@@ -213,6 +213,14 @@ export async function loadEncryptedBlobs(key: CryptoKey, scope: string): Promise
   }));
 }
 
+export async function deleteEncryptedBlob(id: string) {
+  const database = await openVaultDb();
+  const transaction = database.transaction(BLOB_STORE, 'readwrite');
+  transaction.objectStore(BLOB_STORE).delete(id);
+  await transactionDone(transaction);
+  database.close();
+}
+
 export async function exportVaultFile() {
   const database = await openVaultDb();
   const transaction = database.transaction([META_STORE, RECORD_STORE, BLOB_STORE], 'readonly');

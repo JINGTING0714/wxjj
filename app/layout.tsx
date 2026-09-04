@@ -15,20 +15,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://prism-visual-vault-2026.woxiangyyyy.chatgpt.site'),
-  title: 'PRISM — Midjourney 私人资产库',
+  metadataBase: new URL('https://wxjj.woxiangyyyy.chatgpt.site'),
+  title: 'wxjj · PRISM — Midjourney 私人资产库',
   description: '本地优先、加密保存的 Midjourney 提示词、Profile、Moodboard 与图片工作台。',
   manifest: '/manifest.webmanifest',
   openGraph: {
-    title: 'PRISM — Midjourney 私人资产库',
+    title: 'wxjj · PRISM — Midjourney 私人资产库',
     description: '提示词、Profile、Moodboard、配方与图片处理，都留在你的设备里。',
-    images: [{ url: 'https://prism-visual-vault-2026.woxiangyyyy.chatgpt.site/og.png', width: 1200, height: 630, alt: 'PRISM Private Visual Vault' }],
+    images: [{ url: 'https://wxjj.woxiangyyyy.chatgpt.site/og.png', width: 1200, height: 630, alt: 'wxjj · PRISM Private Visual Vault' }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PRISM — Midjourney 私人资产库',
+    title: 'wxjj · PRISM — Midjourney 私人资产库',
     description: '提示词、Profile、Moodboard、配方与图片处理，都留在你的设备里。',
-    images: ['https://prism-visual-vault-2026.woxiangyyyy.chatgpt.site/og.png'],
+    images: ['https://wxjj.woxiangyyyy.chatgpt.site/og.png'],
   },
 };
 

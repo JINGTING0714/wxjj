@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import {
   createVault,
+  deleteEncryptedBlob,
   deleteEncryptedRecord,
   exportVaultFile,
   importVaultFile,
@@ -27,6 +28,7 @@ type VaultContextValue = {
   deleteRecord: (id: string) => Promise<void>;
   loadRecords: <T>(scope: string) => Promise<T[]>;
   saveBlob: (scope: string, blob: Blob, name: string, id?: string) => Promise<string>;
+  deleteBlob: (id: string) => Promise<void>;
   loadBlobs: (scope: string) => ReturnType<typeof loadEncryptedBlobs>;
   exportBackup: () => Promise<Blob>;
   importBackup: (file: File) => Promise<void>;
@@ -100,6 +102,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     saveBlob: async (scope, blob, name, id) => {
       if (!key) throw new Error('请先解锁本机保险库');
       return saveEncryptedBlob(key, scope, blob, name, id);
+    },
+    deleteBlob: async (id) => {
+      if (!key) throw new Error('请先解锁本机保险库');
+      await deleteEncryptedBlob(id);
     },
     loadBlobs: async (scope) => {
       if (!key) throw new Error('请先解锁本机保险库');

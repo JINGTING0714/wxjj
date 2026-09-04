@@ -1,5 +1,4 @@
-export type WatermarkPosition =
-  | 'full'
+export type NumberPosition =
   | 'top-left'
   | 'top'
   | 'top-right'
@@ -10,11 +9,21 @@ export type WatermarkPosition =
   | 'bottom'
   | 'bottom-right';
 
+export type WatermarkCrop = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
 export type WatermarkLayerInput = {
   file: File;
   opacity: number;
-  position: WatermarkPosition;
+  x: number;
+  y: number;
   scale: number;
+  rotation: number;
+  crop: WatermarkCrop;
 };
 
 export type ProcessedImage = {
@@ -32,6 +41,16 @@ export type CollageOptions = {
   rows: number;
   numberImages: boolean;
   startNumber: number;
+  numberPosition: NumberPosition;
+  numberSize: number;
+  numberColor: string;
+  numberBackground: string;
+  numberBackgroundOpacity: number;
+  numberShape: 'none' | 'square' | 'pill';
+  numberWeight: 400 | 600 | 800;
+  numberDigits: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
   format: 'image/png' | 'image/jpeg';
 };
 
@@ -101,38 +120,37 @@ function drawCover(
   );
 }
 
-function placedRect(
-  image: HTMLImageElement,
-  canvasWidth: number,
-  canvasHeight: number,
-  position: Exclude<WatermarkPosition, 'full'>,
-  scale: number,
+function hexToRgba(hex: string, opacity: number) {
+  const value = hex.replace('#', '');
+  const expanded = value.length === 3 ? value.split('').map((part) => `${part}${part}`).join('') : value.padEnd(6, '0').slice(0, 6);
+  const number = Number.parseInt(expanded, 16);
+  const red = (number >> 16) & 255;
+  const green = (number >> 8) & 255;
+  const blue = number & 255;
+  return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(1, opacity))})`;
+}
+
+function numberPlacement(
+  position: NumberPosition,
+  cellX: number,
+  cellY: number,
+  cellWidth: number,
+  cellHeight: number,
+  boxWidth: number,
+  boxHeight: number,
 ) {
-  const safeScale = Math.max(0.05, Math.min(scale, 1));
-  const width = canvasWidth * safeScale;
-  const height = width / (image.naturalWidth / image.naturalHeight);
-  const margin = Math.max(18, Math.min(canvasWidth, canvasHeight) * 0.035);
-  const left = margin;
-  const centerX = (canvasWidth - width) / 2;
-  const right = canvasWidth - width - margin;
-  const top = margin;
-  const centerY = (canvasHeight - height) / 2;
-  const bottom = canvasHeight - height - margin;
-
-  const positions: Record<Exclude<WatermarkPosition, 'full'>, [number, number]> = {
-    'top-left': [left, top],
-    top: [centerX, top],
-    'top-right': [right, top],
-    left: [left, centerY],
-    center: [centerX, centerY],
-    right: [right, centerY],
-    'bottom-left': [left, bottom],
-    bottom: [centerX, bottom],
-    'bottom-right': [right, bottom],
-  };
-
-  const [x, y] = positions[position];
-  return { x, y, width, height };
+  const margin = Math.max(4, Math.min(cellWidth, cellHeight) * 0.035);
+  const x = position.endsWith('left') || position === 'left'
+    ? cellX + margin
+    : position.endsWith('right') || position === 'right'
+      ? cellX + cellWidth - boxWidth - margin
+      : cellX + (cellWidth - boxWidth) / 2;
+  const y = position.startsWith('top') || position === 'top'
+    ? cellY + margin
+    : position.startsWith('bottom') || position === 'bottom'
+      ? cellY + cellHeight - boxHeight - margin
+      : cellY + (cellHeight - boxHeight) / 2;
+  return { x, y };
 }
 
 export async function applyWatermarks(
@@ -155,14 +173,21 @@ export async function applyWatermarks(
 
     for (const layer of layers) {
       const watermark = await loadImage(layer.file);
+      const cropLeft = Math.max(0, Math.min(0.49, layer.crop.left));
+      const cropRight = Math.max(0, Math.min(0.49, layer.crop.right));
+      const cropTop = Math.max(0, Math.min(0.49, layer.crop.top));
+      const cropBottom = Math.max(0, Math.min(0.49, layer.crop.bottom));
+      const sourceX = watermark.naturalWidth * cropLeft;
+      const sourceY = watermark.naturalHeight * cropTop;
+      const sourceWidth = watermark.naturalWidth * Math.max(0.02, 1 - cropLeft - cropRight);
+      const sourceHeight = watermark.naturalHeight * Math.max(0.02, 1 - cropTop - cropBottom);
+      const drawWidth = canvas.width * Math.max(0.01, Math.min(3, layer.scale));
+      const drawHeight = drawWidth / (sourceWidth / sourceHeight);
       context.save();
       context.globalAlpha = Math.max(0, Math.min(layer.opacity, 1));
-      if (layer.position === 'full') {
-        context.drawImage(watermark, 0, 0, canvas.width, canvas.height);
-      } else {
-        const rect = placedRect(watermark, canvas.width, canvas.height, layer.position, layer.scale);
-        context.drawImage(watermark, rect.x, rect.y, rect.width, rect.height);
-      }
+      context.translate(canvas.width * layer.x, canvas.height * layer.y);
+      context.rotate((layer.rotation * Math.PI) / 180);
+      context.drawImage(watermark, sourceX, sourceY, sourceWidth, sourceHeight, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
       context.restore();
     }
 
@@ -193,8 +218,8 @@ export async function createCollages(
   const results: ProcessedImage[] = [];
   const ratio = options.ratioWidth / options.ratioHeight;
   const longEdge = 2400;
-  const canvasWidth = ratio >= 1 ? longEdge : Math.round(longEdge * ratio);
-  const canvasHeight = ratio >= 1 ? Math.round(longEdge / ratio) : longEdge;
+  const canvasWidth = options.canvasWidth ? Math.max(320, Math.min(8000, Math.round(options.canvasWidth))) : ratio >= 1 ? longEdge : Math.round(longEdge * ratio);
+  const canvasHeight = options.canvasHeight ? Math.max(320, Math.min(8000, Math.round(options.canvasHeight))) : ratio >= 1 ? Math.round(longEdge / ratio) : longEdge;
 
   for (let boardIndex = 0; boardIndex < totalBoards; boardIndex += 1) {
     const batch = files.slice(boardIndex * perBoard, (boardIndex + 1) * perBoard);
@@ -220,23 +245,25 @@ export async function createCollages(
 
       if (options.numberImages) {
         const number = options.startNumber + boardIndex * perBoard + imageIndex;
-        const fontSize = Math.round(Math.max(16, Math.min(cellWidth, cellHeight) * 0.095));
-        const label = String(number).padStart(Math.max(3, String(options.startNumber).length), '0');
-        context.font = `600 ${fontSize}px ui-monospace, monospace`;
+        const fontSize = Math.round(Math.max(10, Math.min(cellWidth, cellHeight) * Math.max(0.03, Math.min(0.4, options.numberSize))));
+        const label = String(number).padStart(Math.max(0, Math.min(8, options.numberDigits)), '0');
+        context.font = `${options.numberWeight} ${fontSize}px ui-monospace, monospace`;
         const textWidth = context.measureText(label).width;
-        const padX = fontSize * 0.38;
-        const padY = fontSize * 0.25;
-        const labelX = x + fontSize * 0.28;
-        const labelY = y + cellHeight - fontSize * 0.28;
-        context.fillStyle = 'rgba(19, 14, 24, 0.76)';
-        context.fillRect(
-          labelX - padX,
-          labelY - fontSize - padY,
-          textWidth + padX * 2,
-          fontSize + padY * 1.8,
-        );
-        context.fillStyle = '#f6f2fb';
-        context.fillText(label, labelX, labelY - padY * 0.35);
+        const padX = options.numberShape === 'none' ? 0 : fontSize * 0.4;
+        const padY = options.numberShape === 'none' ? 0 : fontSize * 0.22;
+        const boxWidth = textWidth + padX * 2;
+        const boxHeight = fontSize + padY * 2;
+        const placement = numberPlacement(options.numberPosition, x, y, cellWidth, cellHeight, boxWidth, boxHeight);
+        if (options.numberShape !== 'none') {
+          context.fillStyle = hexToRgba(options.numberBackground, options.numberBackgroundOpacity);
+          context.beginPath();
+          if (options.numberShape === 'pill') context.roundRect(placement.x, placement.y, boxWidth, boxHeight, boxHeight / 2);
+          else context.rect(placement.x, placement.y, boxWidth, boxHeight);
+          context.fill();
+        }
+        context.fillStyle = options.numberColor;
+        context.textBaseline = 'top';
+        context.fillText(label, placement.x + padX, placement.y + padY * 0.72);
       }
     }
 

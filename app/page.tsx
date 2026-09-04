@@ -5,6 +5,7 @@ import {
   Blocks,
   ChevronLeft,
   CircleDot,
+  Droplets,
   Eye,
   Folder,
   Grid3X3,
@@ -39,10 +40,11 @@ import {
   RecipePanel,
   SecurityPanel,
   WatermarkPanel,
+  WatermarkLibraryPanel,
 } from '@/components/prism/studio-panels';
 import { useVault } from '@/components/prism/vault-provider';
 
-type ViewId = 'overview' | 'prompts' | 'profiles' | 'moodboards' | 'recipes' | 'gallery' | 'watermark' | 'collage' | 'security';
+type ViewId = 'overview' | 'prompts' | 'profiles' | 'moodboards' | 'watermarks' | 'recipes' | 'gallery' | 'watermark' | 'collage' | 'security';
 type NavEntry = { id: ViewId; label: string; icon: LucideIcon; count?: number };
 
 const primaryNav: NavEntry[] = [
@@ -50,6 +52,7 @@ const primaryNav: NavEntry[] = [
   { id: 'prompts' as const, label: '提示词库', icon: Library, count: 148 },
   { id: 'profiles' as const, label: 'Profile 库', icon: KeyRound, count: 36 },
   { id: 'moodboards' as const, label: 'Moodboard 库', icon: ImageIcon, count: 24 },
+  { id: 'watermarks' as const, label: '水印库', icon: Droplets },
   { id: 'recipes' as const, label: '搭配配方', icon: Blocks, count: 18 },
 ];
 
@@ -66,7 +69,7 @@ const assets = [
     type: '提示词',
     secret: 'industrial fashion portrait, liquid chrome, violet rim light',
     source: '自创 · 私有',
-    author: 'LZY',
+    author: 'Studio 09',
     note: '冷银高光很稳；人物近景建议降低 stylize。',
     swatch: 'swatch-a',
     images: 4,
@@ -124,6 +127,7 @@ export default function Home() {
   const [collapsed, setCollapsed] = useState(false);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewId>('overview');
+  const [overviewFilter, setOverviewFilter] = useState<'全部' | '提示词' | 'Profile' | 'Moodboard'>('全部');
   const [globalQuery, setGlobalQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -150,7 +154,8 @@ export default function Home() {
 
   const overviewAssets = assets.filter((asset) => {
     const query = globalQuery.trim().toLocaleLowerCase();
-    return !query || [asset.title, asset.type, asset.source, asset.author, asset.note, asset.tag].join(' ').toLocaleLowerCase().includes(query);
+    const typeMatches = overviewFilter === '全部' || asset.type === overviewFilter;
+    return typeMatches && (!query || [asset.title, asset.type, asset.source, asset.author, asset.note, asset.tag].join(' ').toLocaleLowerCase().includes(query));
   });
 
   return (
@@ -249,10 +254,7 @@ export default function Home() {
                   <h2>最近整理</h2>
                 </div>
                 <div className="filter-row">
-                  <button className="filter-active" type="button">全部</button>
-                  <button type="button">提示词</button>
-                  <button type="button">Profile</button>
-                  <button type="button">Moodboard</button>
+                  {(['全部', '提示词', 'Profile', 'Moodboard'] as const).map((filter) => <button className={overviewFilter === filter ? 'filter-active' : ''} key={filter} onClick={() => setOverviewFilter(filter)} type="button">{filter}</button>)}
                 </div>
               </div>
 
@@ -290,7 +292,7 @@ export default function Home() {
                         <p>{asset.author}<span>·</span>{asset.source}</p>
                       </div>
                       <p className="note-cell">{asset.note}</p>
-                      <button aria-label={`打开 ${asset.title}`} className="row-open" type="button">↗</button>
+                      <button aria-label={`打开 ${asset.title}`} className="row-open" onClick={() => setActiveView(asset.type === '提示词' ? 'prompts' : asset.type === 'Profile' ? 'profiles' : 'moodboards')} type="button">↗</button>
                     </article>
                   );
                 })}
@@ -308,6 +310,7 @@ export default function Home() {
           <div className="content-frame studio-frame" hidden={activeView !== 'prompts'}><LibraryPanel globalQuery={globalQuery} kind="prompt" /></div>
           <div className="content-frame studio-frame" hidden={activeView !== 'profiles'}><LibraryPanel globalQuery={globalQuery} kind="profile" /></div>
           <div className="content-frame studio-frame" hidden={activeView !== 'moodboards'}><LibraryPanel globalQuery={globalQuery} kind="moodboard" /></div>
+          <div className="content-frame studio-frame" hidden={activeView !== 'watermarks'}><WatermarkLibraryPanel globalQuery={globalQuery} /></div>
           <div className="content-frame studio-frame" hidden={activeView !== 'recipes'}><RecipePanel globalQuery={globalQuery} /></div>
           <div className="content-frame studio-frame" hidden={activeView !== 'gallery'}><GalleryPanel onOpenCollage={() => setActiveView('collage')} /></div>
           <div className="content-frame studio-frame" hidden={activeView !== 'watermark'}><WatermarkPanel onOpenCollage={() => setActiveView('collage')} /></div>
