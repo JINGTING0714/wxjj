@@ -58,7 +58,7 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function loadImage(source: Blob): Promise<HTMLImageElement> {
+export function loadImage(source: Blob): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(source);
     const image = new Image();
@@ -74,10 +74,14 @@ function loadImage(source: Blob): Promise<HTMLImageElement> {
   });
 }
 
-function canvasBlob(canvas: HTMLCanvasElement, format: string, quality = 0.92) {
+export function canvasBlob(
+  canvas: HTMLCanvasElement,
+  format: string,
+  quality = 0.92,
+) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
-      (blob) => blob ? resolve(blob) : reject(new Error('图片导出失败')),
+      (blob) => (blob ? resolve(blob) : reject(new Error('图片导出失败'))),
       format,
       quality,
     );
@@ -122,7 +126,13 @@ function drawCover(
 
 function hexToRgba(hex: string, opacity: number) {
   const value = hex.replace('#', '');
-  const expanded = value.length === 3 ? value.split('').map((part) => `${part}${part}`).join('') : value.padEnd(6, '0').slice(0, 6);
+  const expanded =
+    value.length === 3
+      ? value
+          .split('')
+          .map((part) => `${part}${part}`)
+          .join('')
+      : value.padEnd(6, '0').slice(0, 6);
   const number = Number.parseInt(expanded, 16);
   const red = (number >> 16) & 255;
   const green = (number >> 8) & 255;
@@ -140,28 +150,72 @@ function numberPlacement(
   boxHeight: number,
 ) {
   const margin = Math.max(4, Math.min(cellWidth, cellHeight) * 0.035);
-  const x = position.endsWith('left') || position === 'left'
-    ? cellX + margin
-    : position.endsWith('right') || position === 'right'
-      ? cellX + cellWidth - boxWidth - margin
-      : cellX + (cellWidth - boxWidth) / 2;
-  const y = position.startsWith('top') || position === 'top'
-    ? cellY + margin
-    : position.startsWith('bottom') || position === 'bottom'
-      ? cellY + cellHeight - boxHeight - margin
-      : cellY + (cellHeight - boxHeight) / 2;
+  const x =
+    position.endsWith('left') || position === 'left'
+      ? cellX + margin
+      : position.endsWith('right') || position === 'right'
+        ? cellX + cellWidth - boxWidth - margin
+        : cellX + (cellWidth - boxWidth) / 2;
+  const y =
+    position.startsWith('top') || position === 'top'
+      ? cellY + margin
+      : position.startsWith('bottom') || position === 'bottom'
+        ? cellY + cellHeight - boxHeight - margin
+        : cellY + (cellHeight - boxHeight) / 2;
   return { x, y };
+}
+
+export function drawWatermarkLayer(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  watermark: HTMLImageElement,
+  layer: WatermarkLayerInput,
+) {
+  const cropLeft = Math.max(0, Math.min(0.49, layer.crop.left));
+  const cropRight = Math.max(0, Math.min(0.49, layer.crop.right));
+  const cropTop = Math.max(0, Math.min(0.49, layer.crop.top));
+  const cropBottom = Math.max(0, Math.min(0.49, layer.crop.bottom));
+  const sourceX = watermark.naturalWidth * cropLeft;
+  const sourceY = watermark.naturalHeight * cropTop;
+  const sourceWidth =
+    watermark.naturalWidth * Math.max(0.02, 1 - cropLeft - cropRight);
+  const sourceHeight =
+    watermark.naturalHeight * Math.max(0.02, 1 - cropTop - cropBottom);
+  const drawWidth = width * Math.max(0.01, Math.min(3, layer.scale));
+  const drawHeight = drawWidth / (sourceWidth / sourceHeight);
+  context.save();
+  context.globalAlpha = Math.max(0, Math.min(layer.opacity, 1));
+  context.translate(width * layer.x, height * layer.y);
+  context.rotate((layer.rotation * Math.PI) / 180);
+  context.drawImage(
+    watermark,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    -drawWidth / 2,
+    -drawHeight / 2,
+    drawWidth,
+    drawHeight,
+  );
+  context.restore();
 }
 
 export async function applyWatermarks(
   files: File[],
   layers: WatermarkLayerInput[],
   onProgress: (done: number, total: number) => void,
-  onItem?: (item: ProcessedImage) => void,
+  onItem?: (item: ProcessedImage, index: number) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<ProcessedImage[]> {
   const results: ProcessedImage[] = [];
 
+  const decodedLayers = await Promise.all(
+    layers.map((layer) => loadImage(layer.file)),
+  );
   for (let index = 0; index < files.length; index += 1) {
+    signal?.throwIfAborted();
     const file = files[index];
     const base = await loadImage(file);
     const canvas = document.createElement('canvas');
@@ -171,25 +225,16 @@ export async function applyWatermarks(
     if (!context) throw new Error('当前浏览器无法创建图片画布');
     context.drawImage(base, 0, 0);
 
-    for (const layer of layers) {
-      const watermark = await loadImage(layer.file);
-      const cropLeft = Math.max(0, Math.min(0.49, layer.crop.left));
-      const cropRight = Math.max(0, Math.min(0.49, layer.crop.right));
-      const cropTop = Math.max(0, Math.min(0.49, layer.crop.top));
-      const cropBottom = Math.max(0, Math.min(0.49, layer.crop.bottom));
-      const sourceX = watermark.naturalWidth * cropLeft;
-      const sourceY = watermark.naturalHeight * cropTop;
-      const sourceWidth = watermark.naturalWidth * Math.max(0.02, 1 - cropLeft - cropRight);
-      const sourceHeight = watermark.naturalHeight * Math.max(0.02, 1 - cropTop - cropBottom);
-      const drawWidth = canvas.width * Math.max(0.01, Math.min(3, layer.scale));
-      const drawHeight = drawWidth / (sourceWidth / sourceHeight);
-      context.save();
-      context.globalAlpha = Math.max(0, Math.min(layer.opacity, 1));
-      context.translate(canvas.width * layer.x, canvas.height * layer.y);
-      context.rotate((layer.rotation * Math.PI) / 180);
-      context.drawImage(watermark, sourceX, sourceY, sourceWidth, sourceHeight, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-      context.restore();
-    }
+    layers.forEach((layer, i) =>
+      drawWatermarkLayer(
+        context,
+        canvas.width,
+        canvas.height,
+        decodedLayers[i],
+        layer,
+      ),
+    );
+    signal?.throwIfAborted();
 
     const blob = await canvasBlob(canvas, 'image/png');
     const result = {
@@ -200,7 +245,8 @@ export async function applyWatermarks(
       url: URL.createObjectURL(blob),
     };
     results.push(result);
-    onItem?.(result);
+    signal?.throwIfAborted();
+    await onItem?.(result, index);
     onProgress(index + 1, files.length);
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   }
@@ -212,30 +258,54 @@ export async function createCollages(
   files: File[],
   options: CollageOptions,
   onProgress: (done: number, total: number) => void,
+  signal?: AbortSignal,
+  onItem?: (item: ProcessedImage, boardIndex: number) => void | Promise<void>,
+  startBoard = 0,
+  jobId?: string,
 ): Promise<ProcessedImage[]> {
   const perBoard = Math.max(1, options.columns * options.rows);
   const totalBoards = Math.ceil(files.length / perBoard);
   const results: ProcessedImage[] = [];
   const ratio = options.ratioWidth / options.ratioHeight;
   const longEdge = 2400;
-  const canvasWidth = options.canvasWidth ? Math.max(320, Math.min(8000, Math.round(options.canvasWidth))) : ratio >= 1 ? longEdge : Math.round(longEdge * ratio);
-  const canvasHeight = options.canvasHeight ? Math.max(320, Math.min(8000, Math.round(options.canvasHeight))) : ratio >= 1 ? Math.round(longEdge / ratio) : longEdge;
+  const canvasWidth = options.canvasWidth
+    ? Math.max(320, Math.min(8000, Math.round(options.canvasWidth)))
+    : ratio >= 1
+      ? longEdge
+      : Math.round(longEdge * ratio);
+  const canvasHeight = options.canvasHeight
+    ? Math.max(320, Math.min(8000, Math.round(options.canvasHeight)))
+    : ratio >= 1
+      ? Math.round(longEdge / ratio)
+      : longEdge;
 
-  for (let boardIndex = 0; boardIndex < totalBoards; boardIndex += 1) {
-    const batch = files.slice(boardIndex * perBoard, (boardIndex + 1) * perBoard);
+  for (let boardIndex = startBoard; boardIndex < totalBoards; boardIndex += 1) {
+    signal?.throwIfAborted();
+    const batch = files.slice(
+      boardIndex * perBoard,
+      (boardIndex + 1) * perBoard,
+    );
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(320, canvasWidth);
     canvas.height = Math.max(320, canvasHeight);
-    const context = canvas.getContext('2d', { alpha: options.format === 'image/png' });
+    const context = canvas.getContext('2d', {
+      alpha: options.format === 'image/png',
+    });
     if (!context) throw new Error('当前浏览器无法创建拼图画布');
     context.fillStyle = '#17131c';
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    const gap = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) * 0.003));
-    const cellWidth = (canvas.width - gap * (options.columns - 1)) / options.columns;
-    const cellHeight = (canvas.height - gap * (options.rows - 1)) / options.rows;
+    const gap = Math.max(
+      2,
+      Math.round(Math.min(canvas.width, canvas.height) * 0.003),
+    );
+    const cellWidth =
+      (canvas.width - gap * (options.columns - 1)) / options.columns;
+    const cellHeight =
+      (canvas.height - gap * (options.rows - 1)) / options.rows;
 
     for (let imageIndex = 0; imageIndex < batch.length; imageIndex += 1) {
+      signal?.throwIfAborted();
       const image = await loadImage(batch[imageIndex]);
       const column = imageIndex % options.columns;
       const row = Math.floor(imageIndex / options.columns);
@@ -245,19 +315,46 @@ export async function createCollages(
 
       if (options.numberImages) {
         const number = options.startNumber + boardIndex * perBoard + imageIndex;
-        const fontSize = Math.round(Math.max(10, Math.min(cellWidth, cellHeight) * Math.max(0.03, Math.min(0.4, options.numberSize))));
-        const label = String(number).padStart(Math.max(0, Math.min(8, options.numberDigits)), '0');
+        const fontSize = Math.round(
+          Math.max(
+            10,
+            Math.min(cellWidth, cellHeight) *
+              Math.max(0.03, Math.min(0.4, options.numberSize)),
+          ),
+        );
+        const label = String(number).padStart(
+          Math.max(0, Math.min(8, options.numberDigits)),
+          '0',
+        );
         context.font = `${options.numberWeight} ${fontSize}px ui-monospace, monospace`;
         const textWidth = context.measureText(label).width;
         const padX = options.numberShape === 'none' ? 0 : fontSize * 0.4;
         const padY = options.numberShape === 'none' ? 0 : fontSize * 0.22;
         const boxWidth = textWidth + padX * 2;
         const boxHeight = fontSize + padY * 2;
-        const placement = numberPlacement(options.numberPosition, x, y, cellWidth, cellHeight, boxWidth, boxHeight);
+        const placement = numberPlacement(
+          options.numberPosition,
+          x,
+          y,
+          cellWidth,
+          cellHeight,
+          boxWidth,
+          boxHeight,
+        );
         if (options.numberShape !== 'none') {
-          context.fillStyle = hexToRgba(options.numberBackground, options.numberBackgroundOpacity);
+          context.fillStyle = hexToRgba(
+            options.numberBackground,
+            options.numberBackgroundOpacity,
+          );
           context.beginPath();
-          if (options.numberShape === 'pill') context.roundRect(placement.x, placement.y, boxWidth, boxHeight, boxHeight / 2);
+          if (options.numberShape === 'pill')
+            context.roundRect(
+              placement.x,
+              placement.y,
+              boxWidth,
+              boxHeight,
+              boxHeight / 2,
+            );
           else context.rect(placement.x, placement.y, boxWidth, boxHeight);
           context.fill();
         }
@@ -270,12 +367,14 @@ export async function createCollages(
     const blob = await canvasBlob(canvas, options.format, 0.92);
     const extension = options.format === 'image/png' ? 'png' : 'jpg';
     results.push({
-      id: uid('collage'),
+      id: jobId ? `${jobId}-${boardIndex}` : uid('collage'),
       name: `PRISM-collage-${String(boardIndex + 1).padStart(3, '0')}.${extension}`,
       sourceName: `${batch.length} 张图片`,
       blob,
       url: URL.createObjectURL(blob),
     });
+    signal?.throwIfAborted();
+    await onItem?.(results[results.length - 1], boardIndex);
     onProgress(boardIndex + 1, totalBoards);
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   }
@@ -284,5 +383,8 @@ export async function createCollages(
 }
 
 export function asFiles(results: ProcessedImage[]) {
-  return results.map((result) => new File([result.blob], result.name, { type: result.blob.type }));
+  return results.map(
+    (result) =>
+      new File([result.blob], result.name, { type: result.blob.type }),
+  );
 }
