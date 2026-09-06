@@ -2,13 +2,13 @@
   "name": "wxjj · PRISM — Midjourney 私人资产库",
   "short_name": "wxjj",
   "description": "本地优先的 Midjourney 私人视觉资产与图片处理工作台。",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#f6f4fa",
   "theme_color": "#1a161f",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

@@ -6,12 +6,25 @@ export type CustomField = {
   value: string;
 };
 
+export type ProfileShortCode = {
+  id: string;
+  label: string;
+  secret: string;
+  nature: 'stage' | 'final' | 'other' | 'unconfirmed';
+  natureOther?: string;
+  note: string;
+  customFields?: CustomField[];
+  // Legacy examples keep their original encrypted scope, so no image is lost.
+  imageScope?: string;
+};
+
 export type StoredLibraryAsset = {
   id: string;
   kind: AssetKind;
   title: string;
   secret: string;
   longCode?: string;
+  profileCodes?: ProfileShortCode[];
   stageType?: string;
   stageTypeOther?: string;
   stageNote?: string;
@@ -105,10 +118,26 @@ export function prismId(prefix: string) {
 
 export function normalizeCustomFields(fields: CustomField[]) {
   return fields
-    .map((field) => ({ ...field, label: field.label.trim(), value: field.value.trim() }))
+    .map((field) => ({
+      ...field,
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
     .filter((field) => field.label || field.value);
 }
 
 export function secretPreview(value: string) {
   return `${value.slice(0, 3)}${'•'.repeat(Math.max(4, value.length - 3))}`;
+}
+
+export function safeSourceUrl(value?: string) {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    return ['https:', 'http:'].includes(parsed.protocol)
+      ? parsed.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

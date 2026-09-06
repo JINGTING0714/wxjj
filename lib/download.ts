@@ -8,7 +8,7 @@ export function downloadBlob(blob: Blob, name: string) {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 export async function downloadZip(
@@ -16,13 +16,20 @@ export async function downloadZip(
   archiveName: string,
 ) {
   const zip = new JSZip();
-  const used = new Map<string, number>();
+  const used = new Set<string>();
   for (const item of items) {
-    const count = used.get(item.name) || 0;
-    used.set(item.name, count + 1);
-    const safeName = count ? item.name.replace(/(\.[^.]+)?$/, `-${count + 1}$1`) : item.name;
+    const base = item.name.replace(/[\\/]/g, '_') || 'image';
+    let safeName = base;
+    let suffix = 2;
+    while (used.has(safeName))
+      safeName = base.replace(/(\.[^.]+)?$/, `-${suffix++}$1`);
+    used.add(safeName);
     zip.file(safeName, item.blob);
   }
-  const payload = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const payload = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
   downloadBlob(payload, archiveName);
 }

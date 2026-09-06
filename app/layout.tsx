@@ -15,20 +15,30 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://wxjj.woxiangyyyy.chatgpt.site'),
+  metadataBase: new URL('https://jingting0714.github.io/wxjj/'),
   title: 'wxjj · PRISM — Midjourney 私人资产库',
-  description: '本地优先、加密保存的 Midjourney 提示词、Profile、Moodboard 与图片工作台。',
-  manifest: '/manifest.webmanifest',
+  description:
+    '本地优先、加密保存的 Midjourney 提示词、Profile、Moodboard 与图片工作台。',
+  manifest: `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/manifest.webmanifest`,
   openGraph: {
     title: 'wxjj · PRISM — Midjourney 私人资产库',
-    description: '提示词、Profile、Moodboard、配方与图片处理，都留在你的设备里。',
-    images: [{ url: 'https://wxjj.woxiangyyyy.chatgpt.site/og.png', width: 1200, height: 630, alt: 'wxjj · PRISM Private Visual Vault' }],
+    description:
+      '提示词、Profile、Moodboard、配方与图片处理，都留在你的设备里。',
+    images: [
+      {
+        url: 'https://jingting0714.github.io/wxjj/og.png',
+        width: 1200,
+        height: 630,
+        alt: 'wxjj · PRISM Private Visual Vault',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'wxjj · PRISM — Midjourney 私人资产库',
-    description: '提示词、Profile、Moodboard、配方与图片处理，都留在你的设备里。',
-    images: ['https://wxjj.woxiangyyyy.chatgpt.site/og.png'],
+    description:
+      '提示词、Profile、Moodboard、配方与图片处理，都留在你的设备里。',
+    images: ['https://jingting0714.github.io/wxjj/og.png'],
   },
 };
 
