@@ -1,4 +1,7 @@
 'use client';
+import { ExampleImage } from './example-image';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
+import { SourceSelection } from './source-selection';
 
 import {
   CircleAlert,
@@ -183,6 +186,7 @@ export function CollagePanel() {
   const currentTask = useRef<Promise<void> | null>(null);
   const [previewBoard, setPreviewBoard] = useState(0);
   const [outputs, setOutputs] = useState<ProcessedImage[]>([]);
+  const selection = useSelection(outputs.map((o) => o.id));
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -399,13 +403,21 @@ export function CollagePanel() {
 
   const deleteOutput = async (output: ProcessedImage) => {
     if (!window.confirm(`删除拼图“${output.name}”吗？`)) return;
-    if (vault.status === 'unlocked') {
-      await vault.deleteBlob(output.id).catch(() => undefined);
-      await vault.deleteRecord(output.id).catch(() => undefined);
-      window.dispatchEvent(new CustomEvent('prism:gallery-refresh'));
+    try {
+      await removeOutputs([output.id]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '删除失败，拼图已保留。');
     }
-    URL.revokeObjectURL(output.url);
-    setOutputs((current) => current.filter((item) => item.id !== output.id));
+  };
+
+  const removeOutputs = async (ids: string[]) => {
+    if (vault.status !== 'unlocked') throw new Error('请先解锁保险库。');
+    await vault.writeBatch({ deleteRecords: ids, deleteBlobs: ids });
+    outputs
+      .filter((o) => ids.includes(o.id))
+      .forEach((o) => URL.revokeObjectURL(o.url));
+    setOutputs((current) => current.filter((o) => !ids.includes(o.id)));
+    window.dispatchEvent(new CustomEvent('prism:gallery-refresh'));
   };
 
   const downloadAll = async () => {
@@ -489,6 +501,21 @@ export function CollagePanel() {
                     ))}
                     {files.length > 12 && <b>+{files.length - 12}</b>}
                   </div>
+                  <SourceSelection
+                    sources={state.sources}
+                    disabled={processing}
+                    onRemove={async (ids) => {
+                      setState((s) => ({
+                        ...s,
+                        sources: s.sources.filter(
+                          (source) => !ids.includes(source.id),
+                        ),
+                        job: null,
+                      }));
+                      setPreviewBoard(0);
+                      await workspace.flush();
+                    }}
+                  />
                   <Button
                     disabled={files.length < 2}
                     onClick={() => {
@@ -959,10 +986,21 @@ export function CollagePanel() {
               </Button>
             </div>
           </div>
+          <BulkActions
+            selection={selection}
+            onDelete={removeOutputs}
+            disabled={processing}
+            noun="张当日拼图"
+          />
           <div className="collage-result-grid">
             {outputs.map((output) => (
               <article key={output.id}>
-                <img alt={output.name} src={output.url} />
+                <SelectItem
+                  selection={selection}
+                  id={output.id}
+                  name={output.name}
+                />
+                <ExampleImage alt={output.name} src={output.url} />
                 <div>
                   <span>{output.name}</span>
                   <div>

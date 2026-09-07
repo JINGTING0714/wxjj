@@ -47,6 +47,10 @@ import {
   type StoredRecipe,
 } from '@/lib/prism-types';
 import type { VaultWrite } from '@/lib/local-vault';
+import { formatProfileCode } from '@/lib/short-codes';
+import { useConfirmation } from './use-confirmation';
+import { ExampleImage } from './example-image';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 type HydratedCode = ProfileShortCode & { images: AssetImage[]; added: File[] };
 type Folder = StoredLibraryAsset & { codes: HydratedCode[] };
@@ -80,9 +84,14 @@ function Secret({ value, long = false }: { value: string; long?: boolean }) {
         {show ? <EyeOff /> : <Eye />}
       </button>
       <button
-        aria-label="复制此码"
+        aria-label={long ? '复制长码' : '复制 Profile 参数'}
+        title={long ? '复制长码' : '复制 --profile 参数'}
         disabled={!show || !value}
-        onClick={() => navigator.clipboard?.writeText(value)}
+        onClick={() =>
+          navigator.clipboard?.writeText(
+            long ? value : formatProfileCode(value),
+          )
+        }
         type="button"
       >
         <Copy />
@@ -141,11 +150,10 @@ function CodeEditor({
           </select>
         </label>
         <label>
-          7 位短码
+          短码
           <div className="code-input">
             <Input
               autoComplete="off"
-              maxLength={7}
               onChange={(e) => onChange({ secret: e.target.value })}
               required
               type={show ? 'text' : 'password'}
@@ -182,7 +190,7 @@ function CodeEditor({
       <div className="profile-code-examples">
         {code.images.map((image) => (
           <figure key={image.id}>
-            <img alt={image.name} src={image.url} />
+            <ExampleImage alt={image.name} src={image.url} />
             <button
               aria-label={`移除 ${image.name}`}
               onClick={() =>
@@ -198,7 +206,7 @@ function CodeEditor({
         ))}
         {urls.map((url, i) => (
           <figure key={url}>
-            <img alt={code.added[i].name} src={url} />
+            <ExampleImage alt={code.added[i].name} src={url} />
             <button
               aria-label={`移除新例图 ${i + 1}`}
               onClick={() =>
@@ -236,6 +244,7 @@ function CodeEditor({
 
 export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [active, setActive] = useState('all');
@@ -318,15 +327,12 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     void run(async () => {
-      if (
-        !codes.length ||
-        codes.some((c) => !/^[a-z\d]{7}$/i.test(c.secret.trim()))
-      )
-        throw new Error(
-          '每个 Profile 至少保留一个短码；所有短码都应为 7 位字母或数字。',
-        );
+      if (!codes.length || codes.some((c) => !c.secret.trim()))
+        throw new Error('每个 Profile 至少保留一个短码，短码内容不能为空。');
       if (new Set(codes.map((c) => c.secret.trim())).size !== codes.length)
         throw new Error('同一 Profile 内有重复短码，请核对。');
+      if (!(await confirmation.confirmShortCodes(codes.map((c) => c.secret))))
+        return;
       const id = editing?.id || crypto.randomUUID();
       const now = new Date().toISOString();
       const storedCodes: ProfileShortCode[] = codes.map(
@@ -474,8 +480,10 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           .toLowerCase()
           .includes(search)),
   );
+  const selection = useSelection(visible.map((f) => f.id));
   return (
     <div className="studio-page profile-page">
+      {confirmation.dialog}
       <FileImportDialog
         kind="profile"
         onImported={() => {
@@ -510,12 +518,14 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       <div className="profile-collections">
         <Button
           onClick={() => setActive('all')}
+          className={active === 'all' ? 'is-active' : ''}
           variant={active === 'all' ? 'default' : 'outline'}
         >
           全部 Profile · {folders.length}
         </Button>
         <Button
           onClick={() => setActive('unfiled')}
+          className={active === 'unfiled' ? 'is-active' : ''}
           variant={active === 'unfiled' ? 'default' : 'outline'}
         >
           未分类
@@ -524,6 +534,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           <div key={c.id}>
             <Button
               onClick={() => setActive(c.id)}
+              className={active === c.id ? 'is-active' : ''}
               variant={active === c.id ? 'default' : 'outline'}
             >
               {c.name}
@@ -559,6 +570,23 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           value={query}
         />
       </div>
+      <BulkActions
+        selection={selection}
+        disabled={busy}
+        noun="个 Profile 文件夹（含所有短码）"
+        onDelete={async (ids) => {
+          await vault.writeBatch({
+            deleteRecords: ids,
+            deleteBlobs: folders
+              .filter((f) => ids.includes(f.id))
+              .flatMap((f) =>
+                f.codes.flatMap((c) => c.images.map((i) => i.id)),
+              ),
+          });
+          await refresh();
+          window.dispatchEvent(new CustomEvent('prism:assets-changed'));
+        }}
+      />
       <div className="profile-folders">
         {visible.map((folder) => (
           <article className="profile-folder" key={folder.id}>
@@ -574,6 +602,11 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                 </span>
               </div>
               <div className="profile-folder-actions">
+                <SelectItem
+                  selection={selection}
+                  id={folder.id}
+                  name={folder.title}
+                />
                 <Button
                   aria-label={`编辑 ${folder.title}`}
                   onClick={() => open(folder)}
@@ -610,15 +643,14 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
             {folder.codes.map((code) => (
               <section className="profile-variant" key={code.id}>
                 <div className="profile-variant-images">
-                  {code.images.map((image) => (
-                    <a
-                      href={image.url}
+                  {code.images.map((image, i) => (
+                    <ExampleImage
                       key={image.id}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <img alt={`${code.label} 例图`} src={image.url} />
-                    </a>
+                      alt={`${code.label} 例图`}
+                      src={image.url}
+                      images={code.images}
+                      index={i}
+                    />
                   ))}
                   <label className="profile-example-upload">
                     <ImageIcon />

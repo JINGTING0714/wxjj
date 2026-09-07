@@ -175,7 +175,7 @@ const moduleGuide: GuideEntry[] = [
     icon: ImageIcon,
     responsibility:
       '用多张例图直观标记画面气质，并补齐短码、创作者、来源与私人说明。',
-    firstAction: '上传最能代表特点的例图并填写 7 位短码。',
+    firstAction: '上传最能代表特点的例图并填写短码。',
     result: '之后可以在配方中不限数量地重复调用。',
   },
   {

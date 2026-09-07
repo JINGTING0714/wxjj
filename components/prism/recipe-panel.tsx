@@ -1,4 +1,6 @@
 'use client';
+import { ExampleImage } from './example-image';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 import {
   CircleAlert,
@@ -432,8 +434,10 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
       !window.confirm(`确定删除配方“${recipe.title}”及其例图吗？`)
     )
       return;
-    await vault.deleteRecord(recipe.id);
-    for (const image of recipe.images) await vault.deleteBlob(image.id);
+    await vault.writeBatch({
+      deleteRecords: [recipe.id],
+      deleteBlobs: recipe.images.map((i) => i.id),
+    });
     setRecipes((current) => current.filter((item) => item.id !== recipe.id));
   };
 
@@ -473,6 +477,9 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
     }
   };
 
+  const selection = useSelection(
+    visible.filter((r) => !r.id.startsWith('demo-')).map((r) => r.id),
+  );
   return (
     <div className="studio-page recipe-page">
       <SectionHead
@@ -515,6 +522,19 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
           每个配方可组合 <b>任意数量</b> 的 Profile 与 Moodboard。
         </p>
       </div>
+      <BulkActions
+        selection={selection}
+        noun="条配方"
+        onDelete={async (ids) => {
+          await vault.writeBatch({
+            deleteRecords: ids,
+            deleteBlobs: recipes
+              .filter((r) => ids.includes(r.id))
+              .flatMap((r) => r.images.map((i) => i.id)),
+          });
+          setRecipes((current) => current.filter((r) => !ids.includes(r.id)));
+        }}
+      />
       <div className="recipe-grid">
         {visible.map((recipe, index) => {
           const open = revealed.has(recipe.id);
@@ -541,7 +561,12 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               role="button"
               tabIndex={0}
             >
-              <label
+              <SelectItem
+                selection={selection}
+                id={recipe.id}
+                name={recipe.title}
+              />
+              <div
                 className="recipe-collage-upload"
                 onClick={(event) => event.stopPropagation()}
                 title={
@@ -552,9 +577,10 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               >
                 <div className={`recipe-collage recipe-${(index % 3) + 1}`}>
                   {recipe.images[0] ? (
-                    <img
+                    <ExampleImage
                       alt={`${recipe.title} 例图`}
                       src={recipe.images[0].url}
+                      images={recipe.images}
                     />
                   ) : (
                     <>
@@ -565,24 +591,27 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                       <i />
                     </>
                   )}
+                </div>
+                <label className="example-add-label">
                   <small>
                     <ImageIcon /> {recipe.images.length}
                     <b>点击添加</b>
                   </small>
-                </div>
-                <input
-                  accept="image/*"
-                  disabled={
-                    vault.status !== 'unlocked' || recipe.id.startsWith('demo-')
-                  }
-                  multiple
-                  onChange={(event) => {
-                    appendRecipeImages(recipe, event.target.files);
-                    event.currentTarget.value = '';
-                  }}
-                  type="file"
-                />
-              </label>
+                  <input
+                    accept="image/*"
+                    disabled={
+                      vault.status !== 'unlocked' ||
+                      recipe.id.startsWith('demo-')
+                    }
+                    multiple
+                    onChange={(event) => {
+                      appendRecipeImages(recipe, event.target.files);
+                      event.currentTarget.value = '';
+                    }}
+                    type="file"
+                  />
+                </label>
+              </div>
               <div className="recipe-body">
                 <div className="recipe-title">
                   <div>
@@ -744,7 +773,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 <div>
                   {existingImages.map((image) => (
                     <figure key={image.id}>
-                      <img alt={image.name} src={image.url} />
+                      <ExampleImage alt={image.name} src={image.url} />
                       <figcaption>{image.name}</figcaption>
                       <button
                         aria-label={`删除例图 ${image.name}`}

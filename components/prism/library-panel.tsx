@@ -1,4 +1,8 @@
 'use client';
+import { formatProfileCode } from '@/lib/short-codes';
+import { useConfirmation } from './use-confirmation';
+import { ExampleImage } from './example-image';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 import {
   CircleAlert,
@@ -66,8 +70,7 @@ const kindCopy = {
     eyebrow: 'PROFILE INDEX',
     title: 'Profile 库',
     noun: 'Profile',
-    description:
-      '用长码归纳同一 Profile 文件夹，再记录每一个测试阶段的 7 位阶段 P。',
+    description: '用长码归纳同一 Profile 文件夹，再分别记录阶段 P 和成品 P。',
   },
   moodboard: {
     number: '04',
@@ -154,28 +157,33 @@ function VisualTile({
   onUpload: (files: FileList | null) => void;
 }) {
   return (
-    <label
+    <div
       className={`record-visual record-visual-upload ${asset.images.length ? 'has-image' : 'empty-example'} ${disabled ? 'is-disabled' : ''}`}
-      title={disabled ? '解锁后可添加例图' : '点击直接追加例图'}
     >
       {asset.images[0] && (
-        <img alt={`${asset.title} 例图`} src={asset.images[0].url} />
+        <ExampleImage
+          alt={`${asset.title} 例图`}
+          src={asset.images[0].url}
+          images={asset.images}
+        />
       )}
-      <small>
-        <ImageIcon /> {asset.images.length}
-        <span>点击添加</span>
-      </small>
-      <input
-        accept="image/*"
-        disabled={disabled}
-        multiple
-        onChange={(event) => {
-          onUpload(event.target.files);
-          event.currentTarget.value = '';
-        }}
-        type="file"
-      />
-    </label>
+      <label className="example-add-label" title="点击追加例图">
+        <small>
+          <ImageIcon /> {asset.images.length}
+          <span>点击添加</span>
+        </small>
+        <input
+          accept="image/*"
+          disabled={disabled}
+          multiple
+          onChange={(event) => {
+            onUpload(event.target.files);
+            event.currentTarget.value = '';
+          }}
+          type="file"
+        />
+      </label>
+    </div>
   );
 }
 
@@ -206,6 +214,7 @@ function SimpleLibraryPanel({
   globalQuery: string;
 }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
   const copy = kindCopy[kind];
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
@@ -355,17 +364,19 @@ function SimpleLibraryPanel({
     }
     const form = new FormData(event.currentTarget);
     const secret = String(form.get('secret') || '').trim();
-    if (kind !== 'prompt' && secret.length !== 7) {
-      setFormError(`${copy.noun} 阶段短码必须正好是 7 位。`);
+    if (!secret) {
+      setFormError(`${copy.noun}内容不能为空。`);
       return;
     }
+    if (kind !== 'prompt' && !(await confirmation.confirmShortCodes([secret])))
+      return;
     const now = new Date().toISOString();
     const id = editingAsset?.id || prismId(kind);
     const record: StoredLibraryAsset = {
       id,
       kind,
       title: String(form.get('title') || '').trim(),
-      secret: kind === 'prompt' ? secret : secret.toUpperCase(),
+      secret,
       longCode:
         kind === 'profile'
           ? String(form.get('longCode') || '').trim()
@@ -554,8 +565,12 @@ function SimpleLibraryPanel({
       return next;
     });
 
+  const selection = useSelection(
+    filtered.filter((a) => !a.id.startsWith('demo-')).map((a) => a.id),
+  );
   return (
     <div className="studio-page">
+      {confirmation.dialog}
       <div className="library-import-entry">
         <FileImportDialog
           kind={kind}
@@ -666,6 +681,19 @@ function SimpleLibraryPanel({
           <span>备注 / 自定义信息</span>
           <span>操作</span>
         </div>
+        <BulkActions
+          selection={selection}
+          onDelete={async (ids) => {
+            await vault.writeBatch({
+              deleteRecords: ids,
+              deleteBlobs: assets
+                .filter((a) => ids.includes(a.id))
+                .flatMap((a) => a.images.map((i) => i.id)),
+            });
+            setAssets((current) => current.filter((a) => !ids.includes(a.id)));
+            window.dispatchEvent(new CustomEvent('prism:assets-changed'));
+          }}
+        />
         {filtered.map((asset) => {
           const isRevealed = revealed.has(asset.id);
           const visibleValue = isRevealed
@@ -676,6 +704,11 @@ function SimpleLibraryPanel({
           return (
             <article className="record-row" key={asset.id}>
               <div className="record-identity">
+                <SelectItem
+                  selection={selection}
+                  id={asset.id}
+                  name={asset.title}
+                />
                 <VisualTile
                   asset={asset}
                   disabled={
@@ -717,10 +750,21 @@ function SimpleLibraryPanel({
                   </button>
                   <button
                     disabled={!isRevealed}
-                    onClick={() => navigator.clipboard?.writeText(asset.secret)}
+                    onClick={() =>
+                      navigator.clipboard?.writeText(
+                        kind === 'profile'
+                          ? formatProfileCode(asset.secret)
+                          : asset.secret,
+                      )
+                    }
                     type="button"
                   >
-                    <Copy /> 复制短码
+                    <Copy />{' '}
+                    {kind === 'prompt'
+                      ? '复制提示词'
+                      : kind === 'profile'
+                        ? '复制 Profile 参数'
+                        : '复制短码'}
                   </button>
                 </div>
                 <p>
@@ -838,9 +882,9 @@ function SimpleLibraryPanel({
             <label className="wide-field">
               <span>
                 {kind === 'profile'
-                  ? '阶段 P 短码（7 位）'
+                  ? 'Profile 短码'
                   : kind === 'moodboard'
-                    ? 'Moodboard 短码（7 位）'
+                    ? 'Moodboard 短码'
                     : '完整提示词'}
               </span>
               {kind === 'prompt' ? (
@@ -853,8 +897,6 @@ function SimpleLibraryPanel({
               ) : (
                 <Input
                   defaultValue={editingAsset?.secret}
-                  maxLength={7}
-                  minLength={7}
                   name="secret"
                   placeholder="ABC1234"
                   required
@@ -968,7 +1010,7 @@ function SimpleLibraryPanel({
                 <div>
                   {existingImages.map((image) => (
                     <figure key={image.id}>
-                      <img alt={image.name} src={image.url} />
+                      <ExampleImage alt={image.name} src={image.url} />
                       <figcaption>{image.name}</figcaption>
                       <button
                         aria-label={`删除例图 ${image.name}`}

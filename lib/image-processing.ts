@@ -1,3 +1,11 @@
+import {
+  compositionSize,
+  compositionStack,
+  resolveComposition,
+  type LayerTransform,
+  type WatermarkComposition,
+} from './watermark-composition';
+
 export type NumberPosition =
   | 'top-left'
   | 'top'
@@ -24,6 +32,7 @@ export type WatermarkLayerInput = {
   scale: number;
   rotation: number;
   crop: WatermarkCrop;
+  locked?: boolean;
 };
 
 export type ProcessedImage = {
@@ -165,24 +174,25 @@ function numberPlacement(
   return { x, y };
 }
 
-export function drawWatermarkLayer(
+export function drawCompositionLayer(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
-  watermark: HTMLImageElement,
-  layer: WatermarkLayerInput,
+  watermark: CanvasImageSource,
+  layer: LayerTransform,
+  naturalWidth: number,
+  naturalHeight: number,
+  referenceWidth: number,
 ) {
   const cropLeft = Math.max(0, Math.min(0.49, layer.crop.left));
   const cropRight = Math.max(0, Math.min(0.49, layer.crop.right));
   const cropTop = Math.max(0, Math.min(0.49, layer.crop.top));
   const cropBottom = Math.max(0, Math.min(0.49, layer.crop.bottom));
-  const sourceX = watermark.naturalWidth * cropLeft;
-  const sourceY = watermark.naturalHeight * cropTop;
-  const sourceWidth =
-    watermark.naturalWidth * Math.max(0.02, 1 - cropLeft - cropRight);
-  const sourceHeight =
-    watermark.naturalHeight * Math.max(0.02, 1 - cropTop - cropBottom);
-  const drawWidth = width * Math.max(0.01, Math.min(3, layer.scale));
+  const sourceX = naturalWidth * cropLeft;
+  const sourceY = naturalHeight * cropTop;
+  const sourceWidth = naturalWidth * Math.max(0.02, 1 - cropLeft - cropRight);
+  const sourceHeight = naturalHeight * Math.max(0.02, 1 - cropTop - cropBottom);
+  const drawWidth = referenceWidth * Math.max(0.01, Math.min(6, layer.scale));
   const drawHeight = drawWidth / (sourceWidth / sourceHeight);
   context.save();
   context.globalAlpha = Math.max(0, Math.min(layer.opacity, 1));
@@ -202,12 +212,58 @@ export function drawWatermarkLayer(
   context.restore();
 }
 
+export function drawWatermarkComposition(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  layers: WatermarkLayerInput[],
+  decoded: HTMLImageElement[],
+  composition?: WatermarkComposition,
+) {
+  const c = resolveComposition(composition);
+  context.clearRect(0, 0, width, height);
+  if (c.background !== 'transparent') {
+    context.fillStyle = c.background;
+    context.fillRect(0, 0, width, height);
+  }
+  const stack = compositionStack<{
+    image: CanvasImageSource;
+    w: number;
+    h: number;
+    layer: LayerTransform;
+  }>(
+    layers.map((layer, i) => ({
+      image: decoded[i] as CanvasImageSource,
+      w: decoded[i].naturalWidth,
+      h: decoded[i].naturalHeight,
+      layer,
+    })),
+    { image: source, w: sourceWidth, h: sourceHeight, layer: c.source },
+    c.sourceIndex,
+  );
+  for (const item of stack)
+    drawCompositionLayer(
+      context,
+      width,
+      height,
+      item.image,
+      item.layer,
+      item.w,
+      item.h,
+      sourceWidth,
+    );
+}
+
 export async function applyWatermarks(
   files: File[],
   layers: WatermarkLayerInput[],
   onProgress: (done: number, total: number) => void,
   onItem?: (item: ProcessedImage, index: number) => void | Promise<void>,
   signal?: AbortSignal,
+  composition?: WatermarkComposition,
 ): Promise<ProcessedImage[]> {
   const results: ProcessedImage[] = [];
 
@@ -219,20 +275,25 @@ export async function applyWatermarks(
     const file = files[index];
     const base = await loadImage(file);
     const canvas = document.createElement('canvas');
-    canvas.width = base.naturalWidth;
-    canvas.height = base.naturalHeight;
+    const size = compositionSize(
+      base.naturalWidth,
+      base.naturalHeight,
+      composition,
+    );
+    canvas.width = size.width;
+    canvas.height = size.height;
     const context = canvas.getContext('2d', { alpha: true });
     if (!context) throw new Error('当前浏览器无法创建图片画布');
-    context.drawImage(base, 0, 0);
-
-    layers.forEach((layer, i) =>
-      drawWatermarkLayer(
-        context,
-        canvas.width,
-        canvas.height,
-        decodedLayers[i],
-        layer,
-      ),
+    drawWatermarkComposition(
+      context,
+      canvas.width,
+      canvas.height,
+      base,
+      base.naturalWidth,
+      base.naturalHeight,
+      layers,
+      decodedLayers,
+      composition,
     );
     signal?.throwIfAborted();
 

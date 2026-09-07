@@ -1,4 +1,6 @@
 'use client';
+import { ExampleImage } from './example-image';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 import {
   CircleAlert,
@@ -254,8 +256,10 @@ export function WatermarkLibraryPanel({
   const deleteWatermark = async (watermark: WatermarkAsset) => {
     if (!window.confirm(`确定删除水印“${watermark.title}”吗？`)) return;
     const blobs = await vault.loadBlobs(`watermark-file:${watermark.id}`);
-    for (const blob of blobs) await vault.deleteBlob(blob.id);
-    await vault.deleteRecord(watermark.id);
+    await vault.writeBatch({
+      deleteRecords: [watermark.id],
+      deleteBlobs: blobs.map((b) => b.id),
+    });
     setWatermarks((current) =>
       current.filter((item) => item.id !== watermark.id),
     );
@@ -312,6 +316,7 @@ export function WatermarkLibraryPanel({
     setActive('all');
   };
 
+  const selection = useSelection(visible.map((w) => w.id));
   return (
     <div className="studio-page watermark-library-page">
       <SectionHead
@@ -401,12 +406,36 @@ export function WatermarkLibraryPanel({
           <span>张水印</span>
         </div>
       </div>
+      <BulkActions
+        selection={selection}
+        noun="条水印记录"
+        onDelete={async (ids) => {
+          const blobs = (
+            await Promise.all(
+              ids.map((id) => vault.loadBlobs(`watermark-file:${id}`)),
+            )
+          ).flat();
+          await vault.writeBatch({
+            deleteRecords: ids,
+            deleteBlobs: blobs.map((b) => b.id),
+          });
+          setWatermarks((current) =>
+            current.filter((w) => !ids.includes(w.id)),
+          );
+          window.dispatchEvent(new CustomEvent('prism:watermarks-changed'));
+        }}
+      />
       {visible.length ? (
         <div className="watermark-library-grid">
           {visible.map((watermark) => (
             <article key={watermark.id}>
+              <SelectItem
+                selection={selection}
+                id={watermark.id}
+                name={watermark.title}
+              />
               <div className="watermark-checker">
-                <img alt={watermark.title} src={watermark.url} />
+                <ExampleImage alt={watermark.title} src={watermark.url} />
               </div>
               <div className="watermark-info">
                 <Badge variant="outline">

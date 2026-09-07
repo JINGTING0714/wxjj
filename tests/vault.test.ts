@@ -3,6 +3,7 @@ import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import JSZip from 'jszip';
 import { legacyFixture } from './legacy-fixture';
+import { defaultComposition } from '../lib/watermark-composition';
 import {
   createVault,
   unlockVault,
@@ -24,6 +25,81 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+test('bulk deletion changes only selected records and blobs, never their collections or other assets', async () => {
+  const key = await createVault('bulk-test-password');
+  const records = ['a', 'b', 'keep'].map((id) => ({
+    scope: 'assets:prompt',
+    value: { id, collection: 'library', secret: `secret-${id}` },
+  }));
+  await writeVaultBatch(key, {
+    records: [
+      ...records,
+      {
+        scope: 'collections:prompt',
+        value: { id: 'library', name: '保留的库' },
+      },
+    ],
+    blobs: ['a', 'b', 'keep'].map((id) => ({
+      id: `img-${id}`,
+      scope: `asset-image:${id}`,
+      blob: new Blob([id]),
+      name: `${id}.png`,
+    })),
+  });
+  await writeVaultBatch(key, {
+    deleteRecords: ['a', 'b'],
+    deleteBlobs: ['img-a', 'img-b'],
+  });
+  assert.deepEqual(await loadEncryptedRecords(key, 'assets:prompt'), [
+    records[2].value,
+  ]);
+  assert.equal(
+    (await loadEncryptedRecords(key, 'collections:prompt')).length,
+    1,
+  );
+  assert.equal((await loadEncryptedBlobs(key, 'asset-image:keep')).length, 1);
+  assert.equal((await loadEncryptedBlobs(key, 'asset-image:a')).length, 0);
+});
+
+test('expanded canvas, source transform, layer order and locks survive full backup restore exactly', async () => {
+  const key = await createVault('composition-test-password');
+  const composition = defaultComposition();
+  composition.canvasWidth = 1.5;
+  composition.canvasHeight = 1.2;
+  composition.sourceIndex = 1;
+  composition.source = {
+    ...composition.source,
+    locked: false,
+    x: 0.4,
+    y: 0.6,
+    rotation: 37,
+    scale: 0.72,
+  };
+  const data = {
+    batches: [
+      {
+        id: 'one',
+        composition,
+        layers: [{ id: 'frame', locked: true, x: 0.5, y: 0.5 }],
+      },
+    ],
+  };
+  await writeVaultBatch(key, {
+    records: [
+      {
+        scope: 'workspaces',
+        value: { id: 'workspace:watermark-batches', data },
+      },
+    ],
+  });
+  const backup = new File([await exportVaultFile(key)], 'composition.prism');
+  await clear();
+  const restored = await importVaultFile(backup, 'composition-test-password');
+  assert.deepEqual(await loadEncryptedRecords(restored.key, 'workspaces'), [
+    { id: 'workspace:watermark-batches', data },
+  ]);
+});
 test('complete restore to fresh device preserves metadata, all scopes and exact binary bytes', async () => {
   const key = await createVault('测试Password 123');
   const values = [

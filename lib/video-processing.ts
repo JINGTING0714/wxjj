@@ -1,9 +1,13 @@
 import {
   canvasBlob,
-  drawWatermarkLayer,
+  drawWatermarkComposition,
   loadImage,
   type WatermarkLayerInput,
 } from './image-processing';
+import {
+  compositionSize,
+  type WatermarkComposition,
+} from './watermark-composition';
 import { fixWebmDuration } from '@fix-webm-duration/fix';
 
 async function openVideo(file: File) {
@@ -103,6 +107,7 @@ export async function watermarkVideo(
   audio: { context: AudioContext; ready: Promise<void> },
   signal: AbortSignal,
   onProgress: (value: number, paused: boolean) => void,
+  composition?: WatermarkComposition,
 ) {
   await audio.ready;
   signal.throwIfAborted();
@@ -115,16 +120,28 @@ export async function watermarkVideo(
   let media: MediaElementAudioSourceNode | undefined;
   let visibility = () => {};
   try {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const size = compositionSize(
+      video.videoWidth,
+      video.videoHeight,
+      composition,
+    );
+    canvas.width = size.width;
+    canvas.height = size.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('无法创建视频画布');
     const decoded = await Promise.all(layers.map((l) => loadImage(l.file)));
     signal.throwIfAborted();
     const draw = () => {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      layers.forEach((layer, i) =>
-        drawWatermarkLayer(ctx, canvas.width, canvas.height, decoded[i], layer),
+      drawWatermarkComposition(
+        ctx,
+        canvas.width,
+        canvas.height,
+        video,
+        video.videoWidth,
+        video.videoHeight,
+        layers,
+        decoded,
+        composition,
       );
     };
     draw();
