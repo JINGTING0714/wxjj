@@ -1,5 +1,5 @@
 'use client';
-import { confirmShortCodes } from '@/lib/short-codes';
+import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -375,6 +375,7 @@ export function FileImportDialog({
   onImported: () => void;
 }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
   const [open, setOpen] = useState(false);
   const [documents, setDocuments] = useState<ImportDocument[]>([]);
   const [busy, setBusy] = useState(false);
@@ -451,11 +452,11 @@ export function FileImportDialog({
       if (selected.some(({ row }) => !row.title.trim() || !row.secret.trim()))
         throw new Error('有选中条目没有名称或内容，请补齐或取消选中。');
       if (
-        !confirmShortCodes(
+        !(await confirmation.confirmShortCodes(
           selected
             .filter(({ row }) => row.kind !== 'prompt')
             .map(({ row }) => row.secret),
-        )
+        ))
       )
         return;
       const batch: VaultWrite = { records: [], blobs: [] };
@@ -592,6 +593,7 @@ export function FileImportDialog({
         <Upload />
         文件批量导入
       </Button>
+      {confirmation.dialog}
       <ImportArchive kind={kind} />
       {!open && status.startsWith('完整导入') && (
         <span className="success-line">{status}</span>

@@ -1,5 +1,6 @@
 'use client';
-import { confirmShortCodes, formatProfileCode } from '@/lib/short-codes';
+import { formatProfileCode } from '@/lib/short-codes';
+import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
@@ -213,6 +214,7 @@ function SimpleLibraryPanel({
   globalQuery: string;
 }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
   const copy = kindCopy[kind];
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
@@ -366,7 +368,8 @@ function SimpleLibraryPanel({
       setFormError(`${copy.noun}内容不能为空。`);
       return;
     }
-    if (kind !== 'prompt' && !confirmShortCodes([secret])) return;
+    if (kind !== 'prompt' && !(await confirmation.confirmShortCodes([secret])))
+      return;
     const now = new Date().toISOString();
     const id = editingAsset?.id || prismId(kind);
     const record: StoredLibraryAsset = {
@@ -567,6 +570,7 @@ function SimpleLibraryPanel({
   );
   return (
     <div className="studio-page">
+      {confirmation.dialog}
       <div className="library-import-entry">
         <FileImportDialog
           kind={kind}

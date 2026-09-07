@@ -47,7 +47,8 @@ import {
   type StoredRecipe,
 } from '@/lib/prism-types';
 import type { VaultWrite } from '@/lib/local-vault';
-import { confirmShortCodes, formatProfileCode } from '@/lib/short-codes';
+import { formatProfileCode } from '@/lib/short-codes';
+import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
@@ -243,6 +244,7 @@ function CodeEditor({
 
 export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [active, setActive] = useState('all');
@@ -329,7 +331,8 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
         throw new Error('每个 Profile 至少保留一个短码，短码内容不能为空。');
       if (new Set(codes.map((c) => c.secret.trim())).size !== codes.length)
         throw new Error('同一 Profile 内有重复短码，请核对。');
-      if (!confirmShortCodes(codes.map((c) => c.secret))) return;
+      if (!(await confirmation.confirmShortCodes(codes.map((c) => c.secret))))
+        return;
       const id = editing?.id || crypto.randomUUID();
       const now = new Date().toISOString();
       const storedCodes: ProfileShortCode[] = codes.map(
@@ -480,6 +483,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   const selection = useSelection(visible.map((f) => f.id));
   return (
     <div className="studio-page profile-page">
+      {confirmation.dialog}
       <FileImportDialog
         kind="profile"
         onImported={() => {

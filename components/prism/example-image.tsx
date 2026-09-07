@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -32,6 +32,18 @@ export function ExampleImage({
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState(index);
   const [zoom, setZoom] = useState(1);
+  const viewport = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const el = viewport.current;
+      if (el)
+        el.scrollTo(
+          (el.scrollWidth - el.clientWidth) / 2,
+          (el.scrollHeight - el.clientHeight) / 2,
+        );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [zoom, current, open]);
   const pictures = images?.length ? images : [{ url: src, name: alt }];
   const picture = pictures[Math.min(current, pictures.length - 1)];
   useEffect(() => {
@@ -117,7 +129,7 @@ export function ExampleImage({
               适应窗口
             </Button>
           </div>
-          <div className="example-lightbox-scroll">
+          <div className="example-lightbox-scroll" ref={viewport}>
             <div
               className="example-lightbox-canvas"
               style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}

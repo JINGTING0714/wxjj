@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useConfirmation } from './use-confirmation';
 
 export function useSelection(ids: string[]) {
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -36,9 +37,11 @@ export function BulkActions({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const confirmation = useConfirmation();
   if (!selection.total) return null;
   return (
     <div className="bulk-actions" onClick={(e) => e.stopPropagation()}>
+      {confirmation.dialog}
       <label>
         <input
           type="checkbox"
@@ -65,11 +68,13 @@ export function BulkActions({
         onClick={async () => {
           const ids = [...selection.selected];
           if (
-            !window.confirm(
+            !(await confirmation.ask(
               confirmMessage
                 ? confirmMessage(ids.length)
                 : `确定删除选中的 ${ids.length} ${noun}及其附属例图吗？\n只删除本地保险库中的这些内容，不会删除电脑上的原文件；此操作不能撤销，请先备份。`,
-            )
+              '确认批量删除',
+              '确认删除',
+            ))
           )
             return;
           setBusy(true);
