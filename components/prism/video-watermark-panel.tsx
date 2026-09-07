@@ -10,17 +10,25 @@ import {
   watermarkVideo,
 } from '@/lib/video-processing';
 import { downloadBlob, downloadZip } from '@/lib/download';
+import {
+  defaultComposition,
+  type WatermarkComposition,
+} from '@/lib/watermark-composition';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
+import { SourceSelection } from './source-selection';
 type VideoSource = { id: string; file: File; frame: File };
 type VideoOutput = { id: string; file: File };
 export function VideoWatermarkPanel() {
   const workspace = useWorkspaceState('video-watermarks', {
     sources: [] as VideoSource[],
     layers: [] as EditorLayer[],
+    composition: defaultComposition(),
     outputs: [] as VideoOutput[],
     job: null as {
       todo: VideoSource[];
       layers: EditorLayer[];
       next: number;
+      composition?: WatermarkComposition;
     } | null,
   });
   const { state, setState } = workspace;
@@ -31,6 +39,7 @@ export function VideoWatermarkPanel() {
   const controller = useRef<AbortController | null>(null);
   const task = useRef<Promise<void> | null>(null);
   const urls = useFileUrls(state.outputs.map((o) => o.file));
+  const selection = useSelection(state.outputs.map((o) => o.id));
   useEffect(() => {
     const stop = () => controller.current?.abort();
     const checkpoint = (e: Event) => {
@@ -86,7 +95,12 @@ export function VideoWatermarkPanel() {
     const job =
       resume && state.job
         ? state.job
-        : { todo: state.sources, layers: state.layers, next: 0 };
+        : {
+            todo: state.sources,
+            layers: state.layers,
+            composition: state.composition,
+            next: 0,
+          };
     controller.current = new AbortController();
     const signal = controller.current.signal;
     setState((s) => ({ ...s, job }));
@@ -107,6 +121,7 @@ export function VideoWatermarkPanel() {
               setProgress(
                 `${i + 1} / ${job.todo.length} · ${source.file.name} · ${Math.round(value * 100)}%${paused ? ' · 标签页隐藏，自动暂停防止丢帧' : ''}`,
               ),
+            job.composition,
           );
           signal.throwIfAborted();
           setState((s) => ({
@@ -139,7 +154,7 @@ export function VideoWatermarkPanel() {
       <h2>视频水印 · 独立工区</h2>
       <p>
         最多 10
-        个视频，使用第一段视频的第一帧作为整批模板。每段输出保持自己的分辨率与原音频，按浏览器能力导出
+        个视频，使用第一段视频的第一帧作为整批模板。默认保留原分辨率，扩展画布后按各视频尺寸同比例输出，并保留原音频；按浏览器能力导出
         WebM 或 MP4，目标帧率 30 fps。视频需要重新编码，并非原文件无损复制。
       </p>
       <p className="import-warning">
@@ -187,10 +202,29 @@ export function VideoWatermarkPanel() {
             </span>
           ))}
         </div>
+        <SourceSelection
+          sources={state.sources}
+          disabled={busy}
+          onRemove={async (ids) => {
+            setState((s) => ({
+              ...s,
+              sources: s.sources.filter((source) => !ids.includes(source.id)),
+              job: null,
+            }));
+            await workspace.flush();
+          }}
+        />
         <WatermarkEditor
           disabled={busy || importing}
           layers={state.layers}
-          onChange={(layers) => setState((s) => ({ ...s, layers }))}
+          composition={state.composition}
+          onChange={(layers, composition) =>
+            setState((s) => ({
+              ...s,
+              layers,
+              ...(composition ? { composition } : {}),
+            }))
+          }
           source={state.sources[0]?.frame}
         />
         <div className="result-actions">
@@ -234,9 +268,26 @@ export function VideoWatermarkPanel() {
               下载全部视频
             </Button>
           </div>
+          <BulkActions
+            selection={selection}
+            disabled={busy}
+            noun="个视频成品"
+            onDelete={async (ids) => {
+              setState((s) => ({
+                ...s,
+                outputs: s.outputs.filter((o) => !ids.includes(o.id)),
+              }));
+              await workspace.flush();
+            }}
+          />
           <div className="video-result-grid">
             {state.outputs.map((o, i) => (
               <article key={o.id}>
+                <SelectItem
+                  selection={selection}
+                  id={o.id}
+                  name={o.file.name}
+                />
                 <video controls playsInline preload="metadata" src={urls[i]} />
                 <p>{o.file.name}</p>
                 <Button

@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "build:pages": "vite build --config vite.pages.config.ts",
-    "test": "node --import tsx --test tests/vault.test.ts tests/import.test.ts",
+    "test": "node --import tsx --test tests/vault.test.ts tests/import.test.ts tests/composition.test.ts",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt"

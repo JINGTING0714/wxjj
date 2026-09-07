@@ -18,7 +18,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/vault.test.ts tests/import.test.ts
+      - run: npm test
       - run: npm run build:pages
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

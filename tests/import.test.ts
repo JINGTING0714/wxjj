@@ -16,6 +16,27 @@ import {
 } from '../lib/profile-model';
 import type { StoredLibraryAsset } from '../lib/prism-types';
 (globalThis as any).DOMParser = DOMParser;
+test('variable-length short codes keep exact contents in headered and plain imports', async () => {
+  const headered = await parseAssetFile(
+    new File(
+      ['名称,短码,作者\n1,aBc123456789,测试老师\n2,xYz,测试老师'],
+      'profiles.csv',
+    ),
+    'profile',
+  );
+  assert.deepEqual(
+    headered.rows.map((r) => r.secret),
+    ['aBc123456789', 'xYz'],
+  );
+  const plain = await parseAssetFile(
+    new File(['aBc123456789\nxYz'], 'codes.csv'),
+    'moodboard',
+  );
+  assert.deepEqual(
+    plain.rows.map((r) => r.secret),
+    ['aBc123456789', 'xYz'],
+  );
+});
 test('CSV quoted multiline prompts and distinct authors remain complete', async () => {
   const csv =
     '序号,作者,提示词,备注\r\n1,老师甲,"a cinematic portrait, violet light\nsecond line",自己的备注\r\n2,老师乙,"second prompt, long words and lighting",更多信息';

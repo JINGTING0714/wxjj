@@ -20,6 +20,13 @@ import { applyWatermarks } from '@/lib/image-processing';
 import { downloadBlob, downloadZip } from '@/lib/download';
 import type { PipelineSource } from '@/lib/pipeline';
 import { VideoWatermarkPanel } from './video-watermark-panel';
+import {
+  defaultComposition,
+  type WatermarkComposition,
+} from '@/lib/watermark-composition';
+import { ExampleImage } from './example-image';
+import { BulkActions, SelectItem, useSelection } from './bulk-selection';
+import { SourceSelection } from './source-selection';
 
 type Output = { id: string; sourceId: string; file: File; rejected: boolean };
 type Batch = {
@@ -30,7 +37,13 @@ type Batch = {
   outputs: Output[];
   retryIds: string[];
   autoSend: boolean;
-  job: { todo: PipelineSource[]; layers: EditorLayer[]; next: number } | null;
+  composition?: WatermarkComposition;
+  job: {
+    todo: PipelineSource[];
+    layers: EditorLayer[];
+    next: number;
+    composition?: WatermarkComposition;
+  } | null;
 };
 const freshBatch = (number: number): Batch => ({
   id: crypto.randomUUID(),
@@ -40,6 +53,7 @@ const freshBatch = (number: number): Batch => ({
   outputs: [],
   retryIds: [],
   autoSend: true,
+  composition: defaultComposition(),
   job: null,
 });
 
@@ -57,6 +71,7 @@ function WaitingBatch({
   onOpenCollage: () => void;
 }) {
   const urls = useFileUrls(batch.outputs.map((o) => o.file));
+  const selection = useSelection(batch.outputs.map((o) => o.id));
   const qualified = batch.outputs.filter((o) => !o.rejected);
   const bad = batch.outputs.filter((o) => o.rejected);
   const send = () => {
@@ -75,15 +90,44 @@ function WaitingBatch({
           {qualified.length} 合格 · {bad.length} 待重打
         </span>
       </div>
+      <BulkActions
+        selection={selection}
+        disabled={processing}
+        noun="张等待区图片"
+        onDelete={(ids) => {
+          const removed = batch.outputs.filter((o) => ids.includes(o.id));
+          onChange((b) => ({
+            ...b,
+            outputs: b.outputs.filter((o) => !ids.includes(o.id)),
+            retryIds: b.retryIds.filter(
+              (id) => !removed.some((o) => o.sourceId === id),
+            ),
+          }));
+          window.dispatchEvent(
+            new CustomEvent('prism:remove-from-collage', { detail: ids }),
+          );
+        }}
+      />
       <div className="result-grid">
         {batch.outputs.map((output, i) => (
           <article
             className={output.rejected ? 'is-rejected' : ''}
             key={output.id}
           >
-            <a href={urls[i]} rel="noreferrer" target="_blank">
-              <img alt={output.file.name} src={urls[i]} />
-            </a>
+            <SelectItem
+              selection={selection}
+              id={output.id}
+              name={output.file.name}
+            />
+            <ExampleImage
+              alt={output.file.name}
+              src={urls[i]}
+              images={urls.map((url, j) => ({
+                url,
+                name: batch.outputs[j].file.name,
+              }))}
+              index={i}
+            />
             <div>
               <p>{output.file.name}</p>
               <button
@@ -235,6 +279,7 @@ export function WatermarkPanel({
               ? target.sources.filter((s) => target.retryIds.includes(s.id))
               : target.sources,
             layers: target.layers,
+            composition: target.composition,
             next: 0,
           };
     if (!job.todo.length || !job.layers.length) return;
@@ -288,6 +333,7 @@ export function WatermarkPanel({
               );
           },
           signal,
+          job.composition,
         );
         update(target.id, (b) => ({ ...b, job: null }));
         await workspace.flush();
@@ -450,6 +496,19 @@ export function WatermarkPanel({
                   </span>
                 ))}
               </div>
+              <SourceSelection
+                sources={batch.sources}
+                disabled={running[batch.id] !== undefined}
+                onRemove={async (ids) => {
+                  update(batch.id, (b) => ({
+                    ...b,
+                    sources: b.sources.filter((s) => !ids.includes(s.id)),
+                    retryIds: b.retryIds.filter((id) => !ids.includes(id)),
+                    job: null,
+                  }));
+                  await workspace.flush();
+                }}
+              />
               {batch.retryIds.length > 0 && (
                 <p className="import-warning">
                   本次只重打 {batch.retryIds.length}{' '}
@@ -459,8 +518,13 @@ export function WatermarkPanel({
               <WatermarkEditor
                 disabled={running[batch.id] !== undefined}
                 layers={batch.layers}
-                onChange={(layers) =>
-                  update(batch.id, (b) => ({ ...b, layers }))
+                composition={batch.composition}
+                onChange={(layers, composition) =>
+                  update(batch.id, (b) => ({
+                    ...b,
+                    layers,
+                    ...(composition ? { composition } : {}),
+                  }))
                 }
                 source={
                   (batch.retryIds.length

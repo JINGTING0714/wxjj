@@ -1,11 +1,26 @@
 'use client';
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { ArrowDown, ArrowUp, Plus, RefreshCw, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Lock,
+  Unlock,
+  Plus,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
 import { loadImage, type WatermarkLayerInput } from '@/lib/image-processing';
 import type { StoredWatermark } from '@/lib/prism-types';
+import {
+  compositionStack,
+  defaultComposition,
+  resolveComposition,
+  SOURCE_LAYER_ID,
+  type WatermarkComposition,
+} from '@/lib/watermark-composition';
 
 export type EditorLayer = WatermarkLayerInput & { id: string };
 export const defaultLayer = (file: File): EditorLayer => ({
@@ -16,17 +31,57 @@ export const defaultLayer = (file: File): EditorLayer => ({
   scale: 0.6,
   rotation: 0,
   opacity: 1,
+  locked: false,
   crop: { top: 0, bottom: 0, left: 0, right: 0 },
 });
+
+function CanvasPercent({
+  value,
+  label,
+  onChange,
+}: {
+  value: number;
+  label: string;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(Math.round(value * 100)));
+  useEffect(() => setDraft(String(Math.round(value * 100))), [value]);
+  return (
+    <input
+      type="number"
+      min="20"
+      max="400"
+      step="1"
+      aria-label={label}
+      value={draft}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const n = Number(e.target.value);
+        if (e.target.value && n >= 20 && n <= 400) onChange(n / 100);
+      }}
+      onBlur={() => {
+        const n = Number(draft);
+        const bounded =
+          draft && Number.isFinite(n)
+            ? Math.min(400, Math.max(20, n))
+            : value * 100;
+        setDraft(String(Math.round(bounded)));
+        onChange(Math.round(bounded) / 100);
+      }}
+    />
+  );
+}
 export function WatermarkEditor({
   source,
   layers,
   onChange,
+  composition,
   disabled = false,
 }: {
   source?: File;
   layers: EditorLayer[];
-  onChange: (layers: EditorLayer[]) => void;
+  onChange: (layers: EditorLayer[], composition?: WatermarkComposition) => void;
+  composition?: WatermarkComposition;
   disabled?: boolean;
 }) {
   const vault = useVault();
@@ -41,7 +96,15 @@ export function WatermarkEditor({
   const surface = useRef<HTMLDivElement>(null);
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
-  const selected = layers.find((l) => l.id === active) || layers[0];
+  const canvas = resolveComposition(composition);
+  const stack = source
+    ? compositionStack(
+        layers,
+        { ...canvas.source, id: SOURCE_LAYER_ID, file: source },
+        canvas.sourceIndex,
+      )
+    : layers;
+  const selected = stack.find((l) => l.id === active) || layers[0] || stack[0];
   const selectedId = selected?.id;
   const drag = useRef<{
     pointer: number;
@@ -61,10 +124,46 @@ export function WatermarkEditor({
   const frame = useRef<number>(0);
   const currentLayers = useRef(layers);
   currentLayers.current = layers;
-  const change = (id: string, patch: Partial<EditorLayer>) =>
+  const currentCanvas = useRef(canvas);
+  currentCanvas.current = canvas;
+  const change = (id: string, patch: Partial<EditorLayer>) => {
+    if (disabled) return;
+    const old =
+      id === SOURCE_LAYER_ID
+        ? currentCanvas.current.source
+        : currentLayers.current.find((l) => l.id === id);
+    if (!old || (old.locked && patch.locked === undefined)) return;
+    if (id === SOURCE_LAYER_ID)
+      onChange(currentLayers.current, {
+        ...currentCanvas.current,
+        source: { ...old, ...patch },
+      });
+    else
+      onChange(
+        currentLayers.current.map((l) =>
+          l.id === id ? { ...l, ...patch } : l,
+        ),
+      );
+  };
+  const publishStack = (next: EditorLayer[]) =>
     onChange(
-      currentLayers.current.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+      next.filter((l) => l.id !== SOURCE_LAYER_ID),
+      {
+        ...canvas,
+        sourceIndex: Math.max(
+          0,
+          next.findIndex((l) => l.id === SOURCE_LAYER_ID),
+        ),
+      },
     );
+  const reorder = (id: string, direction: number) => {
+    const i = stack.findIndex((l) => l.id === id),
+      j = i + direction;
+    if (disabled || stack[i]?.locked || j < 0 || j >= stack.length) return;
+    const next = [...stack];
+    [next[i], next[j]] = [next[j], next[i]];
+    publishStack(next);
+  };
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -152,7 +251,7 @@ export function WatermarkEditor({
     }
   };
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
-    if (disabled || !surface.current) return;
+    if (disabled || layer.locked || !surface.current) return;
     event.preventDefault();
     event.stopPropagation();
     setActive(layer.id);
@@ -183,7 +282,7 @@ export function WatermarkEditor({
     if (d.mode === 'scale')
       d.next = {
         scale: Math.min(
-          3,
+          6,
           Math.max(
             0.01,
             (d.scale *
@@ -224,7 +323,8 @@ export function WatermarkEditor({
       const p = d.next;
       if (p.x !== undefined) d.element.style.left = `${p.x * 100}%`;
       if (p.y !== undefined) d.element.style.top = `${p.y * 100}%`;
-      if (p.scale !== undefined) d.element.style.width = `${p.scale * 100}%`;
+      if (p.scale !== undefined)
+        d.element.style.width = `${(p.scale / currentCanvas.current.canvasWidth) * 100}%`;
       if (p.rotation !== undefined)
         d.element.style.transform = `translate(-50%, -50%) rotate(${p.rotation}deg)`;
     });
@@ -249,25 +349,23 @@ export function WatermarkEditor({
               aria-label="水印样本编辑画布"
               className="watermark-surface"
               ref={surface}
-              style={{ aspectRatio: `${base.w}/${base.h}` }}
+              style={{
+                aspectRatio: `${base.w * canvas.canvasWidth}/${base.h * canvas.canvasHeight}`,
+                backgroundColor: canvas.background,
+              }}
             >
-              <img
-                alt="第一张样本"
-                className="watermark-base-image"
-                draggable={false}
-                src={sourceUrl}
-              />
-              {layers.map((layer, i) => {
+              {stack.map((layer, i) => {
                 const dim = dimensions.get(layer.file);
                 if (!dim) return null;
                 const widthFactor = 1 - layer.crop.left - layer.crop.right;
                 const heightFactor = 1 - layer.crop.top - layer.crop.bottom;
                 return (
                   <div
-                    aria-label={`水印层 ${i + 1}，方向键移动，Shift 加速`}
-                    className={`watermark-dom-layer ${layer.id === selectedId ? 'selected' : ''}`}
+                    aria-label={`${layer.id === SOURCE_LAYER_ID ? '原图' : `水印层 ${i + 1}`}，${layer.locked ? '已锁定' : '方向键移动，Shift 加速'}`}
+                    className={`watermark-dom-layer ${layer.id === selectedId && !layer.locked ? 'selected' : ''} ${layer.locked ? 'is-locked' : ''}`}
                     key={layer.id}
                     onKeyDown={(event) => {
+                      if (disabled || layer.locked) return;
                       const step = event.shiftKey ? 0.05 : 0.005;
                       const delta: Record<string, Partial<EditorLayer>> = {
                         ArrowLeft: { x: layer.x - step },
@@ -288,11 +386,12 @@ export function WatermarkEditor({
                     style={{
                       left: `${layer.x * 100}%`,
                       top: `${layer.y * 100}%`,
-                      width: `${layer.scale * 100}%`,
+                      width: `${(layer.scale / canvas.canvasWidth) * 100}%`,
+                      zIndex: i,
                       aspectRatio: `${dim.w * widthFactor}/${dim.h * heightFactor}`,
                       transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
                     }}
-                    tabIndex={disabled ? -1 : 0}
+                    tabIndex={disabled || layer.locked ? -1 : 0}
                   >
                     <div
                       className="watermark-crop-viewport"
@@ -301,7 +400,13 @@ export function WatermarkEditor({
                       <img
                         alt=""
                         draggable={false}
-                        src={layerUrls[i]}
+                        src={
+                          layer.id === SOURCE_LAYER_ID
+                            ? sourceUrl
+                            : layerUrls[
+                                layers.findIndex((l) => l.id === layer.id)
+                              ]
+                        }
                         style={{
                           width: `${100 / widthFactor}%`,
                           height: `${100 / heightFactor}%`,
@@ -310,7 +415,7 @@ export function WatermarkEditor({
                         }}
                       />
                     </div>
-                    {layer.id === selectedId && !disabled && (
+                    {layer.id === selectedId && !disabled && !layer.locked && (
                       <>
                         <i
                           className="transform-handle top-left"
@@ -346,7 +451,7 @@ export function WatermarkEditor({
           )}
         </div>
         <p className="stage-tip">
-          拖动水印移动，拖动四角等比缩放，拖动顶部圆点旋转。手机可单指操作把手，或使用右侧滑块精确调整。位置按样本比例应用到整批。
+          原图默认锁定；解锁后与水印一样可拖动、缩放、旋转和裁切。四角缩放，顶部圆点旋转，也可用右侧滑块。原图外的内容保留在扩展画布内，只有超出画布边界的部分不导出。样本按比例应用到整批。
         </p>
         {error && <p className="error-banner">{error}</p>}
       </section>
@@ -354,7 +459,60 @@ export function WatermarkEditor({
         disabled={disabled}
         className="watermark-layer-panel workshop-fieldset"
       >
-        <h3>水印层与变换</h3>
+        <h3>画布、图层与变换</h3>
+        <div className="composition-controls">
+          <p>扩展画布可容纳相框；图层的大小不会随画布扩展而被自动拉伸。</p>
+          <div className="transform-grid">
+            {(['canvasWidth', 'canvasHeight'] as const).map((key) => (
+              <label key={key}>
+                <span>画布{key === 'canvasWidth' ? '宽' : '高'}（原图 %）</span>
+                <CanvasPercent
+                  value={canvas[key]}
+                  label={
+                    key === 'canvasWidth' ? '画布宽度百分比' : '画布高度百分比'
+                  }
+                  onChange={(value) =>
+                    onChange(layers, { ...canvas, [key]: value })
+                  }
+                />
+              </label>
+            ))}
+            <label>
+              <span>画布底色</span>
+              <select
+                aria-label="画布底色"
+                value={
+                  canvas.background === 'transparent' ? 'transparent' : 'color'
+                }
+                onChange={(e) =>
+                  onChange(layers, {
+                    ...canvas,
+                    background:
+                      e.target.value === 'transparent'
+                        ? 'transparent'
+                        : '#ffffff',
+                  })
+                }
+              >
+                <option value="transparent">透明（视频输出为黑色）</option>
+                <option value="color">自定义颜色</option>
+              </select>
+            </label>
+            {canvas.background !== 'transparent' && (
+              <label>
+                <span>自定义底色</span>
+                <input
+                  type="color"
+                  aria-label="自定义画布底色"
+                  value={canvas.background}
+                  onChange={(e) =>
+                    onChange(layers, { ...canvas, background: e.target.value })
+                  }
+                />
+              </label>
+            )}
+          </div>
+        </div>
         <div className="layer-source-actions">
           <label className="mini-file">
             <Plus />
@@ -390,7 +548,7 @@ export function WatermarkEditor({
           </select>
         </div>
         <div className="transform-layer-list">
-          {layers.map((layer, i) => (
+          {[...stack].reverse().map((layer) => (
             <article
               className={layer.id === selectedId ? 'is-active' : ''}
               key={layer.id}
@@ -401,38 +559,40 @@ export function WatermarkEditor({
                 type="button"
               >
                 <strong>
-                  {i + 1}. {layer.file.name}
+                  {layer.id === SOURCE_LAYER_ID ? '原图 · ' : '水印 · '}
+                  {layer.file.name}
+                  {layer.locked ? ' · 已锁定' : ''}
                 </strong>
               </button>
               <span className="layer-order-actions">
                 <button
-                  aria-label="上移水印层"
-                  disabled={i === 0}
-                  onClick={() => {
-                    const next = [...layers];
-                    [next[i - 1], next[i]] = [next[i], next[i - 1]];
-                    onChange(next);
-                  }}
+                  type="button"
+                  aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : '水印层'}`}
+                  onClick={() => change(layer.id, { locked: !layer.locked })}
+                >
+                  {layer.locked ? <Lock /> : <Unlock />}
+                </button>
+                <button
+                  aria-label="上移图层（向前）"
+                  disabled={layer.locked || stack.at(-1)?.id === layer.id}
+                  onClick={() => reorder(layer.id, 1)}
                   type="button"
                 >
                   <ArrowUp />
                 </button>
                 <button
-                  aria-label="下移水印层"
-                  disabled={i === layers.length - 1}
-                  onClick={() => {
-                    const next = [...layers];
-                    [next[i + 1], next[i]] = [next[i], next[i + 1]];
-                    onChange(next);
-                  }}
+                  aria-label="下移图层（向后）"
+                  disabled={layer.locked || stack[0]?.id === layer.id}
+                  onClick={() => reorder(layer.id, -1)}
                   type="button"
                 >
                   <ArrowDown />
                 </button>
                 <button
                   aria-label="移除水印层"
+                  disabled={layer.locked || layer.id === SOURCE_LAYER_ID}
                   onClick={() =>
-                    onChange(layers.filter((l) => l.id !== layer.id))
+                    publishStack(stack.filter((l) => l.id !== layer.id))
                   }
                   type="button"
                 >
@@ -442,12 +602,24 @@ export function WatermarkEditor({
             </article>
           ))}
         </div>
+        <p className="stage-tip">
+          列表从上到下对应从前到后。锁定层不会响应拖动，也不会挡住未锁定图层的操作。
+        </p>
         {selected && (
-          <div className="transform-controls">
+          <fieldset
+            className="transform-controls workshop-fieldset"
+            disabled={disabled || selected.locked}
+          >
+            <legend>
+              {selected.id === SOURCE_LAYER_ID ? '原图' : '当前水印'}
+              {selected.locked ? ' · 已锁定，请先解锁再调整' : ' · 自由调整'}
+            </legend>
             <Button
               onClick={() =>
                 change(selected.id, {
-                  ...defaultLayer(selected.file),
+                  ...(selected.id === SOURCE_LAYER_ID
+                    ? { ...defaultComposition().source, locked: false }
+                    : defaultLayer(selected.file)),
                   id: selected.id,
                 })
               }
@@ -478,7 +650,7 @@ export function WatermarkEditor({
                     key: 'scale',
                     label: '缩放',
                     min: 0.01,
-                    max: 3,
+                    max: 6,
                     step: 0.005,
                   },
                   {
@@ -520,7 +692,7 @@ export function WatermarkEditor({
                 </label>
               ))}
               <fieldset className="crop-controls">
-                <legend>裁切原水印</legend>
+                <legend>裁切当前图层</legend>
                 {(['top', 'right', 'bottom', 'left'] as const).map((edge) => (
                   <label key={edge}>
                     <span>
@@ -550,10 +722,10 @@ export function WatermarkEditor({
                 ))}
               </fieldset>
             </div>
-          </div>
+          </fieldset>
         )}
         <p>
-          新上传的水印会自动存入水印库，可再补充作者、来源和分类。图层顺序从上到下依次叠加，末层最靠前。
+          新上传的水印会自动存入水印库，可再补充作者、来源和分类。原图和各水印都可以独立锁定，锁定状态也会保存。
         </p>
       </fieldset>
     </div>

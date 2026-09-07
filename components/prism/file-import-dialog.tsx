@@ -1,4 +1,6 @@
 'use client';
+import { confirmShortCodes } from '@/lib/short-codes';
+import { ExampleImage } from './example-image';
 import { useEffect, useRef, useState } from 'react';
 import {
   Upload,
@@ -161,14 +163,15 @@ function ImportArchive({ kind }: { kind: AssetKind }) {
               </Button>
               <div className="unmatched-grid">
                 {unmatched.map((file, i) => (
-                  <button
-                    key={file.id}
-                    onClick={() => downloadBlob(file.blob, file.name)}
-                    type="button"
-                  >
-                    <img alt={file.name} src={urls[i]} />
-                    <span>{file.name}</span>
-                  </button>
+                  <div key={file.id}>
+                    <ExampleImage alt={file.name} src={urls[i]} />
+                    <button
+                      type="button"
+                      onClick={() => downloadBlob(file.blob, file.name)}
+                    >
+                      下载 {file.name}
+                    </button>
+                  </div>
                 ))}
               </div>
             </>
@@ -271,7 +274,7 @@ function PreviewRow({
       <div className="import-example-list">
         {urls.map((url, i) => (
           <div key={i}>
-            <img alt={`例图 ${i + 1}`} src={url} />
+            <ExampleImage alt={`例图 ${i + 1}`} src={url} />
             <button
               aria-label="移除例图"
               onClick={() =>
@@ -343,7 +346,7 @@ function Unmatched({
       <div className="unmatched-grid">
         {urls.map((url, i) => (
           <label key={i}>
-            <img alt={document.unmatchedImages[i].name} src={url} />
+            <ExampleImage alt={document.unmatchedImages[i].name} src={url} />
             <select
               aria-label="指定例图所属条目"
               onChange={(e) => {
@@ -448,12 +451,13 @@ export function FileImportDialog({
       if (selected.some(({ row }) => !row.title.trim() || !row.secret.trim()))
         throw new Error('有选中条目没有名称或内容，请补齐或取消选中。');
       if (
-        selected.some(
-          ({ row }) =>
-            row.kind !== 'prompt' && !/^[a-z\d]{7}$/i.test(row.secret.trim()),
+        !confirmShortCodes(
+          selected
+            .filter(({ row }) => row.kind !== 'prompt')
+            .map(({ row }) => row.secret),
         )
       )
-        throw new Error('短码应为 7 位字母或数字，请校对。');
+        return;
       const batch: VaultWrite = { records: [], blobs: [] };
       const now = new Date().toISOString();
       for (const doc of documents) {

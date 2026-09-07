@@ -201,12 +201,16 @@ export function tableRows(
       const candidates = cells.filter((value) =>
         kind === 'prompt'
           ? looksLikePrompt(value)
-          : /^[a-z\d]{7}$/i.test(value),
+          : /^--profile\s+\S+$/i.test(value) ||
+            (/^[a-z\d]+$/i.test(value) &&
+              (/[a-z]/i.test(value) || cells.length === 1)),
       );
       if (candidates.length) {
         entry.secret = [...candidates].sort((a, b) => b.length - a.length)[0];
         entry.title = cells.find((value) => /^\d{1,8}$/.test(value)) || '';
-        entry.warnings.push('没有标准表头，已按内容识别，请核对提示词列。');
+        entry.warnings.push(
+          '没有标准表头，已按内容识别，请核对内容列；不会按固定长度截断。',
+        );
         cells
           .filter(
             (value) => value && value !== entry.secret && value !== entry.title,
