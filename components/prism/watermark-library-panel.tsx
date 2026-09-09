@@ -1,5 +1,10 @@
 'use client';
-import { ExampleImage } from './example-image';
+import {
+  CollectionRail,
+  CollectionDialog,
+  RecordHead,
+  RecordExamples,
+} from './library-shared';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 import {
@@ -78,15 +83,6 @@ export function WatermarkLibraryPanel({
   } | null>(null);
   const [error, setError] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
-
-  const allCollections = useMemo(
-    () => [
-      { id: 'all', name: '全部水印' },
-      { id: 'unfiled', name: '未分类' },
-      ...collections,
-    ],
-    [collections],
-  );
 
   const loadAll = async () => {
     if (vault.status !== 'unlocked') {
@@ -330,7 +326,7 @@ export function WatermarkLibraryPanel({
               onClick={() => setCollectionDialog({ name: '' })}
               variant="outline"
             >
-              <FolderPlus /> 新建分类
+              <FolderPlus /> 新建库
             </Button>
             <Button className="add-button" onClick={openCreate}>
               <Plus /> 添加水印
@@ -352,46 +348,15 @@ export function WatermarkLibraryPanel({
           <CircleAlert /> {error}
         </p>
       )}
-      <div className="collection-rail">
-        <div className="collection-tabs">
-          {allCollections.map((collection) => (
-            <button
-              className={active === collection.id ? 'is-active' : ''}
-              key={collection.id}
-              onClick={() => setActive(collection.id)}
-              type="button"
-            >
-              <span>{collection.name}</span>
-              <small>
-                {collection.id === 'all'
-                  ? watermarks.length
-                  : watermarks.filter(
-                      (item) => item.collection === collection.id,
-                    ).length}
-              </small>
-              {!['all', 'unfiled'].includes(collection.id) && (
-                <span className="collection-actions">
-                  <Pencil
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCollectionDialog({
-                        id: collection.id,
-                        name: collection.name,
-                      });
-                    }}
-                  />
-                  <Trash2
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteCollection(collection.id);
-                    }}
-                  />
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
+      <CollectionRail
+        noun="水印"
+        collections={collections}
+        records={watermarks}
+        active={active}
+        onSelect={setActive}
+        onEdit={setCollectionDialog}
+        onDelete={deleteCollection}
+      />
       <div className="library-toolbar">
         <div className="inner-search">
           <Search />
@@ -406,6 +371,7 @@ export function WatermarkLibraryPanel({
           <span>张水印</span>
         </div>
       </div>
+      <RecordHead middle="水印 / 来源" />
       <BulkActions
         selection={selection}
         noun="条水印记录"
@@ -426,57 +392,84 @@ export function WatermarkLibraryPanel({
         }}
       />
       {visible.length ? (
-        <div className="watermark-library-grid">
+        <div className="record-list watermark-records">
           {visible.map((watermark) => (
-            <article key={watermark.id}>
-              <SelectItem
-                selection={selection}
-                id={watermark.id}
-                name={watermark.title}
-              />
-              <div className="watermark-checker">
-                <ExampleImage alt={watermark.title} src={watermark.url} />
+            <article className="record-row" key={watermark.id}>
+              <div className="record-identity">
+                <SelectItem
+                  selection={selection}
+                  id={watermark.id}
+                  name={watermark.title}
+                />
+                <RecordExamples
+                  title={watermark.title}
+                  images={[
+                    {
+                      id: watermark.id,
+                      name: watermark.fileName,
+                      url: watermark.url,
+                    },
+                  ]}
+                />
+                <div>
+                  <Badge variant="outline">水印</Badge>
+                  <h3>{watermark.title}</h3>
+                  <p>{watermark.tags.join(' / ') || '未添加标签'}</p>
+                </div>
               </div>
-              <div className="watermark-info">
-                <Badge variant="outline">
+              <div className="record-secret">
+                <p>
+                  <strong>{watermark.author}</strong> · {watermark.origin}
+                </p>
+                <p>
                   {watermark.acquisition === '其他'
                     ? watermark.acquisitionOther || '其他'
                     : watermark.acquisition}
-                </Badge>
-                <h2>{watermark.title}</h2>
-                <p>
-                  {watermark.author} · {watermark.origin}
                 </p>
-                <span>{watermark.note || '暂无备注'}</span>
-                <CustomFieldList fields={watermark.customFields} />
+                <p className="file-name">{watermark.fileName}</p>
                 {safeSourceUrl(watermark.sourceUrl) && (
                   <a
+                    className="source-link"
                     href={safeSourceUrl(watermark.sourceUrl)}
                     rel="noreferrer"
                     target="_blank"
                   >
-                    <Link2 /> 来源
+                    <Link2 />
+                    查看来源
                   </a>
                 )}
-                <div>
-                  <button onClick={() => openEdit(watermark)} type="button">
-                    <Pencil /> 编辑
-                  </button>
-                  <button
-                    onClick={() =>
-                      downloadBlob(watermark.file, watermark.fileName)
-                    }
-                    type="button"
-                  >
-                    <Download /> 下载
-                  </button>
-                  <button
-                    onClick={() => deleteWatermark(watermark)}
-                    type="button"
-                  >
-                    <Trash2 /> 删除
-                  </button>
-                </div>
+              </div>
+              <div className="record-note">
+                <p>{watermark.note || '暂无私人备注。'}</p>
+                <CustomFieldList fields={watermark.customFields} />
+              </div>
+              <div className="row-actions">
+                <button
+                  type="button"
+                  aria-label={`编辑 ${watermark.title}`}
+                  title="编辑"
+                  onClick={() => openEdit(watermark)}
+                >
+                  <Pencil />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`下载 ${watermark.title}`}
+                  title="下载"
+                  onClick={() =>
+                    downloadBlob(watermark.file, watermark.fileName)
+                  }
+                >
+                  <Download />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`删除 ${watermark.title}`}
+                  title="删除"
+                  onClick={() => deleteWatermark(watermark)}
+                >
+                  <Trash2 />
+                </button>
               </div>
             </article>
           ))}
@@ -613,42 +606,12 @@ export function WatermarkLibraryPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog
-        onOpenChange={(open) => !open && setCollectionDialog(null)}
-        open={Boolean(collectionDialog)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {collectionDialog?.id ? '重命名' : '新建'}水印分类
-            </DialogTitle>
-            <DialogDescription>删除分类不会删除其中的水印。</DialogDescription>
-          </DialogHeader>
-          <form
-            className="single-form"
-            id="watermark-collection-form"
-            onSubmit={saveCollection}
-          >
-            <label>
-              <span>分类名称</span>
-              <Input
-                autoFocus
-                defaultValue={collectionDialog?.name}
-                name="name"
-                required
-              />
-            </label>
-          </form>
-          <DialogFooter>
-            <Button onClick={() => setCollectionDialog(null)} variant="ghost">
-              取消
-            </Button>
-            <Button form="watermark-collection-form" type="submit">
-              保存分类
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CollectionDialog
+        noun="水印"
+        editing={collectionDialog}
+        onClose={() => setCollectionDialog(null)}
+        onSave={saveCollection}
+      />
     </div>
   );
 }

@@ -8,7 +8,6 @@ import {
   Image as ImageIcon,
   Pencil,
   Plus,
-  Search,
   Trash2,
   X,
 } from 'lucide-react';
@@ -49,6 +48,13 @@ import {
 import type { VaultWrite } from '@/lib/local-vault';
 import { formatProfileCode } from '@/lib/short-codes';
 import { useConfirmation } from './use-confirmation';
+import {
+  CollectionRail,
+  CollectionDialog,
+  LibraryToolbar,
+  RecordHead,
+  RecordExamples,
+} from './library-shared';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
@@ -406,18 +412,6 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       window.dispatchEvent(new CustomEvent('prism:assets-changed'));
     });
   };
-  const append = (folder: Folder, code: HydratedCode, files: File[]) =>
-    run(async () => {
-      await vault.writeBatch({
-        blobs: files.map((file) => ({
-          id: crypto.randomUUID(),
-          scope: profileImageScope(folder.id, code),
-          blob: file,
-          name: file.name,
-        })),
-      });
-      await refresh();
-    });
   const deleteFolder = (folder: Folder) => {
     if (
       !confirm(
@@ -484,17 +478,19 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   return (
     <div className="studio-page profile-page">
       {confirmation.dialog}
-      <FileImportDialog
-        kind="profile"
-        onImported={() => {
-          void refresh().catch((e) => setError(String(e)));
-        }}
-      />
+      <div className="library-import-entry">
+        <FileImportDialog
+          kind="profile"
+          onImported={() => {
+            void refresh().catch((e) => setError(String(e)));
+          }}
+        />
+      </div>
       <SectionHead
         eyebrow="PROFILE FOLDERS"
         number="03"
         title="Profile 库"
-        description="一个 Profile 文件夹对应一个长码；阶段 P、成品 P 在文件夹内分别记录短码、性质、例图与备注。"
+        description="一个文件夹保存长码，阶段与成品短码分别记录例图、性质和备注。"
         actions={
           <>
             <Button
@@ -511,65 +507,37 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           </>
         }
       />
-      <p className="profile-model-note">
-        长码用来核对文件夹身份，不能证明某个短码就是成品。阶段 P
-        同样可以跑图；请根据作者信息标明性质，配方会引用你选定的具体短码。
-      </p>
-      <div className="profile-collections">
-        <Button
-          onClick={() => setActive('all')}
-          className={active === 'all' ? 'is-active' : ''}
-          variant={active === 'all' ? 'default' : 'outline'}
-        >
-          全部 Profile · {folders.length}
-        </Button>
-        <Button
-          onClick={() => setActive('unfiled')}
-          className={active === 'unfiled' ? 'is-active' : ''}
-          variant={active === 'unfiled' ? 'default' : 'outline'}
-        >
-          未分类
-        </Button>
-        {collections.map((c) => (
-          <div key={c.id}>
-            <Button
-              onClick={() => setActive(c.id)}
-              className={active === c.id ? 'is-active' : ''}
-              variant={active === c.id ? 'default' : 'outline'}
-            >
-              {c.name}
-            </Button>
-            <button
-              aria-label={`重命名 ${c.name}`}
-              onClick={() => setCollectionEditor(c)}
-              type="button"
-            >
-              <Pencil />
-            </button>
-            <button
-              aria-label={`删除库 ${c.name}`}
-              onClick={() => deleteCollection(c)}
-              type="button"
-            >
-              <Trash2 />
-            </button>
-          </div>
-        ))}
-      </div>
+      <CollectionRail
+        noun="Profile"
+        collections={collections}
+        records={folders}
+        active={active}
+        onSelect={setActive}
+        onEdit={setCollectionEditor}
+        onDelete={(id) => {
+          const c = collections.find((c) => c.id === id);
+          if (c) deleteCollection(c);
+        }}
+      />
+      <details className="library-explainer">
+        <summary>关于文件夹长码与短码性质</summary>
+        <p>
+          长码用于核对文件夹，不代表短码已是成品。阶段 P
+          也能跑图；配方始终引用你选定的具体短码。
+        </p>
+      </details>
       {error && !editor && (
         <p className="error-banner" role="alert">
           {error}
         </p>
       )}
-      <div className="inner-search">
-        <Search />
-        <Input
-          aria-label="搜索 Profile 文件夹与短码信息"
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索名称、作者、性质、备注或标签"
-          value={query}
-        />
-      </div>
+      <LibraryToolbar
+        noun="Profile"
+        query={query}
+        onQuery={setQuery}
+        count={visible.length}
+      />
+      <RecordHead middle="Profile / 来源" />
       <BulkActions
         selection={selection}
         disabled={busy}
@@ -587,100 +555,87 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           window.dispatchEvent(new CustomEvent('prism:assets-changed'));
         }}
       />
-      <div className="profile-folders">
+      <div className="record-list profile-records">
         {visible.map((folder) => (
-          <article className="profile-folder" key={folder.id}>
-            <header>
-              <div>
-                <p>PROFILE FOLDER · {folder.codes.length} 个短码</p>
-                <h2>{folder.title}</h2>
-                <span>
-                  {folder.author} · {folder.origin} ·{' '}
-                  {folder.acquisition === '其他'
-                    ? folder.acquisitionOther || '取得方式未记录'
-                    : folder.acquisition}
-                </span>
-              </div>
-              <div className="profile-folder-actions">
-                <SelectItem
-                  selection={selection}
-                  id={folder.id}
-                  name={folder.title}
-                />
-                <Button
-                  aria-label={`编辑 ${folder.title}`}
-                  onClick={() => open(folder)}
-                  variant="outline"
-                >
-                  <Pencil />
-                  编辑文件夹
-                </Button>
-                <Button
-                  aria-label={`删除 ${folder.title}`}
-                  onClick={() => deleteFolder(folder)}
-                  variant="ghost"
-                >
-                  <Trash2 />
-                  删除
-                </Button>
-              </div>
-            </header>
-            <div className="profile-folder-details">
-              <div>
-                <span>文件夹长码</span>
-                <Secret long value={folder.longCode || ''} />
-              </div>
-              <div>
-                <p>{folder.note || '暂无文件夹备注'}</p>
-                <CustomFieldList fields={folder.customFields} />
-              </div>
-            </div>
-            <div className="profile-variant-head">
-              <span>此短码的例图</span>
-              <span>名称 / 性质 / 短码</span>
-              <span>此短码的备注</span>
-            </div>
-            {folder.codes.map((code) => (
-              <section className="profile-variant" key={code.id}>
-                <div className="profile-variant-images">
-                  {code.images.map((image, i) => (
-                    <ExampleImage
-                      key={image.id}
-                      alt={`${code.label} 例图`}
-                      src={image.url}
-                      images={code.images}
-                      index={i}
+          <section className="profile-record-group" key={folder.id}>
+            {folder.codes.map((code, index) => (
+              <article className="record-row" key={code.id}>
+                <div className="record-identity">
+                  {index === 0 ? (
+                    <SelectItem
+                      selection={selection}
+                      id={folder.id}
+                      name={folder.title}
                     />
-                  ))}
-                  <label className="profile-example-upload">
-                    <ImageIcon />
-                    <span>添加例图</span>
-                    <input
-                      accept="image/*"
-                      multiple
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        e.target.value = '';
-                        void append(folder, code, files);
-                      }}
-                      type="file"
-                    />
-                  </label>
+                  ) : (
+                    <span className="selection-spacer" />
+                  )}
+                  <RecordExamples
+                    images={code.images}
+                    title={code.label || folder.title}
+                  />
+                  <div>
+                    <span className={`nature-label nature-${code.nature}`}>
+                      {natureLabel(code)}
+                    </span>
+                    <h3>{folder.title}</h3>
+                    <p>
+                      {code.label || `短码 ${index + 1}`} · {index + 1} /{' '}
+                      {folder.codes.length}
+                    </p>
+                    <p>{folder.tags.join(' / ') || '未添加标签'}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3>{code.label}</h3>
-                  <span className={`nature-label nature-${code.nature}`}>
-                    {natureLabel(code)}
-                  </span>
+                <div className="record-secret">
                   <Secret value={code.secret} />
+                  <p>
+                    <strong>{folder.author || '未记录作者'}</strong> ·{' '}
+                    {folder.origin || '未记录来源'} ·{' '}
+                    {folder.acquisition === '其他'
+                      ? folder.acquisitionOther || '其他'
+                      : folder.acquisition}
+                  </p>
+                  {index === 0 && (
+                    <div className="folder-code-summary">
+                      <span>文件夹长码 · 共用</span>
+                      <Secret long value={folder.longCode || ''} />
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p>{code.note || '暂无此短码备注'}</p>
+                <div className="record-note">
+                  <p>{code.note || '暂无此短码备注。'}</p>
                   <CustomFieldList fields={code.customFields} />
+                  {index === 0 &&
+                  (folder.note || folder.customFields?.length) ? (
+                    <div className="folder-note-summary">
+                      <span>文件夹补充</span>
+                      <p>{folder.note}</p>
+                      <CustomFieldList fields={folder.customFields} />
+                    </div>
+                  ) : null}
                 </div>
-              </section>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    aria-label={`编辑 ${folder.title}`}
+                    title="编辑文件夹及短码"
+                    onClick={() => open(folder)}
+                  >
+                    <Pencil />
+                  </button>
+                  {index === 0 && (
+                    <button
+                      type="button"
+                      aria-label={`删除 ${folder.title}`}
+                      onClick={() => deleteFolder(folder)}
+                    >
+                      <Trash2 />
+                    </button>
+                  )}
+                </div>
+              </article>
             ))}
-          </article>
+          </section>
         ))}
       </div>
       {!visible.length && (
@@ -702,7 +657,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
               {editing ? '编辑' : '新建'} Profile 文件夹
             </DialogTitle>
             <DialogDescription>
-              共用一个长码；每个短码独立标明性质，例图不会混在其他阶段下。未确认的性质可以留待确认。
+              同一文件夹共用长码；每个短码单独保存性质、例图和备注。
             </DialogDescription>
           </DialogHeader>
           <form
@@ -762,7 +717,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
               来源
               <Input defaultValue={editing?.origin} name="origin" />
             </label>
-            <label>
+            <label className="wide-field">
               来源链接
               <Input
                 defaultValue={editing?.sourceUrl}
@@ -856,55 +811,31 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
               取消
             </Button>
             <Button disabled={busy} form="profile-folder-form" type="submit">
-              {busy ? '正在完整保存…' : '加密保存文件夹与全部短码'}
+              {busy ? '正在完整保存…' : '加密保存'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog
-        onOpenChange={(v) => {
-          if (!v) setCollectionEditor(null);
+      <CollectionDialog
+        noun="Profile"
+        editing={collectionEditor}
+        onClose={() => setCollectionEditor(null)}
+        busy={busy}
+        onSave={(e) => {
+          e.preventDefault();
+          const name = String(
+            new FormData(e.currentTarget).get('name') || '',
+          ).trim();
+          if (name)
+            void run(async () => {
+              const id = collectionEditor?.id || crypto.randomUUID();
+              await vault.saveRecord('collections:profile', { id, name });
+              await refresh();
+              setActive(id);
+              setCollectionEditor(null);
+            });
         }}
-        open={Boolean(collectionEditor)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {collectionEditor?.id ? '重命名' : '新建'} Profile 库
-            </DialogTitle>
-            <DialogDescription>
-              删除库不删除 Profile 文件夹及短码。
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const name = String(
-                new FormData(e.currentTarget).get('name') || '',
-              ).trim();
-              if (name)
-                void run(async () => {
-                  await vault.saveRecord('collections:profile', {
-                    id: collectionEditor?.id || crypto.randomUUID(),
-                    name,
-                  });
-                  await refresh();
-                  setCollectionEditor(null);
-                });
-            }}
-          >
-            <Input
-              aria-label="库名称"
-              defaultValue={collectionEditor?.name}
-              name="name"
-              required
-            />
-            <Button disabled={busy} type="submit">
-              保存分类
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
+      />
     </div>
   );
 }

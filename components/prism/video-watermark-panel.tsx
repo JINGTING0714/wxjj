@@ -4,11 +4,7 @@ import { Download, Pause, Trash2, Upload, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { WatermarkEditor, type EditorLayer } from './watermark-editor';
-import {
-  createVideoAudioContext,
-  videoFirstFrame,
-  watermarkVideo,
-} from '@/lib/video-processing';
+import { videoFirstFrame, watermarkVideo } from '@/lib/video-processing';
 import { downloadBlob, downloadZip } from '@/lib/download';
 import {
   defaultComposition,
@@ -16,6 +12,10 @@ import {
 } from '@/lib/watermark-composition';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 import { SourceSelection } from './source-selection';
+import {
+  defaultVideoExport,
+  type VideoExportOptions,
+} from '@/lib/video-export';
 type VideoSource = { id: string; file: File; frame: File };
 type VideoOutput = { id: string; file: File };
 export function VideoWatermarkPanel() {
@@ -24,11 +24,13 @@ export function VideoWatermarkPanel() {
     layers: [] as EditorLayer[],
     composition: defaultComposition(),
     outputs: [] as VideoOutput[],
+    exportOptions: defaultVideoExport,
     job: null as {
       todo: VideoSource[];
       layers: EditorLayer[];
       next: number;
       composition?: WatermarkComposition;
+      exportOptions?: VideoExportOptions;
     } | null,
   });
   const { state, setState } = workspace;
@@ -85,13 +87,6 @@ export function VideoWatermarkPanel() {
   };
   const run = (resume = false) => {
     if (busy) return;
-    let audio: ReturnType<typeof createVideoAudioContext>;
-    try {
-      audio = createVideoAudioContext();
-    } catch (e) {
-      setError(String(e));
-      return;
-    }
     const job =
       resume && state.job
         ? state.job
@@ -99,6 +94,7 @@ export function VideoWatermarkPanel() {
             todo: state.sources,
             layers: state.layers,
             composition: state.composition,
+            exportOptions: state.exportOptions || defaultVideoExport,
             next: 0,
           };
     controller.current = new AbortController();
@@ -115,13 +111,13 @@ export function VideoWatermarkPanel() {
           const file = await watermarkVideo(
             source.file,
             job.layers,
-            audio,
             signal,
-            (value, paused) =>
+            (value, phase) =>
               setProgress(
-                `${i + 1} / ${job.todo.length} · ${source.file.name} · ${Math.round(value * 100)}%${paused ? ' · 标签页隐藏，自动暂停防止丢帧' : ''}`,
+                `${i + 1} / ${job.todo.length} · ${Math.round(value * 100)}% · ${phase}`,
               ),
             job.composition,
+            job.exportOptions || defaultVideoExport,
           );
           signal.throwIfAborted();
           setState((s) => ({
@@ -143,7 +139,6 @@ export function VideoWatermarkPanel() {
         else
           setProgress('已暂停；成品已保存，继续时从当前未完成视频重新处理。');
       } finally {
-        await audio.context.close();
         setBusy(false);
         task.current = null;
       }
@@ -154,11 +149,21 @@ export function VideoWatermarkPanel() {
       <h2>视频水印 · 独立工区</h2>
       <p>
         最多 10
-        个视频，使用第一段视频的第一帧作为整批模板。默认保留原分辨率，扩展画布后按各视频尺寸同比例输出，并保留原音频；按浏览器能力导出
-        WebM 或 MP4，目标帧率 30 fps。视频需要重新编码，并非原文件无损复制。
+        个视频，使用第一段视频的第一帧作为整批模板。按原始分辨率与帧时间编码，扩展画布同比例输出并保留音轨。普通画面优先
+        MP4，透明画面用
+        WebM；视频会重新编码，不是原文件无损复制，也不会自动修复低清素材。
       </p>
       <p className="import-warning">
-        本地视频约按播放时长处理。网页内切换板块不受影响；切到其他标签页或锁屏可能限制帧处理，因此会自动暂停，返回后继续。不要关窗或刷新。
+        引擎和媒体处理均在本机，首次需从本站下载约 32 MB 引擎。每个文件最多 512
+        MB；大分辨率、长视频可能耗时较长或超出设备内存。处理不依赖前台播放；系统休眠、关窗或刷新仍会中断，可从未完成视频继续。MP4
+        遇到奇数边长会补齐 1 像素。{' '}
+        <a
+          href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/media-engine-notices.html`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          引擎与开源许可
+        </a>
       </p>
       {(error || workspace.saveError) && (
         <p className="error-banner" role="alert">
@@ -227,6 +232,47 @@ export function VideoWatermarkPanel() {
           }
           source={state.sources[0]?.frame}
         />
+        <div className="video-export-settings">
+          <label>
+            <span>视频格式</span>
+            <select
+              aria-label="视频格式"
+              value={(state.exportOptions || defaultVideoExport).format}
+              onChange={(e) =>
+                setState((s) => ({
+                  ...s,
+                  exportOptions: {
+                    ...(s.exportOptions || defaultVideoExport),
+                    format: e.target.value as VideoExportOptions['format'],
+                  },
+                }))
+              }
+            >
+              <option value="auto">自动 · 普通 MP4 / 透明 WebM</option>
+              <option value="mp4">MP4 · 通用播放（不支持透明）</option>
+              <option value="webm-alpha">WebM · 保留透明背景</option>
+            </select>
+          </label>
+          <label>
+            <span>视频质量</span>
+            <select
+              aria-label="视频质量"
+              value={(state.exportOptions || defaultVideoExport).quality}
+              onChange={(e) =>
+                setState((s) => ({
+                  ...s,
+                  exportOptions: {
+                    ...(s.exportOptions || defaultVideoExport),
+                    quality: e.target.value as VideoExportOptions['quality'],
+                  },
+                }))
+              }
+            >
+              <option value="high">高清 · 原始分辨率</option>
+              <option value="ultra">更高质量 · 文件更大</option>
+            </select>
+          </label>
+        </div>
         <div className="result-actions">
           <Button
             disabled={!state.sources.length || !state.layers.length}

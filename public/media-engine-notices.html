@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>wxjj · 视频引擎与开源许可</title>
+<style>body{max-width:800px;margin:56px auto;padding:0 24px;background:#f6f3fa;color:#19161f;font:16px/1.85 system-ui,sans-serif}h1{font-size:32px}h2{margin-top:36px}a{color:#7038df}section{border-top:1px solid #cfc5df;margin-top:32px}code{overflow-wrap:anywhere}small{color:#645d70}</style>
+<h1>视频引擎与开源许可</h1>
+<p>wxjj 在使用者自己的浏览器中处理视频。只有引擎静态文件从本站下载；原片、水印、提示词和配方不会发送给编码服务。</p>
+<section><h2>版本及许可</h2><ul>
+<li>@ffmpeg/ffmpeg 0.12.15：JavaScript 封装，<a href="licenses/ffmpeg-wrapper-MIT.txt">MIT 许可全文</a>。</li>
+<li>@ffmpeg/core 0.12.10：包含 FFmpeg 及外部编解码库，<a href="licenses/ffmpeg-gpl-2.0.txt">GPL 第 2 版或更新版本</a>。封装层的 MIT 许可不取代编码核心与各依赖的许可。</li>
+</ul><p>核心二进制未修改。为适配静态托管文件大小限制，WASM 被拆成 8 MB 分片，在浏览器中还原成原始字节。相关版本与下载来源锁定于项目的 package-lock.json。</p></section>
+<section><h2>源代码与构建资料</h2><p>以下是这些引擎版本对应的上游源代码、补丁和构建步骤。项目源代码中也保留本应用的集成代码与分片脚本。</p><ul>
+<li><a href="https://github.com/ffmpegwasm/ffmpeg.wasm/tree/71aa99d37c02a7b4c435275ca9ef50e612f6efa1">ffmpeg.wasm v12.15 源代码</a> · <a href="https://github.com/ffmpegwasm/ffmpeg.wasm/archive/71aa99d37c02a7b4c435275ca9ef50e612f6efa1.tar.gz">源码下载</a>（含 core 0.12.10、封装 0.12.15）。</li>
+<li><a href="https://github.com/ffmpegwasm/ffmpeg.wasm/blob/71aa99d37c02a7b4c435275ca9ef50e612f6efa1/Dockerfile">Dockerfile 与各依赖版本</a> · <a href="https://github.com/ffmpegwasm/ffmpeg.wasm/tree/71aa99d37c02a7b4c435275ca9ef50e612f6efa1/build">完整构建脚本</a>。</li>
+<li><a href="https://github.com/FFmpeg/FFmpeg/tree/n5.1.4">FFmpeg n5.1.4 源代码与许可</a>。</li>
+<li>外部依赖的源代码与各自许可证：<a href="https://github.com/ffmpegwasm/x264/tree/4-cores">x264</a>、<a href="https://github.com/ffmpegwasm/x265/tree/3.4">x265</a>、<a href="https://github.com/ffmpegwasm/libvpx/tree/v1.13.1">libvpx</a>、<a href="https://github.com/ffmpegwasm/lame">LAME</a>、<a href="https://github.com/ffmpegwasm/Ogg/tree/v1.3.4">Ogg</a>、<a href="https://github.com/ffmpegwasm/theora/tree/v1.1.1">Theora</a>、<a href="https://github.com/ffmpegwasm/opus/tree/v1.3.1">Opus</a>、<a href="https://github.com/ffmpegwasm/vorbis/tree/v1.3.3">Vorbis</a>、<a href="https://github.com/ffmpegwasm/zlib/tree/v1.2.11">zlib</a>、<a href="https://github.com/ffmpegwasm/libwebp/tree/v1.3.2">libwebp</a>、<a href="https://github.com/ffmpegwasm/freetype2/tree/VER-2-10-4">FreeType</a>、<a href="https://github.com/fribidi/fribidi/tree/v1.0.9">FriBidi</a>、<a href="https://github.com/harfbuzz/harfbuzz/tree/5.2.0">HarfBuzz</a>、<a href="https://github.com/libass/libass/tree/0.15.0">libass</a>、<a href="https://github.com/sekrit-twc/zimg/tree/release-3.0.5">zimg</a>。</li>
+<li><a href="https://github.com/JINGTING0714/wxjj">wxjj 应用源代码与依赖清单</a>。</li>
+</ul><p>这些程序按相应许可提供，不附带适销性或特定用途适用性保证。各项目的原始版权声明和许可继续有效。</p></section>
+<small>以上链接只在你主动点击时打开外部网站；本页不含统计或追踪代码。</small></html>

@@ -462,6 +462,36 @@ export function WatermarkEditor({
         <h3>画布、图层与变换</h3>
         <div className="composition-controls">
           <p>扩展画布可容纳相框；图层的大小不会随画布扩展而被自动拉伸。</p>
+          <Button
+            className="composition-reset"
+            variant="outline"
+            type="button"
+            onClick={() => {
+              const oldWidth = canvas.canvasWidth,
+                oldHeight = canvas.canvasHeight;
+              // Keep every layer's pixel position relative to the original centre.
+              onChange(
+                layers.map((layer) => ({
+                  ...layer,
+                  x: 0.5 + (layer.x - 0.5) * oldWidth,
+                  y: 0.5 + (layer.y - 0.5) * oldHeight,
+                })),
+                {
+                  ...canvas,
+                  canvasWidth: 1,
+                  canvasHeight: 1,
+                  source: {
+                    ...canvas.source,
+                    x: 0.5 + (canvas.source.x - 0.5) * oldWidth,
+                    y: 0.5 + (canvas.source.y - 0.5) * oldHeight,
+                  },
+                },
+              );
+            }}
+          >
+            <RefreshCw />
+            恢复原图画布大小
+          </Button>
           <div className="transform-grid">
             {(['canvasWidth', 'canvasHeight'] as const).map((key) => (
               <label key={key}>
@@ -494,7 +524,7 @@ export function WatermarkEditor({
                   })
                 }
               >
-                <option value="transparent">透明（视频输出为黑色）</option>
+                <option value="transparent">透明</option>
                 <option value="color">自定义颜色</option>
               </select>
             </label>

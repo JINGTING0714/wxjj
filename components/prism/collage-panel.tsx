@@ -1,10 +1,13 @@
 'use client';
+import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 import { SourceSelection } from './source-selection';
 
 import {
   CircleAlert,
+  ArrowLeft,
+  ArrowRight,
   Download,
   Grid3X3,
   Image as ImageIcon,
@@ -23,6 +26,7 @@ import { SectionHead } from '@/components/prism/studio-shared';
 import { useWorkspaceState, useFileUrls } from './use-workspace-state';
 import {
   mergeSources,
+  moveSource,
   shuffleSources,
   type PipelineSource,
 } from '@/lib/pipeline';
@@ -70,6 +74,10 @@ const numberPositions: Array<{ value: NumberPosition; label: string }> = [
 
 export function CollagePanel() {
   const vault = useVault();
+  const confirmation = useConfirmation();
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  const drag = useRef<{ id: string; x: number; y: number } | null>(null);
   const workspace = useWorkspaceState('collage', {
     sources: [] as PipelineSource[],
     ratio: ratioPresets[0],
@@ -442,9 +450,44 @@ export function CollagePanel() {
     ),
   );
   const previewPositionClass = `number-${numberPosition}`;
+  const selectedIndex = state.sources.findIndex((s) => s.id === selectedSource);
+  const selectedUrl = useFileUrls(
+    selectedIndex >= 0 ? [files[selectedIndex]] : [],
+  )[0];
+  const moveSelected = (target: number) => {
+    if (!selectedSource || processing) return;
+    setState((s) => ({
+      ...s,
+      sources: moveSource(s.sources, selectedSource, target),
+      job: null,
+    }));
+    setPreviewBoard(
+      Math.floor(
+        Math.max(0, Math.min(files.length - 1, target)) / previewCells,
+      ),
+    );
+  };
+  const deleteSelected = async () => {
+    if (!selectedSource || processing) return;
+    if (
+      !(await confirmation.ask(
+        '从待拼队列移除此图片？不会删除原文件、图库和已生成的拼图。',
+        '移除所选图片',
+        '移除',
+      ))
+    )
+      return;
+    setState((s) => ({
+      ...s,
+      sources: s.sources.filter((item) => item.id !== selectedSource),
+      job: null,
+    }));
+    setSelectedSource(null);
+  };
 
   return (
     <div className="studio-page collage-page">
+      {confirmation.dialog}
       <SectionHead
         eyebrow="COLLAGE ENGINE"
         number="08"
@@ -854,7 +897,101 @@ export function CollagePanel() {
                 }}
               >
                 {Array.from({ length: previewCells }, (_, index) => (
-                  <i className="real-preview-cell" key={index}>
+                  <button
+                    type="button"
+                    data-collage-index={currentPreview * previewCells + index}
+                    className={`real-preview-cell ${state.sources[currentPreview * previewCells + index]?.id === selectedSource ? 'is-selected' : ''} ${dragOver === currentPreview * previewCells + index ? 'is-drag-over' : ''}`}
+                    key={
+                      state.sources[currentPreview * previewCells + index]
+                        ?.id || `empty-${index}`
+                    }
+                    aria-label={
+                      previewUrls[index]
+                        ? `选择第 ${currentPreview * previewCells + index + 1} 张图片`
+                        : '空格'
+                    }
+                    disabled={!previewUrls[index] || processing}
+                    onClick={() =>
+                      setSelectedSource(
+                        state.sources[currentPreview * previewCells + index]
+                          ?.id || null,
+                      )
+                    }
+                    onDoubleClick={() =>
+                      document
+                        .getElementById('collage-selected-preview')
+                        ?.querySelector<HTMLButtonElement>('button')
+                        ?.click()
+                    }
+                    onFocus={() => {
+                      const source =
+                        state.sources[currentPreview * previewCells + index];
+                      if (source) setSelectedSource(source.id);
+                    }}
+                    onPointerDown={(e) => {
+                      const source =
+                        state.sources[currentPreview * previewCells + index];
+                      if (!source || processing) return;
+                      setSelectedSource(source.id);
+                      drag.current = {
+                        id: source.id,
+                        x: e.clientX,
+                        y: e.clientY,
+                      };
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                    onPointerMove={(e) => {
+                      if (!drag.current) return;
+                      const cell = document
+                        .elementFromPoint(e.clientX, e.clientY)
+                        ?.closest<HTMLElement>('[data-collage-index]');
+                      setDragOver(
+                        cell ? Number(cell.dataset.collageIndex) : null,
+                      );
+                    }}
+                    onPointerCancel={() => {
+                      drag.current = null;
+                      setDragOver(null);
+                    }}
+                    onPointerUp={(e) => {
+                      const item = drag.current;
+                      drag.current = null;
+                      setDragOver(null);
+                      if (
+                        !item ||
+                        Math.hypot(e.clientX - item.x, e.clientY - item.y) < 5
+                      )
+                        return;
+                      const cell = document
+                        .elementFromPoint(e.clientX, e.clientY)
+                        ?.closest<HTMLElement>('[data-collage-index]');
+                      if (cell)
+                        setState((s) => ({
+                          ...s,
+                          sources: moveSource(
+                            s.sources,
+                            item.id,
+                            Number(cell.dataset.collageIndex),
+                          ),
+                          job: null,
+                        }));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Delete' || e.key === 'Backspace') {
+                        e.preventDefault();
+                        void deleteSelected();
+                      }
+                      if (
+                        e.altKey &&
+                        ['ArrowLeft', 'ArrowRight'].includes(e.key)
+                      ) {
+                        e.preventDefault();
+                        moveSelected(
+                          selectedIndex + (e.key === 'ArrowLeft' ? -1 : 1),
+                        );
+                      }
+                    }}
+                  >
                     {previewUrls[index] && (
                       <img
                         alt={`第 ${currentPreview * previewCells + index + 1} 张`}
@@ -885,8 +1022,78 @@ export function CollagePanel() {
                         ).padStart(numberDigits, '0')}
                       </span>
                     )}
-                  </i>
+                  </button>
                 ))}
+              </div>
+              <div className="preview-edit-tools">
+                <p>
+                  点击选中，拖到目标格重新排序；可跨板移动。这里只调整待拼队列，不改原图。
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={selectedIndex <= 0 || processing}
+                  onClick={() => moveSelected(selectedIndex - 1)}
+                >
+                  <ArrowLeft />
+                  前移
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    selectedIndex < 0 ||
+                    selectedIndex >= files.length - 1 ||
+                    processing
+                  }
+                  onClick={() => moveSelected(selectedIndex + 1)}
+                >
+                  后移
+                  <ArrowRight />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={selectedIndex < 0 || processing}
+                  onClick={() => void deleteSelected()}
+                >
+                  <Trash2 />
+                  移除所选
+                </Button>
+                {selectedIndex >= 0 && (
+                  <>
+                    <label className="preview-move-position">
+                      移到第{' '}
+                      <Input
+                        aria-label="移到队列序号"
+                        disabled={processing}
+                        type="number"
+                        min={1}
+                        max={files.length}
+                        key={selectedIndex}
+                        defaultValue={selectedIndex + 1}
+                        onBlur={(e) => {
+                          const value = Number(e.target.value);
+                          if (Number.isFinite(value) && value >= 1)
+                            moveSelected(value - 1);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                        }}
+                      />{' '}
+                      张
+                    </label>
+                    <div
+                      className="selected-preview-image"
+                      id="collage-selected-preview"
+                    >
+                      <ExampleImage
+                        src={selectedUrl || ''}
+                        alt={files[selectedIndex]?.name || '已选图片'}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <div className="preview-pagination">
                 <Button

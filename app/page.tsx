@@ -106,7 +106,7 @@ const workflowSteps: Array<{
     id: 'recipes',
     number: '03',
     title: '组合配方',
-    detail: '从已整理的库里自由多选，记录化学反应。',
+    detail: '从库中多选或手填短码，分类记录化学反应。',
   },
   {
     id: 'gallery',
@@ -161,12 +161,9 @@ const moduleGuide: GuideEntry[] = [
     number: '02',
     label: 'Profile 库',
     icon: KeyRound,
-    responsibility:
-      '一个 Profile 文件夹一个长码，下面不限数量地细分阶段短码和最终成品短码，每个短码独有例图与说明。',
-    firstAction:
-      '建文件夹、填长码，再逐个添加短码并标注“性质”：阶段 P、成品 P、其他或待确认。',
-    result:
-      '配方按具体短码读取作者、性质和只露前三位的代码，不会把阶段误当成品。',
+    responsibility: '共用文件夹长码，分别保存阶段与成品短码、例图和说明。',
+    firstAction: '先建文件夹，再添加短码、标注性质并上传例图。',
+    result: '阶段与成品清楚区分，配方引用具体短码。',
   },
   {
     id: 'moodboards',
@@ -194,8 +191,8 @@ const moduleGuide: GuideEntry[] = [
     label: '搭配配方',
     icon: Blocks,
     responsibility:
-      '读取 Profile 与 Moodboard 库，允许三四个 Profile、五六个 Moodboard 或更多任意组合。',
-    firstAction: '先整理两个基础库，再新建配方并多选条目。',
+      '从库中选取或手动填写 Profile、Moodboard，不限数量地混合搭配并自由分类。',
+    firstAction: '新建配方，选择已有条目或自行填写短码。',
     result: '用多张例图、备注和自定义字段记录实际效果。',
   },
   {

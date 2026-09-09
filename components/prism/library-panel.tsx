@@ -1,6 +1,7 @@
 'use client';
 import { formatProfileCode } from '@/lib/short-codes';
 import { useConfirmation } from './use-confirmation';
+import { RecordExamples, SecretField, CollectionRail } from './library-shared';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
@@ -147,44 +148,8 @@ const stageOptions = [
   '其他',
 ];
 
-function VisualTile({
-  asset,
-  disabled,
-  onUpload,
-}: {
-  asset: LibraryAsset;
-  disabled?: boolean;
-  onUpload: (files: FileList | null) => void;
-}) {
-  return (
-    <div
-      className={`record-visual record-visual-upload ${asset.images.length ? 'has-image' : 'empty-example'} ${disabled ? 'is-disabled' : ''}`}
-    >
-      {asset.images[0] && (
-        <ExampleImage
-          alt={`${asset.title} 例图`}
-          src={asset.images[0].url}
-          images={asset.images}
-        />
-      )}
-      <label className="example-add-label" title="点击追加例图">
-        <small>
-          <ImageIcon /> {asset.images.length}
-          <span>点击添加</span>
-        </small>
-        <input
-          accept="image/*"
-          disabled={disabled}
-          multiple
-          onChange={(event) => {
-            onUpload(event.target.files);
-            event.currentTarget.value = '';
-          }}
-          type="file"
-        />
-      </label>
-    </div>
-  );
+function VisualTile({ asset }: { asset: LibraryAsset }) {
+  return <RecordExamples images={asset.images} title={asset.title} />;
 }
 
 function storedAsset(asset: LibraryAsset): StoredLibraryAsset {
@@ -464,47 +429,6 @@ function SimpleLibraryPanel({
     }
   };
 
-  const appendExampleImages = async (
-    asset: LibraryAsset,
-    files: FileList | null,
-  ) => {
-    if (
-      !files ||
-      !files.length ||
-      vault.status !== 'unlocked' ||
-      asset.id.startsWith('demo-')
-    )
-      return;
-    try {
-      const added: AssetImage[] = [];
-      for (const file of Array.from(files)) {
-        const imageId = await vault.saveBlob(
-          `asset-image:${asset.id}`,
-          file,
-          file.name,
-        );
-        added.push({
-          id: imageId,
-          name: file.name,
-          url: URL.createObjectURL(file),
-        });
-      }
-      setAssets((current) =>
-        current.map((item) =>
-          item.id === asset.id
-            ? {
-                ...item,
-                images: [...item.images, ...added],
-                updatedAt: new Date().toISOString(),
-              }
-            : item,
-        ),
-      );
-    } catch (reason) {
-      setFormError(reason instanceof Error ? reason.message : '例图保存失败');
-    }
-  };
-
   const saveCollection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!collectionDialog || vault.status !== 'unlocked') {
@@ -599,50 +523,15 @@ function SimpleLibraryPanel({
         }
       />
 
-      <div className="collection-rail">
-        <div className="collection-tabs">
-          {allCollections.map((collection) => (
-            <button
-              className={collection.id === activeCollection ? 'is-active' : ''}
-              key={collection.id}
-              onClick={() => setActiveCollection(collection.id)}
-              type="button"
-            >
-              <span>{collection.name}</span>
-              <small>
-                {collection.id === 'all'
-                  ? assets.length
-                  : assets.filter((asset) => asset.collection === collection.id)
-                      .length}
-              </small>
-              {!['all', 'unfiled'].includes(collection.id) && (
-                <span className="collection-actions">
-                  <Pencil
-                    aria-label={`重命名 ${collection.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCollectionDialog({
-                        id: collection.id,
-                        name: collection.name,
-                      });
-                    }}
-                  />
-                  <Trash2
-                    aria-label={`删除 ${collection.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteCollection(collection.id);
-                    }}
-                  />
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-        <p>
-          <CircleAlert /> 分类可随时重命名或删除；删除分类不会删除资产。
-        </p>
-      </div>
+      <CollectionRail
+        noun={copy.noun}
+        collections={collections}
+        records={assets}
+        active={activeCollection}
+        onSelect={setActiveCollection}
+        onEdit={setCollectionDialog}
+        onDelete={deleteCollection}
+      />
 
       {vault.status !== 'unlocked' && (
         <div className="vault-gate">
@@ -709,13 +598,7 @@ function SimpleLibraryPanel({
                   id={asset.id}
                   name={asset.title}
                 />
-                <VisualTile
-                  asset={asset}
-                  disabled={
-                    vault.status !== 'unlocked' || asset.id.startsWith('demo-')
-                  }
-                  onUpload={(files) => appendExampleImages(asset, files)}
-                />
+                <VisualTile asset={asset} />
                 <div>
                   <Badge variant="outline">{copy.noun}</Badge>
                   <h3>{asset.title}</h3>
@@ -887,21 +770,14 @@ function SimpleLibraryPanel({
                     ? 'Moodboard 短码'
                     : '完整提示词'}
               </span>
-              {kind === 'prompt' ? (
-                <textarea
-                  defaultValue={editingAsset?.secret}
-                  name="secret"
-                  placeholder="粘贴完整提示词…"
-                  required
-                />
-              ) : (
-                <Input
-                  defaultValue={editingAsset?.secret}
-                  name="secret"
-                  placeholder="ABC1234"
-                  required
-                />
-              )}
+              <SecretField
+                label={kind === 'prompt' ? '完整提示词' : 'Moodboard 短码'}
+                name="secret"
+                defaultValue={editingAsset?.secret}
+                multiline={kind === 'prompt'}
+                placeholder={kind === 'prompt' ? '粘贴完整提示词…' : '填写短码'}
+                required
+              />
             </label>
             {kind === 'profile' && (
               <>
