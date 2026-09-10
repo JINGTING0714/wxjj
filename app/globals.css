@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+  --font-heading: var(--font-ui);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -81,12 +81,19 @@ body {
   background: var(--background);
 }
 body {
+  --font-ui:
+    var(--font-geist-sans), 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
+    system-ui, sans-serif;
+  --font-code:
+    var(--font-geist-mono), 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
+    monospace;
   color: var(--foreground);
-  font-family:
-    var(--font-geist-sans), 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-ui);
 }
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 button {
@@ -156,7 +163,7 @@ button {
 .brand-row span {
   margin-top: 2px;
   color: #8d8496;
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-code);
   font-size: 8px;
   letter-spacing: 0.2em;
 }
@@ -174,7 +181,7 @@ button {
 .nav-label {
   margin: 0 10px 12px;
   color: #6f6678;
-  font: 600 9px/1 var(--font-geist-mono);
+  font: 600 9px/1 var(--font-code);
   letter-spacing: 0.18em;
 }
 .pipeline-label {
@@ -213,7 +220,7 @@ button {
 .nav-item small {
   margin-left: auto;
   color: #706778;
-  font: 10px var(--font-geist-mono);
+  font: 10px var(--font-code);
 }
 .nav-item:hover {
   background: #251f2b;
@@ -325,7 +332,7 @@ button {
   padding: 3px 6px;
   transform: translateY(-50%);
   color: #766e7f;
-  font: 10px var(--font-geist-mono);
+  font: 10px var(--font-code);
 }
 .topbar-actions {
   display: flex;
@@ -367,7 +374,7 @@ button {
 .eyebrow {
   margin: 0 0 12px;
   color: #6c6177;
-  font: 600 9px/1 var(--font-geist-mono);
+  font: 600 9px/1 var(--font-code);
   letter-spacing: 0.18em;
 }
 .eyebrow span {
@@ -394,12 +401,12 @@ button {
 .issue-note span,
 .issue-note small {
   color: #766e80;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
   letter-spacing: 0.12em;
 }
 .issue-note strong {
   margin: 8px 0 4px;
-  font: 400 43px/1 var(--font-geist-mono);
+  font: 400 43px/1 var(--font-code);
   letter-spacing: -0.07em;
 }
 
@@ -441,7 +448,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  font: 600 9px var(--font-geist-mono);
+  font: 600 9px var(--font-code);
   letter-spacing: 0.16em;
 }
 .start-kicker span {
@@ -568,7 +575,7 @@ button {
   place-items: center;
   border: 1px solid #655171;
   color: #b8ff3d;
-  font: 10px var(--font-geist-mono);
+  font: 10px var(--font-code);
 }
 .start-here-map p {
   display: grid;
@@ -577,7 +584,7 @@ button {
 }
 .start-here-map strong {
   color: #eee9f2;
-  font: 600 10px var(--font-geist-mono);
+  font: 600 10px var(--font-code);
   letter-spacing: 0.15em;
 }
 .start-here-map small {
@@ -673,7 +680,7 @@ button {
 .workflow-track > button > span {
   margin-bottom: 28px;
   color: #8258d4;
-  font: 11px var(--font-geist-mono);
+  font: 11px var(--font-code);
 }
 .workflow-track > button:hover > span,
 .workflow-track > button:focus-visible > span {
@@ -698,7 +705,7 @@ button {
   gap: 6px;
   margin-top: auto;
   color: #877a91;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .workflow-track small svg {
   width: 11px;
@@ -745,7 +752,7 @@ button {
   top: 27px;
   right: 27px;
   color: #95899e;
-  font: 10px var(--font-geist-mono);
+  font: 10px var(--font-code);
 }
 .module-guide-card h3 {
   margin: 0;
@@ -774,7 +781,7 @@ button {
 }
 .module-guide-card dt {
   color: #8b7c96;
-  font: 8px/1.6 var(--font-geist-mono);
+  font: 8px/1.6 var(--font-code);
   letter-spacing: 0.06em;
 }
 .module-guide-card dd {
@@ -789,7 +796,7 @@ button {
   gap: 7px;
   margin-top: 18px;
   color: #6840bd;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .module-guide-open svg {
   width: 11px;
@@ -823,7 +830,7 @@ button {
 }
 .metric-strip strong {
   grid-row: span 2;
-  font: 400 34px/1 var(--font-geist-mono);
+  font: 400 34px/1 var(--font-code);
 }
 .metric-strip small {
   color: #8a818f;
@@ -900,7 +907,7 @@ button {
   min-height: 43px;
   border-bottom: 1px solid #d5cedd;
   color: #83798b;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
   letter-spacing: 0.11em;
 }
 .asset-row {
@@ -983,7 +990,7 @@ button {
   left: 9px;
   z-index: 2;
   color: rgb(255 255 255 / 70%);
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .asset-visual > small {
   position: absolute;
@@ -996,7 +1003,7 @@ button {
   background: rgb(18 13 23 / 72%);
   padding: 4px 6px;
   color: white;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
   backdrop-filter: blur(5px);
 }
 .asset-visual > small svg {
@@ -1008,7 +1015,7 @@ button {
   border-color: #cfc6d9;
   padding-inline: 6px;
   color: #63596d;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .asset-identity h3 {
   overflow: hidden;
@@ -1036,7 +1043,7 @@ button {
   overflow: hidden;
   max-width: calc(100% - 30px);
   color: #32283d;
-  font: 11px/1.7 var(--font-geist-mono);
+  font: 11px/1.7 var(--font-code);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1138,7 +1145,7 @@ button {
   background: #f8f5fb;
   padding: 6px 9px;
   color: #706579;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .pipeline-callout [data-slot='button'] {
   border-radius: 0;
@@ -1400,7 +1407,7 @@ button {
   place-items: center;
   background: rgb(255 255 255 / 8%);
   color: #92899c;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .collection-delete {
   width: 12px;
@@ -1477,7 +1484,7 @@ button {
   gap: 8px;
 }
 .result-count strong {
-  font: 400 22px var(--font-geist-mono);
+  font: 400 22px var(--font-code);
 }
 .result-count span {
   color: #857b8c;
@@ -1500,7 +1507,7 @@ button {
   min-height: 42px;
   border-bottom: 1px solid #d6cfdd;
   color: #7c7384;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
   letter-spacing: 0.11em;
 }
 .record-row {
@@ -1546,7 +1553,7 @@ button {
   background: rgb(18 13 23 / 72%);
   padding: 4px 6px;
   color: white;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
   backdrop-filter: blur(5px);
 }
 .record-visual > small svg {
@@ -1557,7 +1564,7 @@ button {
   border-radius: 0;
   border-color: #cabfd6;
   color: #665c70;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .record-identity h3 {
   overflow: hidden;
@@ -1575,7 +1582,7 @@ button {
 .record-secret {
   min-width: 0;
 }
-.record-secret > div:first-child {
+.record-secret-value {
   position: relative;
   min-height: 40px;
   overflow: hidden;
@@ -1587,7 +1594,7 @@ button {
   display: block;
   overflow: hidden;
   color: #30263a;
-  font: 10px/1.75 var(--font-geist-mono);
+  font: 10px/1.75 var(--font-code);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1815,7 +1822,7 @@ button {
   font-size: 10px;
 }
 .recipe-summary strong {
-  font: 400 29px var(--font-geist-mono);
+  font: 400 29px var(--font-code);
 }
 .recipe-summary > p {
   display: flex;
@@ -1864,7 +1871,7 @@ button {
   left: 13px;
   z-index: 2;
   color: rgb(255 255 255 / 70%);
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .recipe-collage > small {
   position: absolute;
@@ -1877,7 +1884,7 @@ button {
   background: rgb(18 13 23 / 75%);
   padding: 5px 7px;
   color: white;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .recipe-collage small svg {
   width: 10px;
@@ -1973,11 +1980,11 @@ button {
 }
 .formula-line span {
   color: #897e91;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
   letter-spacing: 0.1em;
 }
 .formula-line code {
-  font: 11px var(--font-geist-mono);
+  font: 11px var(--font-code);
 }
 .formula-line b {
   color: #905fe6;
@@ -2061,10 +2068,10 @@ button {
 }
 .gallery-libraries > button i {
   color: #9a8fa3;
-  font: normal 8px var(--font-geist-mono);
+  font: normal 8px var(--font-code);
 }
 .gallery-libraries > button small {
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .gallery-libraries > button svg {
   width: 12px;
@@ -2106,7 +2113,7 @@ button {
 }
 .gallery-surface-head > span {
   color: #8d8494;
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .demo-gallery {
   display: grid;
@@ -2125,7 +2132,7 @@ button {
   left: 11px;
   z-index: 2;
   color: rgb(255 255 255 / 65%);
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .demo-art-a {
   grid-row: 1 / span 2;
@@ -2289,7 +2296,7 @@ button {
   place-items: center;
   border: 1px solid #bdb2c9;
   color: #716579;
-  font: normal 9px var(--font-geist-mono);
+  font: normal 9px var(--font-code);
 }
 .pipeline-steps > div.is-current > i {
   border-color: #7241d3;
@@ -2414,7 +2421,7 @@ button {
   place-items: center;
   border: 1px solid #d2c8db;
   color: #6f6377;
-  font: 11px var(--font-geist-mono);
+  font: 11px var(--font-code);
 }
 .mini-file {
   height: 32px;
@@ -2484,7 +2491,7 @@ button {
   background: #241b2c;
   padding: 3px 4px;
   color: white;
-  font: 7px var(--font-geist-mono);
+  font: 7px var(--font-code);
 }
 .layer-fields {
   display: grid;
@@ -2675,7 +2682,7 @@ button {
 }
 .result-grid article > div > span {
   color: #867a8d;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .result-grid article p {
   overflow: hidden;
@@ -2737,7 +2744,7 @@ button {
   place-items: center;
   border: 1px solid #bfb4c9;
   color: #71667a;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
 }
 .control-title > div {
   flex: 1;
@@ -2805,7 +2812,7 @@ button {
   border-style: dashed;
 }
 .preset-grid button span {
-  font: 9px var(--font-geist-mono);
+  font: 9px var(--font-code);
 }
 .custom-fields {
   display: flex;
@@ -2917,7 +2924,7 @@ button {
 }
 .preview-heading > span {
   color: #6f38e7;
-  font: 11px var(--font-geist-mono);
+  font: 11px var(--font-code);
 }
 .board-preview {
   display: grid;
@@ -2956,7 +2963,7 @@ button {
   background: rgb(18 12 22 / 73%);
   padding: 3px 4px;
   color: white;
-  font: 6px var(--font-geist-mono);
+  font: 6px var(--font-code);
 }
 .spec-list {
   display: grid;
@@ -3118,11 +3125,11 @@ button {
   text-align: right;
 }
 .security-score strong {
-  font: 400 31px var(--font-geist-mono);
+  font: 400 31px var(--font-code);
 }
 .security-score span {
   color: #82768c;
-  font: 8px var(--font-geist-mono);
+  font: 8px var(--font-code);
   letter-spacing: 0.15em;
 }
 .security-grid {
@@ -3772,7 +3779,7 @@ button {
 }
 .formula-groups > div > span {
   color: #83798b;
-  font: 11px var(--font-geist-mono);
+  font: 11px var(--font-code);
   letter-spacing: 0.08em;
 }
 .formula-groups > div > div {
@@ -3786,7 +3793,7 @@ button {
   background: #eee9f3;
   padding: 5px 6px;
   color: #493a57;
-  font: 11px var(--font-geist-mono);
+  font: 11px var(--font-code);
 }
 .formula-groups > b {
   align-self: center;
@@ -4214,7 +4221,7 @@ button {
   background: #211828;
   padding: 2px 4px;
   color: white;
-  font: normal 9px var(--font-geist-mono);
+  font: normal 9px var(--font-code);
 }
 .transform-layer-list .layer-order-actions {
   display: grid;
@@ -4961,7 +4968,7 @@ button {
   min-height: 100px;
   padding: 12px;
   font:
-    14px/1.6 var(--font-geist-mono),
+    14px/1.6 var(--font-code),
     monospace;
   overflow-wrap: anywhere;
   background: white;
@@ -5086,6 +5093,123 @@ button {
   touch-action: none;
   will-change: transform, left, top, width;
   user-select: none;
+}
+.watermark-snap-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+.watermark-snap-control input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary);
+}
+.watermark-snap-control span {
+  color: #756880;
+  font-size: 12px;
+}
+.watermark-alignment-status {
+  display: block;
+  min-height: 24px;
+  margin: 10px 0;
+  color: #6942a1;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.watermark-alignment-guides {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  z-index: 2147483647;
+  pointer-events: none;
+}
+.watermark-alignment-guides polygon {
+  fill: none;
+  stroke: #b8ff3d;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+.watermark-alignment-guides line {
+  stroke: #dc7bff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.stretch-handle {
+  position: absolute;
+  display: block;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+}
+.stretch-handle::after {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  background: #b8ff3d;
+  border: 1px solid #24182d;
+}
+.stretch-left,
+.stretch-right {
+  top: calc(50% - 15px);
+  cursor: ew-resize;
+}
+.stretch-left {
+  left: -15px;
+}
+.stretch-right {
+  right: -15px;
+}
+.stretch-top,
+.stretch-bottom {
+  left: calc(50% - 15px);
+  cursor: ns-resize;
+}
+.stretch-top {
+  top: -15px;
+}
+.stretch-bottom {
+  bottom: -15px;
+}
+@media (pointer: coarse) {
+  .stretch-handle {
+    width: 44px;
+    height: 44px;
+  }
+  .stretch-handle::after {
+    inset: 15px;
+  }
+  .stretch-left,
+  .stretch-right {
+    top: calc(50% - 22px);
+  }
+  .stretch-left {
+    left: -22px;
+  }
+  .stretch-right {
+    right: -22px;
+  }
+  .stretch-top,
+  .stretch-bottom {
+    left: calc(50% - 22px);
+  }
+  .stretch-top {
+    top: -22px;
+  }
+  .stretch-bottom {
+    bottom: -22px;
+  }
+  .watermark-dom-layer .rotation-handle {
+    top: -44px;
+  }
 }
 .watermark-crop-viewport {
   position: absolute;
@@ -5440,7 +5564,7 @@ button {
 .profile-folder > header p {
   margin: 0 0 8px;
   color: #8a779d;
-  font: 12px var(--font-geist-mono);
+  font: 12px var(--font-code);
   letter-spacing: 0.1em;
 }
 .profile-folder h2 {
@@ -6136,6 +6260,75 @@ button {
 }
 .profile-record-group {
   display: contents;
+}
+.record-list {
+  font-family: var(--font-ui);
+}
+.record-list .record-secret code {
+  font: 400 14px/1.75 var(--font-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.record-list .record-secret-value {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+.record-list .record-identity h3 {
+  font: 500 16px/1.5 var(--font-ui);
+  letter-spacing: normal;
+}
+.record-list .record-identity p,
+.record-list .record-secret > p,
+.record-list .record-note,
+.record-list .recipe-entry-list span,
+.record-list .folder-code-summary > span,
+.record-list .folder-note-summary > span {
+  font: 400 14px/1.75 var(--font-ui);
+}
+.record-identity .record-type-label,
+.record-list .record-identity [data-slot='badge'] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  height: auto;
+  border: 1px solid #cabfd6;
+  padding: 2px 8px;
+  color: #665c70;
+  font: 400 12px/1.5 var(--font-ui);
+}
+.record-secret-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.record-secret-actions button {
+  min-height: 32px;
+  font: 400 14px/1.5 var(--font-ui);
+  white-space: nowrap;
+}
+.record-secret-actions svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.record-code-block {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+.folder-code-summary > .record-code-block {
+  margin-top: 8px;
+}
+.canvas-background-note {
+  line-height: 1.7;
+}
+.video-processing-progress {
+  display: block;
+  width: 100%;
+  height: 10px;
+  accent-color: var(--primary);
+  margin: 12px 0 24px;
 }
 .record-row > *,
 .record-identity > div,

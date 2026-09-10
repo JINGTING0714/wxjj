@@ -3,6 +3,7 @@ import {
   drawWatermarkComposition,
   drawCompositionLayer,
   loadImage,
+  fitImageComposition,
   type WatermarkLayerInput,
 } from './image-processing';
 import {
@@ -16,8 +17,13 @@ import {
   videoInputDecoder,
   type VideoExportOptions,
 } from './video-export';
+import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { VideoEngineSession } from './video-engine';
+import { nativeWatermarkVideo, videoMayHaveAlpha } from './video-native';
+import { videoProgressDetail } from './video-progress';
 
-async function openVideo(file: File) {
+async function openVideo(file: File, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const video = document.createElement('video');
   const url = URL.createObjectURL(file);
   video.preload = 'auto';
@@ -42,7 +48,13 @@ async function openVideo(file: File) {
       const clean = () => {
         clearTimeout(timer);
         video.onloadeddata = video.onerror = null;
+        signal?.removeEventListener('abort', abort);
       };
+      const abort = () => {
+        clean();
+        reject(signal?.reason);
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       video.onloadeddata = () => {
         clean();
         resolve();
@@ -99,22 +111,53 @@ export async function watermarkVideo(
   file: File,
   layers: WatermarkLayerInput[],
   signal: AbortSignal,
-  onProgress: (value: number, phase: string) => void,
+  notify: (value: number, phase: string) => void,
   composition?: WatermarkComposition,
   options: VideoExportOptions = defaultVideoExport,
+  batchEngine?: VideoEngineSession,
 ) {
   signal.throwIfAborted();
   if (file.size > 512 * 1024 * 1024)
     throw new Error(
       '本地视频单文件上限为 512 MB；请先分段，避免浏览器内存不足。',
     );
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-  const { video, dispose } = await openVideo(file);
-  const ffmpeg = new FFmpeg();
-  const abort = () => ffmpeg.terminate();
+  const { video, dispose } = await openVideo(file, signal);
+  const engine = batchEngine ?? new VideoEngineSession();
+  let ffmpeg: FFmpeg | undefined;
+  const abort = () => engine.dispose();
   signal.addEventListener('abort', abort, { once: true });
-  let wasmUrl = '';
+  const started = performance.now();
+  let lastValue = 0,
+    phase = '准备视频',
+    encodingStarted = 0,
+    encodingPhase = '';
+  const duration = video.duration;
+  const emit = () =>
+    notify(
+      lastValue,
+      `${phase} · ${videoProgressDetail(lastValue, (performance.now() - started) / 1000, encodingStarted ? (performance.now() - encodingStarted) / 1000 : 0, duration)}`,
+    );
+  let lastEmitted = 0;
+  const onProgress = (value: number, nextPhase: string) => {
+    if (nextPhase.endsWith('编码') && encodingPhase !== nextPhase) {
+      encodingStarted = performance.now();
+      encodingPhase = nextPhase;
+    }
+    const changed = phase !== nextPhase;
+    lastValue = value;
+    phase = nextPhase;
+    if (changed || value === 1 || performance.now() - lastEmitted >= 200) {
+      emit();
+      lastEmitted = performance.now();
+    }
+  };
+  const heartbeat = setInterval(emit, 1000);
   const logs: string[] = [];
+  const log = ({ message }: { message: string }) => {
+    logs.push(message);
+    if (logs.length > 12) logs.shift();
+  };
+  let progress: ((event: { time: number }) => void) | undefined;
   const canvases: HTMLCanvasElement[] = [];
   const canvas = (w: number, h: number) => {
     const el = document.createElement('canvas');
@@ -128,18 +171,24 @@ export async function watermarkVideo(
     return { el, ctx };
   };
   try {
-    const c = resolveComposition(composition);
-    const size = compositionSize(video.videoWidth, video.videoHeight, c);
+    let c = resolveComposition(composition);
     const decoded = await Promise.all(
       layers.map((layer) => loadImage(layer.file)),
     );
+    if (c.fitContent) {
+      const fitted = fitImageComposition(
+        video.videoWidth,
+        video.videoHeight,
+        layers,
+        decoded,
+        c,
+      );
+      c = fitted.composition;
+      layers = fitted.layers;
+    }
+    const size = compositionSize(video.videoWidth, video.videoHeight, c);
     signal.throwIfAborted();
-    const probeScale = Math.min(1, 512 / Math.max(size.width, size.height));
-    const probe = canvas(
-      Math.max(1, Math.round(size.width * probeScale)),
-      Math.max(1, Math.round(size.height * probeScale)),
-    );
-    probe.ctx.scale(probe.el.width / size.width, probe.el.height / size.height);
+    const probe = canvas(size.width, size.height);
     drawWatermarkComposition(
       probe.ctx,
       size.width,
@@ -151,20 +200,30 @@ export async function watermarkVideo(
       decoded,
       c,
     );
-    const rgba = probe.ctx.getImageData(
-      0,
-      0,
-      probe.el.width,
-      probe.el.height,
-    ).data;
     let hasTransparency = false;
-    for (let i = 3; i < rgba.length; i += 4)
-      if (rgba[i] < 255) {
-        hasTransparency = true;
-        break;
-      }
+    // Full resolution, in strips: even a one-pixel alpha border must be preserved.
+    for (let y = 0; y < size.height && !hasTransparency; y += 128) {
+      const rgba = probe.ctx.getImageData(
+        0,
+        y,
+        size.width,
+        Math.min(128, size.height - y),
+      ).data;
+      for (let i = 3; i < rgba.length; i += 4)
+        if (rgba[i] < 255) {
+          hasTransparency = true;
+          break;
+        }
+    }
+    probe.el.width = probe.el.height = 0;
     // An alpha-capable input may change transparency after its first frame.
-    if (c.background === 'transparent' && /\.webm$/i.test(file.name))
+    // Check track metadata, not only the first frame or file extension. Unknown
+    // alpha also prevents the opaque-source shortcut when a solid background is used.
+    const sourceHasTransparency = await videoMayHaveAlpha(file).catch(
+      () => true,
+    );
+    signal.throwIfAborted();
+    if (c.background === 'transparent' && sourceHasTransparency)
       hasTransparency = true;
     const plan = videoExportPlan(
       video.videoWidth,
@@ -173,6 +232,7 @@ export async function watermarkVideo(
       c,
       options,
       hasTransparency,
+      sourceHasTransparency,
     );
     const under = canvas(size.width, size.height),
       over = canvas(size.width, size.height);
@@ -195,62 +255,47 @@ export async function watermarkVideo(
         decoded[i].naturalHeight,
         video.videoWidth,
       );
-    const underBlob = await canvasBlob(under.el, 'image/png'),
+    // Browser video decoders can discard WebM alpha even when flattening onto
+    // a solid canvas. Such sources need the alpha-aware compatibility decoder.
+    if (!plan.alpha && !sourceHasTransparency) {
+      try {
+        const fast = await nativeWatermarkVideo(
+          file,
+          under.el,
+          over.el,
+          video.videoWidth,
+          video.videoHeight,
+          c,
+          options,
+          signal,
+          onProgress,
+        );
+        if (fast) {
+          onProgress(1, '编码完成，正在加密保存');
+          return fast;
+        }
+      } catch (error) {
+        if (signal.aborted) throw error;
+      }
+      onProgress(0, '此视频改用兼容处理');
+    }
+    const underBlob = plan.direct
+        ? null
+        : await canvasBlob(under.el, 'image/png'),
       overBlob = await canvasBlob(over.el, 'image/png');
-    const duration = video.duration;
     dispose();
     canvases.forEach((c) => {
       c.width = c.height = 0;
     });
-    onProgress(0, '加载本机视频引擎（首次约 32 MB）');
-    const base = new URL(
-      `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/media-engine/v0.12.10-0.12.15/`,
-      location.origin,
-    );
-    const get = async (name: string) => {
-      const response = await fetch(new URL(name, base), {
-        signal,
-        credentials: 'omit',
-      });
-      if (!response.ok)
-        throw new Error(
-          '视频引擎加载失败，请保持联网重试；你的媒体文件没有上传。',
-        );
-      return response;
-    };
-    const manifest = (await (await get('manifest.json')).json()) as {
-      parts: string[];
-      bytes: number;
-    };
-    if (
-      !Array.isArray(manifest.parts) ||
-      manifest.parts.some((part) => !/^core-\d+\.bin$/.test(part))
-    )
-      throw new Error('视频引擎清单无效');
-    const parts = await Promise.all(
-      manifest.parts.map(async (name) => (await get(name)).arrayBuffer()),
-    );
-    const wasm = new Blob(parts, { type: 'application/wasm' });
-    if (wasm.size !== manifest.bytes)
-      throw new Error('视频引擎下载不完整，请重试');
-    wasmUrl = URL.createObjectURL(wasm);
+    ffmpeg = await engine.get(signal, onProgress);
     signal.throwIfAborted();
-    await ffmpeg.load({
-      classWorkerURL: new URL('worker.js', base).href,
-      coreURL: new URL('ffmpeg-core.js', base).href,
-      wasmURL: wasmUrl,
-    });
-    signal.throwIfAborted();
-    const progress = ({ time }: { time: number }) =>
+    progress = ({ time }: { time: number }) =>
       onProgress(
         Math.max(0, Math.min(0.99, time / 1e6 / duration)),
-        `${plan.alpha ? 'WebM 透明' : 'MP4'} · 本机编码`,
+        `${plan.alpha ? 'WebM 透明' : 'MP4'} · 兼容编码`,
       );
     ffmpeg.on('progress', progress);
-    ffmpeg.on('log', ({ message }) => {
-      logs.push(message);
-      if (logs.length > 12) logs.shift();
-    });
+    ffmpeg.on('log', log);
     onProgress(0, `${plan.alpha ? 'WebM 透明' : 'MP4'} · 准备原始分辨率素材`);
     await ffmpeg.writeFile('input', new Uint8Array(await file.arrayBuffer()));
     let decoder: string[] = [];
@@ -281,15 +326,17 @@ export async function watermarkVideo(
         throw new Error('无法读取 WebM 视频编码，已停止以免丢失透明背景');
       decoder = videoInputDecoder(metadata.streams?.[0]?.codec_name);
     }
-    await ffmpeg.writeFile(
-      'under.png',
-      new Uint8Array(await underBlob.arrayBuffer()),
-    );
+    if (underBlob)
+      await ffmpeg.writeFile(
+        'under.png',
+        new Uint8Array(await underBlob.arrayBuffer()),
+      );
     await ffmpeg.writeFile(
       'over.png',
       new Uint8Array(await overBlob.arrayBuffer()),
     );
     signal.throwIfAborted();
+    onProgress(0, `${plan.alpha ? 'WebM 透明' : 'MP4'} · 兼容编码`);
     const code = await ffmpeg.exec([...decoder, ...plan.args]);
     signal.throwIfAborted();
     if (code !== 0)
@@ -331,9 +378,23 @@ export async function watermarkVideo(
       `${detail}${diagnostic ? ` · ${diagnostic}` : ''}`.slice(0, 480),
     );
   } finally {
+    clearInterval(heartbeat);
     signal.removeEventListener('abort', abort);
-    ffmpeg.terminate();
-    if (wasmUrl) URL.revokeObjectURL(wasmUrl);
+    if (ffmpeg) {
+      if (progress) ffmpeg.off('progress', progress);
+      ffmpeg.off('log', log);
+      if (ffmpeg.loaded)
+        for (const name of [
+          'input',
+          'under.png',
+          'over.png',
+          'probe.json',
+          'output.mp4',
+          'output.webm',
+        ])
+          await ffmpeg.deleteFile(name).catch(() => {});
+    }
+    if (!batchEngine || signal.aborted) engine.dispose();
     dispose();
     canvases.forEach((c) => {
       c.width = c.height = 0;
