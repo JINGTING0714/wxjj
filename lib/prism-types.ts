@@ -52,9 +52,20 @@ export type LibraryAsset = StoredLibraryAsset & {
   images: AssetImage[];
 };
 
+export type ManualRecipeEntry = {
+  id: string;
+  kind: 'profile' | 'moodboard';
+  secret: string;
+  label: string;
+  author: string;
+  note: string;
+};
+
 export type StoredRecipe = {
   id: string;
   title: string;
+  collection?: string;
+  manualEntries?: ManualRecipeEntry[];
   profileIds: string[];
   moodboardIds: string[];
   ratio: string;

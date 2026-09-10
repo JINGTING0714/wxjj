@@ -1,12 +1,22 @@
 'use client';
+import {
+  CollectionRail,
+  CollectionDialog,
+  LibraryToolbar,
+  RecordHead,
+  RecordExamples,
+  SecretField,
+} from './library-shared';
+import { useConfirmation } from './use-confirmation';
+import type { CollectionRecord, ManualRecipeEntry } from '@/lib/prism-types';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 import {
   CircleAlert,
+  FolderPlus,
   Eye,
   EyeOff,
-  Image as ImageIcon,
   LockKeyhole,
   Pencil,
   Plus,
@@ -202,6 +212,15 @@ function SelectionList({
 
 export function RecipePanel({ globalQuery }: { globalQuery: string }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
+  const [collections, setCollections] = useState<CollectionRecord[]>([]);
+  const [active, setActive] = useState('all');
+  const [localQuery, setLocalQuery] = useState('');
+  const [collectionEditor, setCollectionEditor] = useState<{
+    id?: string;
+    name: string;
+  } | null>(null);
+  const [manualEntries, setManualEntries] = useState<ManualRecipeEntry[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>(demoRecipes);
   const [profiles, setProfiles] = useState<StoredLibraryAsset[]>(demoProfiles);
   const [moodboards, setMoodboards] =
@@ -239,6 +258,9 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
           StoredRecipe & { profile?: string; moodboard?: string }
         >('recipes'),
       ],
+    );
+    setCollections(
+      await vault.loadRecords<CollectionRecord>('collections:recipe'),
     );
     const normalizedRecipes = await Promise.all(
       storedRecipes.map(async (record) => {
@@ -300,8 +322,10 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
       new Map([...profiles, ...moodboards].map((asset) => [asset.id, asset])),
     [profiles, moodboards],
   );
-  const query = globalQuery.trim().toLocaleLowerCase();
+  const query = `${globalQuery} ${localQuery}`.trim().toLocaleLowerCase();
   const visible = recipes.filter((recipe) => {
+    if (active !== 'all' && (recipe.collection || 'unfiled') !== active)
+      return false;
     const selectedText = [...recipe.profileIds, ...recipe.moodboardIds]
       .map((id) => {
         const item = assetById.get(id);
@@ -312,6 +336,11 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
       !query ||
       [
         recipe.title,
+        ...(recipe.manualEntries || []).flatMap((e) => [
+          e.label,
+          e.author,
+          e.note,
+        ]),
         recipe.note,
         ...recipe.tags,
         selectedText,
@@ -328,6 +357,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
 
   const openCreate = () => {
     setEditing(null);
+    setManualEntries([]);
     setSelectedProfiles(new Set());
     setSelectedMoodboards(new Set());
     setProfileQuery('');
@@ -346,6 +376,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
       return;
     }
     setEditing(recipe);
+    setManualEntries(recipe.manualEntries || []);
     setSelectedProfiles(new Set(recipe.profileIds));
     setSelectedMoodboards(new Set(recipe.moodboardIds));
     setCustomFields(recipe.customFields || []);
@@ -371,22 +402,37 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
 
   const saveRecipe = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setFormError('');
     if (vault.status !== 'unlocked') {
       setFormError('请先解锁本机保险库，再保存配方。');
       return;
     }
-    if (!selectedProfiles.size && !selectedMoodboards.size) {
+    if (
+      !selectedProfiles.size &&
+      !selectedMoodboards.size &&
+      !manualEntries.some((e) => e.secret.trim())
+    ) {
       setFormError(
-        '至少选择一个具体的 Profile 短码或 Moodboard；数量和两类比例不限。',
+        '至少从库选择或手动填写一个 Profile / Moodboard；数量不限。',
       );
       return;
     }
     const data = new FormData(event.currentTarget);
+    if (
+      !(await confirmation.confirmShortCodes(
+        manualEntries.map((e) => e.secret),
+      ))
+    )
+      return;
     const now = new Date().toISOString();
     const id = editing?.id || prismId('recipe');
     const record: StoredRecipe = {
       id,
       title: String(data.get('title') || '').trim(),
+      collection: String(data.get('collection') || 'unfiled'),
+      manualEntries: manualEntries
+        .map((e) => ({ ...e, secret: e.secret.trim() }))
+        .filter((e) => e.secret),
       profileIds: [...selectedProfiles],
       moodboardIds: [...selectedMoodboards],
       ratio: String(data.get('ratio') || '').trim() || '自由画幅',
@@ -441,56 +487,30 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
     setRecipes((current) => current.filter((item) => item.id !== recipe.id));
   };
 
-  const appendRecipeImages = async (recipe: Recipe, files: FileList | null) => {
-    if (
-      !files ||
-      !files.length ||
-      vault.status !== 'unlocked' ||
-      recipe.id.startsWith('demo-')
-    )
-      return;
-    try {
-      const added: AssetImage[] = [];
-      for (const file of Array.from(files)) {
-        const imageId = await vault.saveBlob(
-          `recipe-image:${recipe.id}`,
-          file,
-          file.name,
-        );
-        added.push({
-          id: imageId,
-          name: file.name,
-          url: URL.createObjectURL(file),
-        });
-      }
-      setRecipes((current) =>
-        current.map((item) =>
-          item.id === recipe.id
-            ? { ...item, images: [...item.images, ...added] }
-            : item,
-        ),
-      );
-    } catch (reason) {
-      setFormError(
-        reason instanceof Error ? reason.message : '配方例图保存失败',
-      );
-    }
-  };
-
   const selection = useSelection(
     visible.filter((r) => !r.id.startsWith('demo-')).map((r) => r.id),
   );
   return (
     <div className="studio-page recipe-page">
+      {confirmation.dialog}
       <SectionHead
         eyebrow="FORMULA LAB"
         number="05"
         title="搭配配方"
-        description="直接从管理库选择具体的阶段 P、成品 P 和 Moodboard；同一 Profile 的不同短码也可独立参与组合。"
+        description="从库中选取或自行录入 Profile、Moodboard，自由分类并记录组合效果。"
         actions={
-          <Button className="add-button" onClick={openCreate}>
-            <Plus /> 新建配方
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setCollectionEditor({ name: '' })}
+            >
+              <FolderPlus />
+              新建库
+            </Button>
+            <Button className="add-button" onClick={openCreate}>
+              <Plus /> 新建配方
+            </Button>
+          </>
         }
       />
       {vault.status !== 'unlocked' && (
@@ -509,19 +529,41 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
           <CircleAlert /> {formError}
         </p>
       )}
-      <div className="recipe-summary">
-        <div>
-          <span>配方数量</span>
-          <strong>{recipes.length}</strong>
-        </div>
-        <div>
-          <span>可选资产</span>
-          <strong>{profiles.length + moodboards.length}</strong>
-        </div>
-        <p>
-          每个配方可组合 <b>任意数量</b> 的 Profile 与 Moodboard。
-        </p>
-      </div>
+      <CollectionRail
+        noun="配方"
+        collections={collections}
+        records={recipes}
+        active={active}
+        onSelect={setActive}
+        onEdit={setCollectionEditor}
+        onDelete={async (id) => {
+          if (
+            !(await confirmation.ask(
+              '只删除此分类？配方和例图会保留在未分类中。',
+              '删除配方库',
+            ))
+          )
+            return;
+          await vault.writeBatch({
+            deleteRecords: [id],
+            records: recipes
+              .filter((r) => r.collection === id)
+              .map((r) => ({
+                scope: 'recipes',
+                value: { ...asStored(r), collection: 'unfiled' },
+              })),
+          });
+          setActive('all');
+          await loadAll();
+        }}
+      />
+      <LibraryToolbar
+        noun="配方"
+        query={localQuery}
+        onQuery={setLocalQuery}
+        count={visible.length}
+      />
+      <RecordHead middle="搭配 / Profile 与 Moodboard" />
       <BulkActions
         selection={selection}
         noun="条配方"
@@ -535,180 +577,143 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
           setRecipes((current) => current.filter((r) => !ids.includes(r.id)));
         }}
       />
-      <div className="recipe-grid">
-        {visible.map((recipe, index) => {
+      <div className="record-list recipe-records">
+        {visible.map((recipe) => {
           const open = revealed.has(recipe.id);
-          const selectedProfileAssets = recipe.profileIds
+          const entries = [...recipe.profileIds, ...recipe.moodboardIds]
             .map((id) => assetById.get(id))
-            .filter(Boolean) as StoredLibraryAsset[];
-          const selectedMoodboardAssets = recipe.moodboardIds
-            .map((id) => assetById.get(id))
-            .filter(Boolean) as StoredLibraryAsset[];
+            .filter(Boolean)
+            .map((a) => ({
+              id: a!.id,
+              kind: a!.kind,
+              label: a!.title,
+              author: a!.author,
+              secret: a!.secret,
+            }));
           return (
-            <article
-              className="recipe-card is-interactive"
-              key={recipe.id}
-              onClick={() => openEdit(recipe)}
-              onKeyDown={(event) => {
-                if (
-                  event.target === event.currentTarget &&
-                  (event.key === 'Enter' || event.key === ' ')
-                ) {
-                  event.preventDefault();
-                  openEdit(recipe);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <SelectItem
-                selection={selection}
-                id={recipe.id}
-                name={recipe.title}
-              />
-              <div
-                className="recipe-collage-upload"
-                onClick={(event) => event.stopPropagation()}
-                title={
-                  recipe.id.startsWith('demo-')
-                    ? '解锁后可添加例图'
-                    : '点击直接追加配方例图'
-                }
-              >
-                <div className={`recipe-collage recipe-${(index % 3) + 1}`}>
-                  {recipe.images[0] ? (
-                    <ExampleImage
-                      alt={`${recipe.title} 例图`}
-                      src={recipe.images[0].url}
-                      images={recipe.images}
-                    />
-                  ) : (
-                    <>
-                      <span>{String(index + 1).padStart(2, '0')}</span>
-                      <i />
-                      <i />
-                      <i />
-                      <i />
-                    </>
-                  )}
+            <article className="record-row" key={recipe.id}>
+              <div className="record-identity">
+                <SelectItem
+                  selection={selection}
+                  id={recipe.id}
+                  name={recipe.title}
+                />
+                <RecordExamples images={recipe.images} title={recipe.title} />
+                <div>
+                  <Badge variant="outline">配方 · {recipe.ratio}</Badge>
+                  <h3>{recipe.title}</h3>
+                  <p>{recipe.tags.join(' / ') || '未添加标签'}</p>
                 </div>
-                <label className="example-add-label">
-                  <small>
-                    <ImageIcon /> {recipe.images.length}
-                    <b>点击添加</b>
-                  </small>
-                  <input
-                    accept="image/*"
-                    disabled={
-                      vault.status !== 'unlocked' ||
-                      recipe.id.startsWith('demo-')
-                    }
-                    multiple
-                    onChange={(event) => {
-                      appendRecipeImages(recipe, event.target.files);
-                      event.currentTarget.value = '';
-                    }}
-                    type="file"
-                  />
-                </label>
               </div>
-              <div className="recipe-body">
-                <div className="recipe-title">
-                  <div>
-                    <p className="eyebrow">FORMULA / {recipe.ratio}</p>
-                    <h2>{recipe.title}</h2>
-                  </div>
+              <div className="record-secret">
+                <div className="recipe-entry-list">
+                  {[...entries, ...(recipe.manualEntries || [])].map((e) => (
+                    <div key={e.id}>
+                      <span>
+                        {e.kind === 'profile' ? 'Profile' : 'Moodboard'} ·{' '}
+                        {e.label || '自行录入'}
+                        {e.author ? ` · ${e.author}` : ''}
+                      </span>
+                      <code>{open ? e.secret : secretPreview(e.secret)}</code>
+                    </div>
+                  ))}
+                </div>
+                <div className="record-secret-actions">
                   <button
-                    aria-label={open ? '隐藏配方短码' : '显示配方短码'}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setRevealed((current) => {
-                        const next = new Set(current);
-                        if (open) next.delete(recipe.id);
-                        else next.add(recipe.id);
-                        return next;
-                      });
-                    }}
                     type="button"
+                    aria-label={open ? '隐藏配方短码' : '显示配方短码'}
+                    onClick={() =>
+                      setRevealed((current) => {
+                        const n = new Set(current);
+                        if (open) n.delete(recipe.id);
+                        else n.add(recipe.id);
+                        return n;
+                      })
+                    }
                   >
                     {open ? <EyeOff /> : <Eye />}
+                    {open ? '隐藏' : '显示'}
                   </button>
-                </div>
-                <div className="formula-groups">
-                  <div>
-                    <span>PROFILE 短码 · {selectedProfileAssets.length}</span>
-                    <div>
-                      {selectedProfileAssets.map((asset) => (
-                        <code key={asset.id}>
-                          {asset.title} · {asset.author} · {asset.stageType} ·{' '}
-                          {open ? asset.secret : secretPreview(asset.secret)}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                  <b>×</b>
-                  <div>
-                    <span>MOODBOARDS · {selectedMoodboardAssets.length}</span>
-                    <div>
-                      {selectedMoodboardAssets.map((asset) => (
-                        <code key={asset.id}>
-                          {asset.author} ·{' '}
-                          {open ? asset.secret : secretPreview(asset.secret)}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
                 </div>
                 {[...recipe.profileIds, ...recipe.moodboardIds].some(
                   (id) => !assetById.has(id),
                 ) && (
                   <p className="import-warning">
-                    有引用的短码 /
-                    资产已被删除，请编辑配方重新选择；没有自动换成其他阶段或成品。
+                    有引用已被删除，请编辑重新选择；不会自动替换短码。
                   </p>
                 )}
-                <p className="recipe-note">{recipe.note || '暂无备注。'}</p>
+              </div>
+              <div className="record-note">
+                <p>{recipe.note || '暂无私人备注。'}</p>
+                {(recipe.manualEntries || [])
+                  .filter((e) => e.note)
+                  .map((e) => (
+                    <p key={e.id}>
+                      {e.label ||
+                        (e.kind === 'profile' ? 'Profile' : 'Moodboard')}
+                      ：{e.note}
+                    </p>
+                  ))}
                 <CustomFieldList fields={recipe.customFields} />
-                <div className="recipe-actions">
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openEdit(recipe);
-                    }}
-                    type="button"
-                  >
-                    <Pencil /> 编辑配方
-                  </button>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteRecipe(recipe);
-                    }}
-                    type="button"
-                  >
-                    <Trash2 /> 删除
-                  </button>
-                </div>
+              </div>
+              <div className="row-actions">
+                <button
+                  type="button"
+                  aria-label={`编辑配方 ${recipe.title}`}
+                  title="编辑配方"
+                  onClick={() => openEdit(recipe)}
+                >
+                  <Pencil />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`删除配方 ${recipe.title}`}
+                  title="删除配方"
+                  onClick={() => deleteRecipe(recipe)}
+                >
+                  <Trash2 />
+                </button>
               </div>
             </article>
           );
         })}
         {!visible.length && (
-          <div className="empty-state recipe-empty">
+          <div className="empty-state">
             <Search />
-            <h3>还没有配方</h3>
-            <p>先整理 Profile 和 Moodboard 管理库，再创建第一个自由组合。</p>
+            <h3>还没有匹配的配方</h3>
+            <p>可从管理库选择，也可手动填写自己的组合。</p>
           </div>
         )}
       </div>
+      <CollectionDialog
+        noun="配方"
+        editing={collectionEditor}
+        onClose={() => setCollectionEditor(null)}
+        onSave={async (e) => {
+          e.preventDefault();
+          const name = String(
+            new FormData(e.currentTarget).get('name') || '',
+          ).trim();
+          if (!name) return;
+          try {
+            const id = collectionEditor?.id || prismId('recipe-collection');
+            await vault.saveRecord('collections:recipe', { id, name });
+            await loadAll();
+            setActive(id);
+            setCollectionEditor(null);
+          } catch (e) {
+            setFormError(String(e));
+          }
+        }}
+      />
 
       <Dialog onOpenChange={setDialog} open={dialog}>
         <DialogContent className="asset-dialog recipe-dialog">
           <DialogHeader>
             <DialogTitle>{editing ? '编辑' : '新建'}搭配配方</DialogTitle>
             <DialogDescription>
-              Profile 按“文件夹 / 短码名称 /
-              性质”展开。阶段与成品均可选，可选同一文件夹的多个短码，也可只使用其中一类资产。
+              可从库中多选阶段 P、成品 P 与
+              Moodboard，也可手动填写；两种方式可以混合使用，数量不限。
             </DialogDescription>
           </DialogHeader>
           <form
@@ -722,6 +727,22 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               <Input defaultValue={editing?.title} name="title" required />
             </label>
             <label>
+              <span>归属库</span>
+              <select
+                name="collection"
+                defaultValue={
+                  editing?.collection || (active === 'all' ? 'unfiled' : active)
+                }
+              >
+                <option value="unfiled">未分类</option>
+                {collections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="wide-field">
               <span>画幅 / 版本</span>
               <Input
                 defaultValue={editing?.ratio || '3:4'}
@@ -747,6 +768,133 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 title="选择 Moodboard"
               />
             </div>
+            <fieldset className="manual-recipe-editor wide-field">
+              <div className="custom-fields-title">
+                <div>
+                  <strong>自行录入</strong>
+                  <span>与库中选项可混合使用；不会自动加入基础资产库。</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setManualEntries((items) => [
+                      ...items,
+                      {
+                        id: prismId('manual'),
+                        kind: 'profile',
+                        secret: '',
+                        label: '',
+                        author: '',
+                        note: '',
+                      },
+                    ])
+                  }
+                >
+                  <Plus />
+                  添加一项
+                </Button>
+              </div>
+              {manualEntries.map((entry, index) => (
+                <div className="manual-recipe-entry" key={entry.id}>
+                  <label>
+                    <span>类型</span>
+                    <select
+                      value={entry.kind}
+                      onChange={(e) =>
+                        setManualEntries((items) =>
+                          items.map((x) =>
+                            x.id === entry.id
+                              ? {
+                                  ...x,
+                                  kind: e.target.value as
+                                    | 'profile'
+                                    | 'moodboard',
+                                }
+                              : x,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="profile">Profile</option>
+                      <option value="moodboard">Moodboard</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>名称（可选）</span>
+                    <Input
+                      value={entry.label}
+                      onChange={(e) =>
+                        setManualEntries((items) =>
+                          items.map((x) =>
+                            x.id === entry.id
+                              ? { ...x, label: e.target.value }
+                              : x,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="wide-field">
+                    <span>短码 {index + 1}</span>
+                    <SecretField
+                      label={`手动短码 ${index + 1}`}
+                      value={entry.secret}
+                      required
+                      onChange={(value) =>
+                        setManualEntries((items) =>
+                          items.map((x) =>
+                            x.id === entry.id ? { ...x, secret: value } : x,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>作者（可选）</span>
+                    <Input
+                      value={entry.author}
+                      onChange={(e) =>
+                        setManualEntries((items) =>
+                          items.map((x) =>
+                            x.id === entry.id
+                              ? { ...x, author: e.target.value }
+                              : x,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>补充说明（可选）</span>
+                    <Input
+                      value={entry.note}
+                      onChange={(e) =>
+                        setManualEntries((items) =>
+                          items.map((x) =>
+                            x.id === entry.id
+                              ? { ...x, note: e.target.value }
+                              : x,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() =>
+                      setManualEntries((items) =>
+                        items.filter((x) => x.id !== entry.id),
+                      )
+                    }
+                  >
+                    <Trash2 />
+                    移除此项
+                  </Button>
+                </div>
+              ))}
+            </fieldset>
             <label className="wide-field">
               <span>标签</span>
               <Input

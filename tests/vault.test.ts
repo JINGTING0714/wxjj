@@ -26,6 +26,86 @@ async function clear() {
 }
 beforeEach(clear);
 
+test('recipe categories, library references, manual entries and examples survive cross-device backup exactly', async () => {
+  const key = await createVault('recipe-migration-password');
+  const recipe = {
+    id: 'mixed-recipe',
+    title: '混合配方',
+    collection: 'recipe-cat',
+    profileIds: ['folder:stage-1'],
+    moodboardIds: [],
+    manualEntries: [
+      {
+        id: 'manual-p',
+        kind: 'profile',
+        secret: 'CaseSensitive123456789',
+        label: '手填阶段',
+        author: '作者乙',
+        note: '福利 P',
+      },
+      {
+        id: 'manual-m',
+        kind: 'moodboard',
+        secret: 'xYz',
+        label: '',
+        author: '',
+        note: '',
+      },
+    ],
+    customFields: [{ id: 'f', label: '自行扩展', value: '不遗漏' }],
+  };
+  await writeVaultBatch(key, {
+    records: [
+      { scope: 'recipes', value: recipe },
+      {
+        scope: 'collections:recipe',
+        value: { id: 'recipe-cat', name: '配方库' },
+      },
+    ],
+    blobs: [
+      {
+        id: 'recipe-img',
+        scope: 'recipe-image:mixed-recipe',
+        name: 'example.png',
+        blob: new Blob([new Uint8Array([0, 1, 255])], { type: 'image/png' }),
+      },
+    ],
+  });
+  const backup = new File([await exportVaultFile(key)], 'recipe.prism');
+  await clear();
+  const restored = await importVaultFile(backup, 'recipe-migration-password');
+  assert.deepEqual(await loadEncryptedRecords(restored.key, 'recipes'), [
+    recipe,
+  ]);
+  assert.deepEqual(
+    await loadEncryptedRecords(restored.key, 'collections:recipe'),
+    [{ id: 'recipe-cat', name: '配方库' }],
+  );
+  const images = await loadEncryptedBlobs(
+    restored.key,
+    'recipe-image:mixed-recipe',
+  );
+  assert.equal(images.length, 1);
+  assert.deepEqual(
+    new Uint8Array(await images[0].blob.arrayBuffer()),
+    new Uint8Array([0, 1, 255]),
+  );
+  await writeVaultBatch(restored.key, {
+    deleteRecords: ['recipe-cat'],
+    records: [
+      { scope: 'recipes', value: { ...recipe, collection: 'unfiled' } },
+    ],
+  });
+  assert.deepEqual(await loadEncryptedRecords(restored.key, 'recipes'), [
+    { ...recipe, collection: 'unfiled' },
+  ]);
+  assert.equal(
+    (await loadEncryptedBlobs(restored.key, 'recipe-image:mixed-recipe'))
+      .length,
+    1,
+  );
+});
+
 test('bulk deletion changes only selected records and blobs, never their collections or other assets', async () => {
   const key = await createVault('bulk-test-password');
   const records = ['a', 'b', 'keep'].map((id) => ({
