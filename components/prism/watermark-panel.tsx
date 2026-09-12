@@ -1,11 +1,15 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ChevronDown,
   Download,
   Grid3X3,
+  Image as ImageIcon,
+  Layers3,
   Pause,
   Plus,
   RefreshCw,
+  SlidersHorizontal,
   Stamp,
   Trash2,
   Upload,
@@ -27,8 +31,25 @@ import {
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 import { SourceSelection } from './source-selection';
+import {
+  MobileWorkspace,
+  MobileWorkspacePanel,
+  MobileWorkspacePrimaryAction,
+  MobileWorkspaceSheet,
+  MobileWorkspaceTabs,
+  type MobileWorkspaceTab,
+} from './mobile-workspace';
 
 type Output = { id: string; sourceId: string; file: File; rejected: boolean };
+type WatermarkMobilePanel = 'preview' | 'watermarks' | 'adjust' | 'output';
+
+const mobileTabs: MobileWorkspaceTab<WatermarkMobilePanel>[] = [
+  { value: 'preview', label: '预览', icon: <ImageIcon /> },
+  { value: 'watermarks', label: '水印', icon: <Layers3 /> },
+  { value: 'adjust', label: '调整', icon: <SlidersHorizontal /> },
+  { value: 'output', label: '输出', icon: <Download /> },
+];
+
 type Batch = {
   id: string;
   title: string;
@@ -235,6 +256,11 @@ export function WatermarkPanel({
   const tasks = useRef(new Map<string, Promise<void>>());
   const [running, setRunning] = useState<Record<string, number>>({});
   const [error, setError] = useState('');
+  const [mobilePanel, setMobilePanel] =
+    useState<WatermarkMobilePanel>('preview');
+  const [batchSheetOpen, setBatchSheetOpen] = useState(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
   const batch =
     state.batches.find((b) => b.id === state.active) || state.batches[0];
   const update = (id: string, change: (old: Batch) => Batch) =>
@@ -381,7 +407,7 @@ export function WatermarkPanel({
           <p className="error-banner">{workspace.saveError}</p>
         )}
         {error && <p className="error-banner">{error}</p>}
-        <div className="batch-tabs">
+        <div className="batch-tabs desktop-workspace-only">
           {state.batches.map((b) => (
             <Button
               key={b.id}
@@ -409,115 +435,222 @@ export function WatermarkPanel({
           </Button>
         </div>
         {batch && (
-          <section className="batch-editor">
-            <fieldset
-              className="workshop-fieldset"
-              disabled={!workspace.ready || running[batch.id] !== undefined}
+          <button
+            className="mobile-batch-selector mobile-workspace-only"
+            onClick={() => setBatchSheetOpen(true)}
+            type="button"
+          >
+            <span>
+              <strong>{batch.title}</strong>
+              <small>
+                {batch.sources.length} 张原图 · {batch.layers.length} 层水印
+                {running[batch.id] !== undefined
+                  ? ` · ${running[batch.id]}%`
+                  : batch.outputs.length
+                    ? ` · ${batch.outputs.length} 张成品`
+                    : ''}
+              </small>
+            </span>
+            <ChevronDown />
+          </button>
+        )}
+        <MobileWorkspaceSheet
+          description="每个批次保留独立的原图、图层、排版和处理结果。"
+          onOpenChange={setBatchSheetOpen}
+          open={batchSheetOpen}
+          title="选择图片批次"
+        >
+          <div className="mobile-batch-list">
+            {state.batches.map((item) => (
+              <button
+                aria-current={batch?.id === item.id ? 'true' : undefined}
+                className={batch?.id === item.id ? 'is-active' : ''}
+                key={item.id}
+                onClick={() => {
+                  setState((current) => ({ ...current, active: item.id }));
+                  setMobilePanel('preview');
+                  setBatchSheetOpen(false);
+                }}
+                type="button"
+              >
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>
+                    {item.sources.length} 张 · {item.layers.length} 层
+                    {item.outputs.length
+                      ? ` · ${item.outputs.length} 张成品`
+                      : ''}
+                  </small>
+                </span>
+                {running[item.id] !== undefined && <b>{running[item.id]}%</b>}
+              </button>
+            ))}
+            <Button
+              disabled={!workspace.ready || state.batches.length >= 5}
+              onClick={() => {
+                const added = freshBatch(state.batches.length + 1);
+                setState((current) => ({
+                  ...current,
+                  batches: [...current.batches, added],
+                  active: added.id,
+                }));
+                setMobilePanel('preview');
+                setBatchSheetOpen(false);
+              }}
+              variant="outline"
             >
-              <div className="batch-source-toolbar">
-                <label>
-                  批次名称
-                  <Input
-                    onChange={(e) =>
-                      update(batch.id, (b) => ({ ...b, title: e.target.value }))
-                    }
-                    value={batch.title}
-                  />
-                </label>
-                <label className="mini-file">
-                  <Upload />
-                  导入本批原图
-                  <input
-                    accept="image/*"
-                    multiple
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []);
-                      e.target.value = '';
-                      if (files.length + batch.sources.length > 200) {
-                        setError('每批最多 200 张，请减少文件或新建下一批。');
-                        return;
+              <Plus /> 新建批次（{state.batches.length}/5）
+            </Button>
+          </div>
+        </MobileWorkspaceSheet>
+        {batch && (
+          <section className="batch-editor">
+            <MobileWorkspace className="watermark-mobile-workspace">
+              <MobileWorkspacePanel
+                active={mobilePanel === 'preview'}
+                className="watermark-source-panel"
+                label="批次与原图"
+              >
+                <div className="batch-source-toolbar">
+                  <label htmlFor={`watermark-batch-title-${batch.id}`}>
+                    批次名称
+                    <Input
+                      id={`watermark-batch-title-${batch.id}`}
+                      disabled={
+                        !workspace.ready || running[batch.id] !== undefined
                       }
-                      update(batch.id, (b) => ({
-                        ...b,
-                        sources: [
-                          ...b.sources,
-                          ...files.map((file) => ({
-                            id: crypto.randomUUID(),
-                            file,
-                          })),
-                        ],
-                      }));
-                    }}
-                    type="file"
-                  />
-                </label>
-                <span>{batch.sources.length} / 200 张</span>
-                <Button
-                  onClick={() => {
-                    if (
-                      confirm(
-                        '删除这个批次及其原图、图层和等待区副本？水印库素材及已生成拼图保留。',
-                      )
-                    ) {
-                      window.dispatchEvent(
-                        new CustomEvent('prism:remove-from-collage', {
-                          detail: batch.outputs.map((o) => o.id),
-                        }),
-                      );
-                      setState((s) => ({
-                        ...s,
-                        batches: s.batches.filter((b) => b.id !== batch.id),
-                        active: '',
-                      }));
-                    }
-                  }}
-                  variant="outline"
-                >
-                  <Trash2 />
-                  删除此批
-                </Button>
-              </div>
-              <div className="source-file-list">
-                {batch.sources.map((source, i) => (
-                  <span key={source.id}>
-                    {i + 1}. {source.file.name}
-                    <button
-                      aria-label={`移除原图 ${source.file.name}`}
-                      onClick={() =>
+                      onChange={(e) =>
                         update(batch.id, (b) => ({
                           ...b,
-                          sources: b.sources.filter((s) => s.id !== source.id),
+                          title: e.target.value,
                         }))
                       }
-                      type="button"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <SourceSelection
-                sources={batch.sources}
-                disabled={running[batch.id] !== undefined}
-                onRemove={async (ids) => {
-                  update(batch.id, (b) => ({
-                    ...b,
-                    sources: b.sources.filter((s) => !ids.includes(s.id)),
-                    retryIds: b.retryIds.filter((id) => !ids.includes(id)),
-                    job: null,
-                  }));
-                  await workspace.flush();
-                }}
-              />
-              {batch.retryIds.length > 0 && (
-                <p className="import-warning">
-                  本次只重打 {batch.retryIds.length}{' '}
-                  张不合格图片。请重新调整下方样本，然后确认启动；其他批次与拼图不受影响。
-                </p>
-              )}
+                      value={batch.title}
+                    />
+                  </label>
+                  <label className="mini-file">
+                    <Upload />
+                    导入本批原图
+                    <input
+                      accept="image/*"
+                      disabled={
+                        !workspace.ready || running[batch.id] !== undefined
+                      }
+                      multiple
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        e.target.value = '';
+                        if (files.length + batch.sources.length > 200) {
+                          setError('每批最多 200 张，请减少文件或新建下一批。');
+                          return;
+                        }
+                        update(batch.id, (b) => ({
+                          ...b,
+                          sources: [
+                            ...b.sources,
+                            ...files.map((file) => ({
+                              id: crypto.randomUUID(),
+                              file,
+                            })),
+                          ],
+                        }));
+                      }}
+                      type="file"
+                    />
+                  </label>
+                  <span>{batch.sources.length} / 200 张</span>
+                  <Button
+                    disabled={
+                      !workspace.ready || running[batch.id] !== undefined
+                    }
+                    onClick={() => {
+                      if (
+                        confirm(
+                          '删除这个批次及其原图、图层和等待区副本？水印库素材及已生成拼图保留。',
+                        )
+                      ) {
+                        window.dispatchEvent(
+                          new CustomEvent('prism:remove-from-collage', {
+                            detail: batch.outputs.map((o) => o.id),
+                          }),
+                        );
+                        setState((current) => ({
+                          ...current,
+                          batches: current.batches.filter(
+                            (item) => item.id !== batch.id,
+                          ),
+                          active: '',
+                        }));
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    <Trash2 /> 删除此批
+                  </Button>
+                </div>
+                <div className="source-file-list desktop-workspace-only">
+                  {batch.sources.map((source, i) => (
+                    <span key={source.id}>
+                      {i + 1}. {source.file.name}
+                      <button
+                        aria-label={`移除原图 ${source.file.name}`}
+                        onClick={() =>
+                          update(batch.id, (b) => ({
+                            ...b,
+                            sources: b.sources.filter(
+                              (item) => item.id !== source.id,
+                            ),
+                          }))
+                        }
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="desktop-workspace-only">
+                  <SourceSelection
+                    sources={batch.sources}
+                    disabled={running[batch.id] !== undefined}
+                    onRemove={async (ids) => {
+                      update(batch.id, (b) => ({
+                        ...b,
+                        sources: b.sources.filter((s) => !ids.includes(s.id)),
+                        retryIds: b.retryIds.filter((id) => !ids.includes(id)),
+                        job: null,
+                      }));
+                      await workspace.flush();
+                    }}
+                  />
+                </div>
+                {batch.sources.length > 0 && (
+                  <button
+                    className="mobile-source-summary mobile-workspace-only"
+                    onClick={() => setSourceSheetOpen(true)}
+                    type="button"
+                  >
+                    <span>
+                      <strong>管理本批原图</strong>
+                      <small>
+                        {batch.sources.length} 张 · 搜索、多选或移除
+                      </small>
+                    </span>
+                    <ChevronDown />
+                  </button>
+                )}
+                {batch.retryIds.length > 0 && (
+                  <p className="import-warning">
+                    本次只重打 {batch.retryIds.length}{' '}
+                    张不合格图片。请重新调整样本，然后确认启动；其他批次与拼图不受影响。
+                  </p>
+                )}
+              </MobileWorkspacePanel>
+
               <WatermarkEditor
                 disabled={running[batch.id] !== undefined}
                 layers={batch.layers}
+                mobilePanel={mobilePanel}
                 composition={batch.composition}
                 onChange={(layers, composition) =>
                   update(batch.id, (b) => ({
@@ -533,53 +666,177 @@ export function WatermarkPanel({
                   )?.file
                 }
               />
-              <label className="check-line">
-                <input
-                  checked={batch.autoSend}
-                  onChange={(e) =>
-                    update(batch.id, (b) => ({
-                      ...b,
-                      autoSend: e.target.checked,
-                    }))
-                  }
-                  type="checkbox"
-                />
-                每张完成后自动送入拼图队列（仍可在等待区标记不合格并移除）
-              </label>
-              <div className="result-actions">
-                <Button
-                  disabled={!batch.sources.length || !batch.layers.length}
-                  onClick={() => run(batch)}
-                >
-                  <Stamp />
-                  {batch.retryIds.length
-                    ? `确认样本，重打 ${batch.retryIds.length} 张`
-                    : '确认样本，处理整批'}
-                </Button>
-                {batch.job && (
-                  <Button onClick={() => run(batch, true)} variant="outline">
+
+              <MobileWorkspaceTabs
+                label="水印工坊功能"
+                onValueChange={setMobilePanel}
+                tabs={mobileTabs}
+                value={mobilePanel}
+              />
+
+              <MobileWorkspacePanel
+                active={mobilePanel === 'output'}
+                className="watermark-output-panel"
+                label="输出"
+              >
+                <div className="mobile-workspace-panel-heading mobile-workspace-only">
+                  <p className="eyebrow">OUTPUT</p>
+                  <h3>处理与结果</h3>
+                  <p>
+                    {batch.sources.length} 张原图 · {batch.layers.length} 层水印
+                  </p>
+                </div>
+                <label className="check-line">
+                  <input
+                    checked={batch.autoSend}
+                    disabled={running[batch.id] !== undefined}
+                    onChange={(e) =>
+                      update(batch.id, (b) => ({
+                        ...b,
+                        autoSend: e.target.checked,
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  每张完成后自动送入拼图队列（仍可在等待区标记不合格并移除）
+                </label>
+                <div className="result-actions desktop-workspace-only">
+                  <Button
+                    disabled={!batch.sources.length || !batch.layers.length}
+                    onClick={() => run(batch)}
+                  >
+                    <Stamp />
+                    {batch.retryIds.length
+                      ? `确认样本，重打 ${batch.retryIds.length} 张`
+                      : '确认样本，处理整批'}
+                  </Button>
+                  {batch.job && (
+                    <Button onClick={() => run(batch, true)} variant="outline">
+                      继续未完成（{batch.job.next}/{batch.job.todo.length}）
+                    </Button>
+                  )}
+                </div>
+                {running[batch.id] !== undefined && (
+                  <div className="run-bar">
+                    <span>
+                      正在处理 {batch.title} · {running[batch.id]}%
+                    </span>
+                    <Button
+                      className="desktop-workspace-only"
+                      onClick={() => controllers.current.get(batch.id)?.abort()}
+                      variant="outline"
+                    >
+                      <Pause /> 暂停
+                    </Button>
+                  </div>
+                )}
+                {batch.outputs.length > 0 && (
+                  <div className="mobile-result-summary mobile-workspace-only">
+                    <span>
+                      <strong>{batch.outputs.length} 张成品</strong>
+                      <small>
+                        {batch.outputs.filter((item) => !item.rejected).length}{' '}
+                        合格 ·{' '}
+                        {batch.outputs.filter((item) => item.rejected).length}{' '}
+                        待调整
+                      </small>
+                    </span>
+                    <Button
+                      onClick={() => setResultsOpen(true)}
+                      variant="outline"
+                    >
+                      查看结果
+                    </Button>
+                  </div>
+                )}
+              </MobileWorkspacePanel>
+
+              <MobileWorkspacePrimaryAction>
+                {running[batch.id] !== undefined ? (
+                  <Button
+                    onClick={() => controllers.current.get(batch.id)?.abort()}
+                    variant="outline"
+                  >
+                    <Pause /> 暂停处理 · {running[batch.id]}%
+                  </Button>
+                ) : batch.job ? (
+                  <Button onClick={() => run(batch, true)}>
+                    <RefreshCw />
                     继续未完成（{batch.job.next}/{batch.job.todo.length}）
                   </Button>
+                ) : (
+                  <Button
+                    disabled={
+                      !workspace.ready ||
+                      !batch.sources.length ||
+                      !batch.layers.length
+                    }
+                    onClick={() => run(batch)}
+                  >
+                    <Stamp />
+                    {batch.retryIds.length
+                      ? `确认样本，重打 ${batch.retryIds.length} 张`
+                      : '确认样本，处理整批'}
+                  </Button>
                 )}
-              </div>
-            </fieldset>
-            {running[batch.id] !== undefined && (
-              <div className="run-bar">
-                <span>
-                  正在处理 {batch.title} · {running[batch.id]}%
-                </span>
-                <Button
-                  onClick={() => controllers.current.get(batch.id)?.abort()}
-                  variant="outline"
-                >
-                  <Pause />
-                  暂停
-                </Button>
-              </div>
-            )}
+              </MobileWorkspacePrimaryAction>
+            </MobileWorkspace>
+
+            <MobileWorkspaceSheet
+              description="在独立列表中搜索、多选或移除文件，主工作台只保留数量摘要。"
+              onOpenChange={setSourceSheetOpen}
+              open={sourceSheetOpen}
+              title={`${batch.title} · 原图`}
+            >
+              <SourceSelection
+                sources={batch.sources}
+                disabled={running[batch.id] !== undefined}
+                openByDefault
+                onRemove={async (ids) => {
+                  update(batch.id, (b) => ({
+                    ...b,
+                    sources: b.sources.filter((s) => !ids.includes(s.id)),
+                    retryIds: b.retryIds.filter((id) => !ids.includes(id)),
+                    job: null,
+                  }));
+                  await workspace.flush();
+                }}
+              />
+            </MobileWorkspaceSheet>
+
+            <MobileWorkspaceSheet
+              description="完整成品只在这里展开，不再占用主编辑页面高度。"
+              onOpenChange={setResultsOpen}
+              open={resultsOpen}
+              title={`${batch.title} · 处理结果`}
+            >
+              {batch.outputs.length > 0 ? (
+                <WaitingBatch
+                  batch={batch}
+                  onChange={(change) => update(batch.id, change)}
+                  onOpenCollage={() => {
+                    setResultsOpen(false);
+                    onOpenCollage();
+                  }}
+                  onRetry={() => {
+                    update(batch.id, (old) => ({
+                      ...old,
+                      retryIds: old.outputs
+                        .filter((item) => item.rejected)
+                        .map((item) => item.sourceId),
+                    }));
+                    setResultsOpen(false);
+                    setMobilePanel('adjust');
+                  }}
+                  processing={running[batch.id] !== undefined}
+                />
+              ) : (
+                <p className="mobile-workspace-empty">本批还没有处理结果。</p>
+              )}
+            </MobileWorkspaceSheet>
           </section>
         )}
-        <div className="waiting-batches">
+        <div className="waiting-batches desktop-workspace-results">
           {state.batches
             .filter((b) => b.outputs.length)
             .map((b) => (

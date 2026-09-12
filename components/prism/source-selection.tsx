@@ -8,10 +8,12 @@ export function SourceSelection({
   sources,
   onRemove,
   disabled = false,
+  openByDefault = false,
 }: {
   sources: PipelineSource[];
   onRemove: (ids: string[]) => void | Promise<void>;
   disabled?: boolean;
+  openByDefault?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -23,7 +25,7 @@ export function SourceSelection({
   const current = Math.min(page, pages - 1);
   if (!sources.length) return null;
   return (
-    <details className="source-selection">
+    <details className="source-selection" open={openByDefault || undefined}>
       <summary>
         管理全部原图 · 搜索 / 多选 / 批量移除（{sources.length}）
       </summary>

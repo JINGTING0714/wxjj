@@ -78,30 +78,40 @@ function Secret({ value, long = false }: { value: string; long?: boolean }) {
     return () => window.removeEventListener('prism:hide-secrets', hide);
   }, []);
   return (
-    <div className="profile-secret">
-      <code>
-        {show ? value || '未记录' : long ? '长码已隐藏' : secretPreview(value)}
-      </code>
-      <button
-        aria-label={show ? '隐藏此码' : '显示此码'}
-        onClick={() => setShow(!show)}
-        type="button"
-      >
-        {show ? <EyeOff /> : <Eye />}
-      </button>
-      <button
-        aria-label={long ? '复制长码' : '复制 Profile 参数'}
-        title={long ? '复制长码' : '复制 --profile 参数'}
-        disabled={!show || !value}
-        onClick={() =>
-          navigator.clipboard?.writeText(
-            long ? value : formatProfileCode(value),
-          )
-        }
-        type="button"
-      >
-        <Copy />
-      </button>
+    <div className="record-code-block">
+      <div className="record-secret-value">
+        <code>
+          {show
+            ? value || '未记录'
+            : long
+              ? '长码已隐藏'
+              : secretPreview(value)}
+        </code>
+      </div>
+      <div className="record-secret-actions">
+        <button
+          aria-label={show ? '隐藏此码' : '显示此码'}
+          onClick={() => setShow(!show)}
+          type="button"
+        >
+          {show ? <EyeOff /> : <Eye />}
+          {show ? '隐藏' : '显示'}
+        </button>
+        <button
+          aria-label={long ? '复制长码' : '复制 Profile 参数'}
+          title={long ? '复制长码' : '复制 --profile 参数'}
+          disabled={!show || !value}
+          onClick={() =>
+            navigator.clipboard?.writeText(
+              long ? value : formatProfileCode(value),
+            )
+          }
+          type="button"
+        >
+          <Copy />
+          {long ? '复制长码' : '复制 Profile 参数'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -575,7 +585,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                     title={code.label || folder.title}
                   />
                   <div>
-                    <span className={`nature-label nature-${code.nature}`}>
+                    <span className={`record-type-label nature-${code.nature}`}>
                       {natureLabel(code)}
                     </span>
                     <h3>{folder.title}</h3>

@@ -9,6 +9,7 @@ import {
   videoInputDecoder,
 } from '../lib/video-export';
 import { moveSource } from '../lib/pipeline';
+import { videoProgressDetail } from '../lib/video-progress';
 
 test('collage movement changes the whole queue without replacing files or touching inputs', () => {
   const sources = Array.from({ length: 53 }, (_, i) => ({
@@ -56,6 +57,58 @@ test('video format choices never silently flatten an alpha canvas', () => {
     videoExportPlan(3840, 2160, 3, undefined, defaultVideoExport, false).width,
     3840,
   );
+});
+
+test('ordinary video avoids full canvas reconstruction; transforms and alpha retain the general compositor', () => {
+  const c = defaultComposition();
+  const simple = videoExportPlan(1280, 720, 10, c, defaultVideoExport, false);
+  assert.equal(simple.direct, true);
+  assert.ok(!simple.args.includes('under.png'));
+  assert.ok(!simple.args.includes('-loop'));
+  assert.ok(simple.args.includes('ultrafast'));
+  for (const key of ['scaleX', 'scaleY'] as const) {
+    const stretched = { ...c, source: { ...c.source, [key]: 1.2 } };
+    assert.equal(
+      videoExportPlan(1280, 720, 10, stretched, defaultVideoExport, false)
+        .direct,
+      false,
+    );
+  }
+  assert.equal(
+    videoExportPlan(
+      1280,
+      720,
+      10,
+      { ...c, background: '#ffffff' },
+      defaultVideoExport,
+      false,
+      true,
+    ).direct,
+    false,
+    'transparent source composited on a solid background must keep the underlay',
+  );
+  c.source.rotation = 20;
+  const transformed = videoExportPlan(
+    1280,
+    720,
+    10,
+    c,
+    defaultVideoExport,
+    true,
+  );
+  assert.equal(transformed.direct, false);
+  assert.ok(transformed.args.includes('under.png'));
+  assert.ok(transformed.args.includes('yuva420p'));
+  assert.ok(transformed.args.includes('realtime'));
+});
+
+test('progress reports real elapsed time and only estimates after encoding advances', () => {
+  assert.equal(videoProgressDetail(0, 13, 0, 10), '已用 13 秒');
+  assert.equal(
+    videoProgressDetail(0.5, 15, 10, 10),
+    '已用 15 秒 · 约剩 10 秒 · 0.50× 速度',
+  );
+  assert.equal(videoProgressDetail(1, 20, 15, 10), '已用 20 秒');
 });
 
 test(
@@ -153,6 +206,39 @@ test(
       6,
       '12 fps input must retain all 6 frames, not become a 30 fps recording',
     );
+    c.source.scaleX = 0.5;
+    c.source.scaleY = 1.25;
+    run(
+      '-y',
+      ...videoExportPlan(64, 48, 0.5, c, defaultVideoExport, true).args,
+    );
+    run(
+      '-c:v',
+      'libvpx',
+      '-i',
+      'output.webm',
+      '-frames:v',
+      '1',
+      '-pix_fmt',
+      'rgba',
+      '-f',
+      'rawvideo',
+      'stretched.rgba',
+    );
+    const stretchedFrame = engine.FS.readFile('stretched.rgba');
+    assert.equal(stretchedFrame.length, 96 * 72 * 4);
+    assert.equal(
+      stretchedFrame[(36 * 96 + 25) * 4 + 3],
+      0,
+      'independent width leaves a narrower source',
+    );
+    assert.equal(
+      stretchedFrame[(8 * 96 + 48) * 4 + 3],
+      255,
+      'independent height stretches upward',
+    );
+    assert.equal(stretchedFrame[(3 * 96 + 48) * 4 + 3], 0);
+    c.source.scaleX = c.source.scaleY = 1;
     c.background = '#fff';
     run(
       ...videoExportPlan(
@@ -226,7 +312,7 @@ test(
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=codec_name',
+      'stream=codec_name,width,height,sample_aspect_ratio',
       '-of',
       'json',
       'output.webm',
@@ -235,9 +321,16 @@ test(
     );
     assert.ok([0, -1].includes(engine.ret));
     engine.reset();
-    const codec = JSON.parse(
+    const stream = JSON.parse(
       new TextDecoder().decode(engine.FS.readFile('probe.json')),
-    ).streams[0].codec_name;
-    assert.deepEqual(videoInputDecoder(codec), ['-c:v', 'libvpx']);
+    ).streams[0];
+    assert.equal(stream.width, 768);
+    assert.equal(stream.height, 432);
+    assert.equal(
+      stream.sample_aspect_ratio,
+      '1:1',
+      'exported video must display and reimport at the actual canvas aspect ratio',
+    );
+    assert.deepEqual(videoInputDecoder(stream.codec_name), ['-c:v', 'libvpx']);
   },
 );
