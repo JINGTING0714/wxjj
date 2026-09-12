@@ -3,14 +3,18 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   Lock,
+  Move,
   Unlock,
   Plus,
   RefreshCw,
   Scan,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { MobileWorkspacePanel, MobileWorkspaceSheet } from './mobile-workspace';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
 import {
@@ -101,6 +105,7 @@ export function WatermarkEditor({
   composition,
   disabled = false,
   sourceKind = 'image',
+  mobilePanel,
 }: {
   source?: File;
   layers: EditorLayer[];
@@ -108,10 +113,13 @@ export function WatermarkEditor({
   composition?: WatermarkComposition;
   disabled?: boolean;
   sourceKind?: 'image' | 'video';
+  mobilePanel?: 'preview' | 'watermarks' | 'adjust' | 'output';
 }) {
   const vault = useVault();
   const [active, setActive] = useState('');
   const [snapEnabled, setSnapEnabled] = useState(true);
+  const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [guides, setGuides] = useState<AlignmentGuides | null>(null);
   const [dimensions, setDimensions] = useState(
     new Map<
@@ -123,6 +131,9 @@ export function WatermarkEditor({
   const [library, setLibrary] = useState<
     Array<{ record: StoredWatermark; file: File }>
   >([]);
+  useEffect(() => {
+    if (mobilePanel && mobilePanel !== 'preview') setMobileTouchEditing(false);
+  }, [mobilePanel]);
   const surface = useRef<HTMLDivElement>(null);
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
@@ -295,6 +306,7 @@ export function WatermarkEditor({
   };
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
     if (disabled || layer.locked || !surface.current) return;
+    if (event.pointerType === 'touch' && !mobileTouchEditing) return;
     if (drag.current && drag.current.pointer !== event.pointerId) return;
     const dim = dimensions.get(layer.file);
     const original = source && dimensions.get(source);
@@ -440,7 +452,10 @@ export function WatermarkEditor({
   })();
   return (
     <div className="watermark-layout watermark-free-editor">
-      <section className="watermark-input-panel">
+      <section
+        className="watermark-input-panel mobile-workspace-preview"
+        data-interaction={mobileTouchEditing ? 'edit' : 'scroll'}
+      >
         <h3>第一张样本 · 自由摆放</h3>
         <label className="watermark-snap-control">
           <input
@@ -452,7 +467,10 @@ export function WatermarkEditor({
           贴边自动吸附
           <span>继续拖动可越过边界 · 电脑按住 Alt 可暂时关闭</span>
         </label>
-        <div className="watermark-stage dom-watermark-stage">
+        <div
+          className="watermark-stage dom-watermark-stage"
+          data-interaction={mobileTouchEditing ? 'edit' : 'scroll'}
+        >
           {base && sourceUrl ? (
             <div
               aria-label="水印样本编辑画布"
@@ -594,6 +612,23 @@ export function WatermarkEditor({
             </div>
           )}
         </div>
+        <div className="mobile-preview-interaction mobile-workspace-only">
+          <Button
+            disabled={disabled || !base}
+            onClick={() => setMobileTouchEditing((editing) => !editing)}
+            size="sm"
+            type="button"
+            variant={mobileTouchEditing ? 'default' : 'outline'}
+          >
+            {mobileTouchEditing ? <Check /> : <Move />}
+            {mobileTouchEditing ? '完成移动' : '移动 / 缩放水印'}
+          </Button>
+          <span>
+            {mobileTouchEditing
+              ? '画布手势已启用，完成后恢复页面滚动。'
+              : '当前可在预览上直接上下滑动页面。'}
+          </span>
+        </div>
         <output className="watermark-alignment-status">
           {guides
             ? `对齐提示：${guides.lines.map((line) => line.label).join(' · ')}`
@@ -606,10 +641,10 @@ export function WatermarkEditor({
       </section>
       <fieldset
         disabled={disabled}
-        className="watermark-layer-panel workshop-fieldset"
+        className="watermark-layer-panel workshop-fieldset mobile-editor-controls"
       >
-        <h3>画布、图层与变换</h3>
-        <div className="composition-controls">
+        <h3 className="desktop-workspace-only">画布、图层与变换</h3>
+        <div className="composition-controls desktop-workspace-only">
           <p>
             摆好原图和水印后，一键收齐四周边界。图层大小和相对位置保持不变。
           </p>
@@ -741,230 +776,527 @@ export function WatermarkEditor({
               : '原图已铺满画布，底色不会影响成品。'}
           </p>
         </div>
-        <div className="layer-source-actions">
-          <label className="mini-file">
-            <Plus />
-            上传水印
-            <input
-              accept="image/*"
-              multiple
+        <MobileWorkspacePanel
+          active={!mobilePanel || mobilePanel === 'watermarks'}
+          className="watermark-layers-mobile-panel"
+          label="水印图层"
+        >
+          <div className="mobile-workspace-panel-heading mobile-workspace-only">
+            <p className="eyebrow">LAYERS</p>
+            <h3>水印与图层</h3>
+            <p>添加、选择、排序或锁定图层。</p>
+          </div>
+          <div className="layer-source-actions">
+            <label className="mini-file">
+              <Plus />
+              上传水印
+              <input
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  void add(Array.from(e.target.files || []));
+                  e.target.value = '';
+                }}
+                type="file"
+              />
+            </label>
+            <select
+              aria-label="从水印库选择"
               onChange={(e) => {
-                void add(Array.from(e.target.files || []));
-                e.target.value = '';
+                const item = library.find(
+                  (s) => s.record.id === e.target.value,
+                );
+                if (item) {
+                  const layer = defaultLayer(item.file);
+                  onChange([...layers, layer]);
+                  setActive(layer.id);
+                }
               }}
-              type="file"
-            />
-          </label>
-          <select
-            aria-label="从水印库选择"
-            onChange={(e) => {
-              const item = library.find((s) => s.record.id === e.target.value);
-              if (item) {
-                const layer = defaultLayer(item.file);
-                onChange([...layers, layer]);
-                setActive(layer.id);
-              }
-            }}
-            value=""
-          >
-            <option value="">从水印库选择…</option>
-            {library.map((item) => (
-              <option key={item.record.id} value={item.record.id}>
-                {item.record.title} · {item.record.author}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="transform-layer-list">
-          {[...stack].reverse().map((layer) => (
-            <article
-              className={layer.id === selectedId ? 'is-active' : ''}
-              key={layer.id}
+              value=""
             >
-              <button
-                className="layer-select"
-                onClick={() => setActive(layer.id)}
-                type="button"
+              <option value="">从水印库选择…</option>
+              {library.map((item) => (
+                <option key={item.record.id} value={item.record.id}>
+                  {item.record.title} · {item.record.author}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="transform-layer-list">
+            {[...stack].reverse().map((layer) => (
+              <article
+                className={layer.id === selectedId ? 'is-active' : ''}
+                key={layer.id}
               >
-                <strong>
-                  {layer.id === SOURCE_LAYER_ID ? '原图 · ' : '水印 · '}
-                  {layer.file.name}
-                  {layer.locked ? ' · 已锁定' : ''}
-                </strong>
-              </button>
-              <span className="layer-order-actions">
                 <button
-                  type="button"
-                  aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : '水印层'}`}
-                  onClick={() => change(layer.id, { locked: !layer.locked })}
-                >
-                  {layer.locked ? <Lock /> : <Unlock />}
-                </button>
-                <button
-                  aria-label="上移图层（向前）"
-                  disabled={layer.locked || stack.at(-1)?.id === layer.id}
-                  onClick={() => reorder(layer.id, 1)}
+                  className="layer-select"
+                  onClick={() => setActive(layer.id)}
                   type="button"
                 >
-                  <ArrowUp />
+                  <strong>
+                    {layer.id === SOURCE_LAYER_ID ? '原图 · ' : '水印 · '}
+                    {layer.file.name}
+                    {layer.locked ? ' · 已锁定' : ''}
+                  </strong>
                 </button>
-                <button
-                  aria-label="下移图层（向后）"
-                  disabled={layer.locked || stack[0]?.id === layer.id}
-                  onClick={() => reorder(layer.id, -1)}
-                  type="button"
-                >
-                  <ArrowDown />
-                </button>
-                <button
-                  aria-label="移除水印层"
-                  disabled={layer.locked || layer.id === SOURCE_LAYER_ID}
-                  onClick={() =>
-                    publishStack(stack.filter((l) => l.id !== layer.id))
-                  }
-                  type="button"
-                >
-                  <X />
-                </button>
-              </span>
-            </article>
-          ))}
-        </div>
-        <p className="stage-tip">
-          列表从上到下对应从前到后。锁定层不会响应拖动，也不会挡住未锁定图层的操作。
-        </p>
-        {selected && (
-          <fieldset
-            className="transform-controls workshop-fieldset"
-            disabled={disabled || selected.locked}
-          >
-            <legend>
-              {selected.id === SOURCE_LAYER_ID ? '原图' : '当前水印'}
-              {selected.locked ? ' · 已锁定，请先解锁再调整' : ' · 自由调整'}
-            </legend>
-            <Button
-              onClick={() =>
-                change(selected.id, {
-                  ...(selected.id === SOURCE_LAYER_ID
-                    ? { ...defaultComposition().source, locked: false }
-                    : defaultLayer(selected.file)),
-                  id: selected.id,
-                })
-              }
-              size="sm"
-              variant="outline"
+                <span className="layer-order-actions">
+                  <button
+                    type="button"
+                    aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : '水印层'}`}
+                    onClick={() => change(layer.id, { locked: !layer.locked })}
+                  >
+                    {layer.locked ? <Lock /> : <Unlock />}
+                  </button>
+                  <button
+                    aria-label="上移图层（向前）"
+                    disabled={layer.locked || stack.at(-1)?.id === layer.id}
+                    onClick={() => reorder(layer.id, 1)}
+                    type="button"
+                  >
+                    <ArrowUp />
+                  </button>
+                  <button
+                    aria-label="下移图层（向后）"
+                    disabled={layer.locked || stack[0]?.id === layer.id}
+                    onClick={() => reorder(layer.id, -1)}
+                    type="button"
+                  >
+                    <ArrowDown />
+                  </button>
+                  <button
+                    aria-label="移除水印层"
+                    disabled={layer.locked || layer.id === SOURCE_LAYER_ID}
+                    onClick={() =>
+                      publishStack(stack.filter((l) => l.id !== layer.id))
+                    }
+                    type="button"
+                  >
+                    <X />
+                  </button>
+                </span>
+              </article>
+            ))}
+          </div>
+          <p className="stage-tip">
+            列表从上到下对应从前到后。锁定层不会响应拖动，也不会挡住未锁定图层的操作。
+          </p>
+          <p className="watermark-library-note">
+            新上传的水印会自动存入水印库，可再补充作者、来源和分类。原图和各水印都可以独立锁定，锁定状态也会保存。
+          </p>
+        </MobileWorkspacePanel>
+        <MobileWorkspacePanel
+          active={!mobilePanel || mobilePanel === 'adjust'}
+          className="watermark-adjust-mobile-panel"
+          label="调整图层"
+        >
+          <div className="mobile-workspace-panel-heading mobile-workspace-only">
+            <p className="eyebrow">ADJUST</p>
+            <h3>调整当前图层</h3>
+            <p>主面板只保留高频参数，精确设置按需展开。</p>
+          </div>
+          {selected && (
+            <fieldset
+              className="transform-controls workshop-fieldset"
+              disabled={disabled || selected.locked}
             >
-              <RefreshCw />
-              重置本层
-            </Button>
-            {selected.id !== SOURCE_LAYER_ID && base && (
+              <legend>
+                {selected.id === SOURCE_LAYER_ID ? '原图' : '当前水印'}
+                {selected.locked ? ' · 已锁定，请先解锁再调整' : ' · 自由调整'}
+              </legend>
               <Button
+                onClick={() =>
+                  change(selected.id, {
+                    ...(selected.id === SOURCE_LAYER_ID
+                      ? { ...defaultComposition().source, locked: false }
+                      : defaultLayer(selected.file)),
+                    id: selected.id,
+                  })
+                }
+                size="sm"
+                variant="outline"
+              >
+                <RefreshCw />
+                重置本层
+              </Button>
+              {selected.id !== SOURCE_LAYER_ID && base && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const dim = dimensions.get(selected.file);
+                    if (!dim) return;
+                    try {
+                      const size = compositionSize(base.w, base.h, canvas);
+                      change(
+                        selected.id,
+                        fitLayerToSource(
+                          selected,
+                          { width: dim.w, height: dim.h, bounds: dim.bounds },
+                          canvas.source,
+                          { width: base.w, height: base.h },
+                          { ...size, referenceWidth: base.w },
+                        ),
+                      );
+                      setError('');
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '无法贴合原图');
+                    }
+                  }}
+                >
+                  <Scan />
+                  拉伸贴合原图
+                </Button>
+              )}
+              <div
+                aria-label="快速定位当前图层"
+                className="mobile-position-grid mobile-workspace-only"
+              >
+                {[
+                  [0.08, 0.08, '左上'],
+                  [0.5, 0.08, '上中'],
+                  [0.92, 0.08, '右上'],
+                  [0.08, 0.5, '左中'],
+                  [0.5, 0.5, '居中'],
+                  [0.92, 0.5, '右中'],
+                  [0.08, 0.92, '左下'],
+                  [0.5, 0.92, '下中'],
+                  [0.92, 0.92, '右下'],
+                ].map(([x, y, label]) => (
+                  <button
+                    aria-label={String(label)}
+                    className={
+                      Math.abs(selected.x - Number(x)) < 0.02 &&
+                      Math.abs(selected.y - Number(y)) < 0.02
+                        ? 'is-active'
+                        : ''
+                    }
+                    key={String(label)}
+                    onClick={() =>
+                      change(selected.id, { x: Number(x), y: Number(y) })
+                    }
+                    title={String(label)}
+                    type="button"
+                  >
+                    <i />
+                  </button>
+                ))}
+              </div>
+              <div className="transform-grid">
+                {(
+                  [
+                    {
+                      key: 'x',
+                      label: '水平 X',
+                      min: -0.5,
+                      max: 1.5,
+                      step: 0.005,
+                    },
+                    {
+                      key: 'y',
+                      label: '垂直 Y',
+                      min: -0.5,
+                      max: 1.5,
+                      step: 0.005,
+                    },
+                    {
+                      key: 'scale',
+                      label: '等比缩放',
+                      min: 0.01,
+                      max: 6,
+                      step: 0.005,
+                    },
+                    {
+                      key: 'scaleX',
+                      label: '横向拉伸',
+                      min: 0.01,
+                      max: 6,
+                      step: 0.005,
+                    },
+                    {
+                      key: 'scaleY',
+                      label: '纵向拉伸',
+                      min: 0.01,
+                      max: 6,
+                      step: 0.005,
+                    },
+                    {
+                      key: 'opacity',
+                      label: '透明度',
+                      min: 0,
+                      max: 1,
+                      step: 0.01,
+                    },
+                    {
+                      key: 'rotation',
+                      label: '旋转',
+                      min: -360,
+                      max: 360,
+                      step: 1,
+                    },
+                  ] as const
+                ).map((control) => (
+                  <label
+                    className={
+                      ['x', 'y', 'scaleX', 'scaleY'].includes(control.key)
+                        ? 'mobile-advanced-control'
+                        : undefined
+                    }
+                    key={control.key}
+                  >
+                    <span>
+                      {control.label} ·{' '}
+                      {control.key === 'rotation'
+                        ? `${Math.round(selected.rotation)}°`
+                        : `${Math.round((selected[control.key] ?? 1) * 100)}%`}
+                    </span>
+                    <input
+                      aria-label={control.label}
+                      max={control.max}
+                      min={control.min}
+                      onChange={(e) =>
+                        change(selected.id, {
+                          [control.key]: Number(e.target.value),
+                        })
+                      }
+                      step={control.step}
+                      type="range"
+                      value={selected[control.key] ?? 1}
+                    />
+                  </label>
+                ))}
+                <fieldset className="crop-controls mobile-advanced-control">
+                  <legend>裁切当前图层</legend>
+                  {(['top', 'right', 'bottom', 'left'] as const).map((edge) => (
+                    <label key={edge}>
+                      <span>
+                        {
+                          { top: '上', right: '右', bottom: '下', left: '左' }[
+                            edge
+                          ]
+                        }{' '}
+                        · {Math.round(selected.crop[edge] * 100)}%
+                      </span>
+                      <input
+                        max="0.49"
+                        min="0"
+                        onChange={(e) =>
+                          change(selected.id, {
+                            crop: {
+                              ...selected.crop,
+                              [edge]: Number(e.target.value),
+                            },
+                          })
+                        }
+                        step=".005"
+                        type="range"
+                        value={selected.crop[edge]}
+                      />
+                    </label>
+                  ))}
+                </fieldset>
+              </div>
+              <Button
+                className="mobile-advanced-trigger mobile-workspace-only"
+                onClick={() => setAdvancedOpen(true)}
                 type="button"
                 variant="outline"
-                size="sm"
+              >
+                <SlidersHorizontal />
+                精确位置、裁切与画布设置
+              </Button>
+            </fieldset>
+          )}
+        </MobileWorkspacePanel>
+      </fieldset>
+      <MobileWorkspaceSheet
+        description="这些低频参数不会常驻主工作台；修改会立即反映在上方预览。"
+        onOpenChange={setAdvancedOpen}
+        open={advancedOpen}
+        title="高级调整"
+      >
+        <div className="mobile-advanced-settings">
+          <section>
+            <h4>画布与内容边界</h4>
+            <div className="mobile-advanced-actions">
+              <Button
+                disabled={
+                  disabled ||
+                  !base ||
+                  layers.some((layer) => !dimensions.has(layer.file))
+                }
                 onClick={() => {
-                  const dim = dimensions.get(selected.file);
-                  if (!dim) return;
+                  if (!base) return;
                   try {
-                    const size = compositionSize(base.w, base.h, canvas);
-                    change(
-                      selected.id,
-                      fitLayerToSource(
-                        selected,
-                        { width: dim.w, height: dim.h, bounds: dim.bounds },
-                        canvas.source,
-                        { width: base.w, height: base.h },
-                        { ...size, referenceWidth: base.w },
-                      ),
+                    const fitted = fitCompositionToContent(
+                      base.w,
+                      base.h,
+                      layers,
+                      layers.map((layer) => {
+                        const dimension = dimensions.get(layer.file)!;
+                        return {
+                          width: dimension.w,
+                          height: dimension.h,
+                          bounds: dimension.bounds,
+                        };
+                      }),
+                      canvas,
+                      sourceKind === 'video' ? undefined : base.bounds,
                     );
+                    publishChange(fitted.layers, fitted.composition);
                     setError('');
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : '无法贴合原图');
+                  } catch (cause) {
+                    setError(
+                      cause instanceof Error ? cause.message : '无法调整画布',
+                    );
                   }
                 }}
+                type="button"
               >
-                <Scan />
-                拉伸贴合原图
+                <Scan /> 一键适应内容
               </Button>
-            )}
-            <div className="transform-grid">
-              {(
-                [
-                  {
-                    key: 'x',
-                    label: '水平 X',
-                    min: -0.5,
-                    max: 1.5,
-                    step: 0.005,
-                  },
-                  {
-                    key: 'y',
-                    label: '垂直 Y',
-                    min: -0.5,
-                    max: 1.5,
-                    step: 0.005,
-                  },
-                  {
-                    key: 'scale',
-                    label: '等比缩放',
-                    min: 0.01,
-                    max: 6,
-                    step: 0.005,
-                  },
-                  {
-                    key: 'scaleX',
-                    label: '横向拉伸',
-                    min: 0.01,
-                    max: 6,
-                    step: 0.005,
-                  },
-                  {
-                    key: 'scaleY',
-                    label: '纵向拉伸',
-                    min: 0.01,
-                    max: 6,
-                    step: 0.005,
-                  },
-                  {
-                    key: 'opacity',
-                    label: '透明度',
-                    min: 0,
-                    max: 1,
-                    step: 0.01,
-                  },
-                  {
-                    key: 'rotation',
-                    label: '旋转',
-                    min: -360,
-                    max: 360,
-                    step: 1,
-                  },
-                ] as const
-              ).map((control) => (
-                <label key={control.key}>
+              <Button
+                disabled={disabled}
+                onClick={() => {
+                  const oldWidth = canvas.canvasWidth;
+                  const oldHeight = canvas.canvasHeight;
+                  onChange(
+                    layers.map((layer) => ({
+                      ...layer,
+                      x: 0.5 + (layer.x - 0.5) * oldWidth,
+                      y: 0.5 + (layer.y - 0.5) * oldHeight,
+                    })),
+                    {
+                      ...canvas,
+                      canvasWidth: 1,
+                      canvasHeight: 1,
+                      source: {
+                        ...canvas.source,
+                        x: 0.5 + (canvas.source.x - 0.5) * oldWidth,
+                        y: 0.5 + (canvas.source.y - 0.5) * oldHeight,
+                      },
+                    },
+                  );
+                }}
+                type="button"
+                variant="outline"
+              >
+                <RefreshCw /> 恢复原图画布
+              </Button>
+            </div>
+            <div className="mobile-advanced-grid">
+              {(['canvasWidth', 'canvasHeight'] as const).map((key) => (
+                <label key={key}>
                   <span>
-                    {control.label} ·{' '}
-                    {control.key === 'rotation'
-                      ? `${Math.round(selected.rotation)}°`
-                      : `${Math.round((selected[control.key] ?? 1) * 100)}%`}
+                    画布{key === 'canvasWidth' ? '宽' : '高'}（原图 %）
                   </span>
-                  <input
-                    aria-label={control.label}
-                    max={control.max}
-                    min={control.min}
-                    onChange={(e) =>
-                      change(selected.id, {
-                        [control.key]: Number(e.target.value),
-                      })
+                  <CanvasPercent
+                    label={
+                      key === 'canvasWidth'
+                        ? '画布宽度百分比'
+                        : '画布高度百分比'
                     }
-                    step={control.step}
-                    type="range"
-                    value={selected[control.key] ?? 1}
+                    onChange={(value) => {
+                      const next = { ...canvas, [key]: value };
+                      try {
+                        if (base) compositionSize(base.w, base.h, next);
+                        onChange(layers, next);
+                        setError('');
+                      } catch (cause) {
+                        setError(
+                          cause instanceof Error
+                            ? cause.message
+                            : '画布尺寸无效',
+                        );
+                      }
+                    }}
+                    value={canvas[key]}
                   />
                 </label>
               ))}
-              <fieldset className="crop-controls">
-                <legend>裁切当前图层</legend>
+              {backgroundVisible && (
+                <label>
+                  <span>空白区域</span>
+                  <select
+                    aria-label="空白区域底色"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      onChange(layers, {
+                        ...canvas,
+                        background:
+                          event.target.value === 'transparent'
+                            ? 'transparent'
+                            : '#ffffff',
+                      })
+                    }
+                    value={
+                      canvas.background === 'transparent'
+                        ? 'transparent'
+                        : 'color'
+                    }
+                  >
+                    <option value="transparent">保留透明</option>
+                    <option value="color">自定义颜色</option>
+                  </select>
+                </label>
+              )}
+              {backgroundVisible && canvas.background !== 'transparent' && (
+                <label>
+                  <span>自定义底色</span>
+                  <input
+                    aria-label="自定义画布底色"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      onChange(layers, {
+                        ...canvas,
+                        background: event.target.value,
+                      })
+                    }
+                    type="color"
+                    value={canvas.background}
+                  />
+                </label>
+              )}
+            </div>
+          </section>
+          {selected && (
+            <fieldset disabled={disabled || selected.locked}>
+              <legend>
+                {selected.id === SOURCE_LAYER_ID ? '原图' : '当前水印'} ·
+                精确参数
+              </legend>
+              <div className="mobile-advanced-grid">
+                {(
+                  [
+                    { key: 'x', label: '水平 X', min: -0.5, max: 1.5 },
+                    { key: 'y', label: '垂直 Y', min: -0.5, max: 1.5 },
+                    { key: 'scaleX', label: '横向拉伸', min: 0.01, max: 6 },
+                    { key: 'scaleY', label: '纵向拉伸', min: 0.01, max: 6 },
+                  ] as const
+                ).map((control) => (
+                  <label key={control.key}>
+                    <span>
+                      {control.label} ·{' '}
+                      {Math.round((selected[control.key] ?? 1) * 100)}%
+                    </span>
+                    <input
+                      aria-label={control.label}
+                      max={control.max}
+                      min={control.min}
+                      onChange={(event) =>
+                        change(selected.id, {
+                          [control.key]: Number(event.target.value),
+                        })
+                      }
+                      step=".005"
+                      type="range"
+                      value={selected[control.key] ?? 1}
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="mobile-advanced-crop">
+                <h4>裁切当前图层</h4>
                 {(['top', 'right', 'bottom', 'left'] as const).map((edge) => (
                   <label key={edge}>
                     <span>
@@ -978,11 +1310,11 @@ export function WatermarkEditor({
                     <input
                       max="0.49"
                       min="0"
-                      onChange={(e) =>
+                      onChange={(event) =>
                         change(selected.id, {
                           crop: {
                             ...selected.crop,
-                            [edge]: Number(e.target.value),
+                            [edge]: Number(event.target.value),
                           },
                         })
                       }
@@ -992,14 +1324,11 @@ export function WatermarkEditor({
                     />
                   </label>
                 ))}
-              </fieldset>
-            </div>
-          </fieldset>
-        )}
-        <p>
-          新上传的水印会自动存入水印库，可再补充作者、来源和分类。原图和各水印都可以独立锁定，锁定状态也会保存。
-        </p>
-      </fieldset>
+              </div>
+            </fieldset>
+          )}
+        </div>
+      </MobileWorkspaceSheet>
     </div>
   );
 }
