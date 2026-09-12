@@ -4,6 +4,7 @@
 <h1>视频引擎与开源许可</h1>
 <p>wxjj 在使用者自己的浏览器中处理视频。只有引擎静态文件从本站下载；原片、水印、提示词和配方不会发送给编码服务。</p>
 <section><h2>版本及许可</h2><ul>
+<li>Mediabunny 1.56.1：浏览器快速视频处理，<a href="licenses/mediabunny-MPL-2.0.txt">Mozilla Public License 2.0 全文</a>。上游源码未修改，<a href="https://registry.npmjs.org/mediabunny/-/mediabunny-1.56.1.tgz">本版本完整源码包</a>。</li>
 <li>@ffmpeg/ffmpeg 0.12.15：JavaScript 封装，<a href="licenses/ffmpeg-wrapper-MIT.txt">MIT 许可全文</a>。</li>
 <li>@ffmpeg/core 0.12.10：包含 FFmpeg 及外部编解码库，<a href="licenses/ffmpeg-gpl-2.0.txt">GPL 第 2 版或更新版本</a>。封装层的 MIT 许可不取代编码核心与各依赖的许可。</li>
 </ul><p>核心二进制未修改。为适配静态托管文件大小限制，WASM 被拆成 8 MB 分片，在浏览器中还原成原始字节。相关版本与下载来源锁定于项目的 package-lock.json。</p></section>

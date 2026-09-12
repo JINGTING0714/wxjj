@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { WatermarkEditor, type EditorLayer } from './watermark-editor';
 import { videoFirstFrame, watermarkVideo } from '@/lib/video-processing';
+import { VideoEngineSession } from '@/lib/video-engine';
 import { downloadBlob, downloadZip } from '@/lib/download';
 import {
   defaultComposition,
@@ -37,6 +38,7 @@ export function VideoWatermarkPanel() {
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState('');
+  const [progressValue, setProgressValue] = useState(0);
   const [error, setError] = useState('');
   const controller = useRef<AbortController | null>(null);
   const task = useRef<Promise<void> | null>(null);
@@ -86,7 +88,7 @@ export function VideoWatermarkPanel() {
     }
   };
   const run = (resume = false) => {
-    if (busy) return;
+    if (busy || task.current) return;
     const job =
       resume && state.job
         ? state.job
@@ -101,8 +103,10 @@ export function VideoWatermarkPanel() {
     const signal = controller.current.signal;
     setState((s) => ({ ...s, job }));
     setBusy(true);
+    setProgressValue(0);
     setError('');
     task.current = (async () => {
+      const engine = new VideoEngineSession();
       try {
         await workspace.flush();
         for (let i = job.next; i < job.todo.length; i++) {
@@ -112,12 +116,15 @@ export function VideoWatermarkPanel() {
             source.file,
             job.layers,
             signal,
-            (value, phase) =>
+            (value, phase) => {
+              setProgressValue(value);
               setProgress(
                 `${i + 1} / ${job.todo.length} · ${Math.round(value * 100)}% · ${phase}`,
-              ),
+              );
+            },
             job.composition,
             job.exportOptions || defaultVideoExport,
+            engine,
           );
           signal.throwIfAborted();
           setState((s) => ({
@@ -139,6 +146,7 @@ export function VideoWatermarkPanel() {
         else
           setProgress('已暂停；成品已保存，继续时从当前未完成视频重新处理。');
       } finally {
+        engine.dispose();
         setBusy(false);
         task.current = null;
       }
@@ -154,7 +162,8 @@ export function VideoWatermarkPanel() {
         WebM；视频会重新编码，不是原文件无损复制，也不会自动修复低清素材。
       </p>
       <p className="import-warning">
-        引擎和媒体处理均在本机，首次需从本站下载约 32 MB 引擎。每个文件最多 512
+        自动选择本机快速处理，兼容音轨会直接保留。透明视频或浏览器不支持快速处理时，使用兼容引擎（首次约
+        32 MB，同批只加载一次）。每个文件最多 512
         MB；大分辨率、长视频可能耗时较长或超出设备内存。处理不依赖前台播放；系统休眠、关窗或刷新仍会中断，可从未完成视频继续。MP4
         遇到奇数边长会补齐 1 像素。{' '}
         <a
@@ -171,6 +180,14 @@ export function VideoWatermarkPanel() {
         </p>
       )}
       {progress && <p role="status">{progress}</p>}
+      {busy && (
+        <progress
+          className="video-processing-progress"
+          aria-label="当前视频处理进度"
+          max={1}
+          value={progressValue}
+        />
+      )}
       <fieldset
         className="workshop-fieldset"
         disabled={busy || importing || !workspace.ready}
@@ -220,6 +237,7 @@ export function VideoWatermarkPanel() {
           }}
         />
         <WatermarkEditor
+          sourceKind="video"
           disabled={busy || importing}
           layers={state.layers}
           composition={state.composition}

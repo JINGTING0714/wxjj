@@ -7,20 +7,40 @@ import {
   Unlock,
   Plus,
   RefreshCw,
+  Scan,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
-import { loadImage, type WatermarkLayerInput } from '@/lib/image-processing';
+import {
+  loadImage,
+  imageContentBounds,
+  type WatermarkLayerInput,
+} from '@/lib/image-processing';
 import type { StoredWatermark } from '@/lib/prism-types';
 import {
   compositionStack,
+  fitCompositionToContent,
+  layerGeometry,
+  layerStretch,
+  compositionSize,
+  sourceCoversCanvas,
+  type ContentBounds,
   defaultComposition,
   resolveComposition,
   SOURCE_LAYER_ID,
   type WatermarkComposition,
 } from '@/lib/watermark-composition';
+import {
+  alignLayerToSource,
+  stretchLayer,
+  fitLayerToSource,
+  type AlignmentGuides,
+  type SceneSize,
+  type StretchEdge,
+} from '@/lib/watermark-interaction';
+import type { LayerDimensions } from '@/lib/watermark-composition';
 
 export type EditorLayer = WatermarkLayerInput & { id: string };
 export const defaultLayer = (file: File): EditorLayer => ({
@@ -29,6 +49,8 @@ export const defaultLayer = (file: File): EditorLayer => ({
   x: 0.5,
   y: 0.5,
   scale: 0.6,
+  scaleX: 1,
+  scaleY: 1,
   rotation: 0,
   opacity: 1,
   locked: false,
@@ -44,29 +66,30 @@ function CanvasPercent({
   label: string;
   onChange: (value: number) => void;
 }) {
-  const [draft, setDraft] = useState(String(Math.round(value * 100)));
-  useEffect(() => setDraft(String(Math.round(value * 100))), [value]);
+  const display = (n: number) => String(Math.round(n * 10000) / 100);
+  const [edit, setEdit] = useState({ value, draft: display(value) });
+  if (edit.value !== value) setEdit({ value, draft: display(value) });
+  const draft = edit.value === value ? edit.draft : display(value);
+  const setDraft = (draft: string) => setEdit({ value, draft });
   return (
     <input
       type="number"
-      min="20"
-      max="400"
-      step="1"
+      min="0.01"
+      step="0.01"
       aria-label={label}
       value={draft}
       onChange={(e) => {
         setDraft(e.target.value);
         const n = Number(e.target.value);
-        if (e.target.value && n >= 20 && n <= 400) onChange(n / 100);
+        if (e.target.value && Number.isFinite(n) && n > 0) onChange(n / 100);
       }}
       onBlur={() => {
         const n = Number(draft);
         const bounded =
-          draft && Number.isFinite(n)
-            ? Math.min(400, Math.max(20, n))
-            : value * 100;
-        setDraft(String(Math.round(bounded)));
-        onChange(Math.round(bounded) / 100);
+          draft && Number.isFinite(n) ? Math.max(0.01, n) : value * 100;
+        setDraft(String(bounded));
+        // Merely focusing a fitted percentage must not resize the canvas.
+        if (draft !== display(value)) onChange(bounded / 100);
       }}
     />
   );
@@ -74,20 +97,27 @@ function CanvasPercent({
 export function WatermarkEditor({
   source,
   layers,
-  onChange,
+  onChange: publishChange,
   composition,
   disabled = false,
+  sourceKind = 'image',
 }: {
   source?: File;
   layers: EditorLayer[];
   onChange: (layers: EditorLayer[], composition?: WatermarkComposition) => void;
   composition?: WatermarkComposition;
   disabled?: boolean;
+  sourceKind?: 'image' | 'video';
 }) {
   const vault = useVault();
   const [active, setActive] = useState('');
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [guides, setGuides] = useState<AlignmentGuides | null>(null);
   const [dimensions, setDimensions] = useState(
-    new Map<File, { w: number; h: number }>(),
+    new Map<
+      File,
+      { w: number; h: number; bounds?: ContentBounds | null; opaque: boolean }
+    >(),
   );
   const [error, setError] = useState('');
   const [library, setLibrary] = useState<
@@ -97,6 +127,11 @@ export function WatermarkEditor({
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
   const canvas = resolveComposition(composition);
+  const onChange = (
+    nextLayers: EditorLayer[],
+    nextCanvas?: WatermarkComposition,
+  ) =>
+    publishChange(nextLayers, { ...(nextCanvas ?? canvas), fitContent: false });
   const stack = source
     ? compositionStack(
         layers,
@@ -120,6 +155,9 @@ export function WatermarkEditor({
     mode: string;
     element: HTMLElement;
     next: Partial<EditorLayer>;
+    layer: EditorLayer;
+    dimensions: LayerDimensions;
+    scene: SceneSize;
   } | null>(null);
   const frame = useRef<number>(0);
   const currentLayers = useRef(layers);
@@ -173,7 +211,12 @@ export function WatermarkEditor({
       for (const file of list)
         if (!updated.has(file)) {
           const image = await loadImage(file);
-          updated.set(file, { w: image.naturalWidth, h: image.naturalHeight });
+          const content = imageContentBounds(image);
+          updated.set(file, {
+            w: image.naturalWidth,
+            h: image.naturalHeight,
+            ...content,
+          });
           changed = true;
         }
       if (!cancelled && changed) setDimensions(updated);
@@ -252,6 +295,17 @@ export function WatermarkEditor({
   };
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
     if (disabled || layer.locked || !surface.current) return;
+    if (drag.current && drag.current.pointer !== event.pointerId) return;
+    const dim = dimensions.get(layer.file);
+    const original = source && dimensions.get(source);
+    if (!dim || !original) return;
+    let size;
+    try {
+      size = compositionSize(original.w, original.h, canvas);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '画布尺寸无效');
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     setActive(layer.id);
@@ -272,6 +326,9 @@ export function WatermarkEditor({
       mode: (event.target as HTMLElement).dataset.action || 'move',
       element: event.currentTarget,
       next: {},
+      layer,
+      dimensions: { width: dim.w, height: dim.h, bounds: dim.bounds },
+      scene: { ...size, referenceWidth: original.w },
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -306,27 +363,60 @@ export function WatermarkEditor({
             180) /
             Math.PI,
       };
-    else
+    else if (d.mode.startsWith('stretch-')) {
+      const next = stretchLayer(
+        d.layer,
+        d.dimensions,
+        d.scene,
+        d.mode.slice(8) as StretchEdge,
+        {
+          x: ((event.clientX - d.px) * d.scene.width) / rect.width,
+          y: ((event.clientY - d.py) * d.scene.height) / rect.height,
+        },
+      );
       d.next = {
-        x: Math.max(
-          -0.5,
-          Math.min(1.5, d.x + (event.clientX - d.px) / rect.width),
-        ),
-        y: Math.max(
-          -0.5,
-          Math.min(1.5, d.y + (event.clientY - d.py) / rect.height),
-        ),
+        x: next.x,
+        y: next.y,
+        scaleX: next.scaleX,
+        scaleY: next.scaleY,
       };
+    } else
+      d.next = {
+        x: d.x + (event.clientX - d.px) / rect.width,
+        y: d.y + (event.clientY - d.py) / rect.height,
+      };
+    let nextGuides: AlignmentGuides | null = null;
+    const original = source && dimensions.get(source);
+    if (d.id !== SOURCE_LAYER_ID && original) {
+      const aligned = alignLayerToSource(
+        { ...d.layer, ...d.next },
+        d.dimensions,
+        currentCanvas.current.source,
+        { width: original.w, height: original.h },
+        d.scene,
+        ((event.pointerType === 'touch' ? 10 : 7) * d.scene.width) / rect.width,
+        d.mode === 'move' && snapEnabled && !event.altKey,
+      );
+      nextGuides = aligned.guides.lines.length ? aligned.guides : null;
+      if (d.mode === 'move')
+        d.next = { ...d.next, x: aligned.layer.x, y: aligned.layer.y };
+    }
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
       if (!drag.current) return;
-      const p = d.next;
-      if (p.x !== undefined) d.element.style.left = `${p.x * 100}%`;
-      if (p.y !== undefined) d.element.style.top = `${p.y * 100}%`;
-      if (p.scale !== undefined)
-        d.element.style.width = `${(p.scale / currentCanvas.current.canvasWidth) * 100}%`;
-      if (p.rotation !== undefined)
-        d.element.style.transform = `translate(-50%, -50%) rotate(${p.rotation}deg)`;
+      const p = { ...d.layer, ...d.next };
+      const size = layerGeometry(
+        p,
+        d.dimensions.width,
+        d.dimensions.height,
+        d.scene.referenceWidth,
+      );
+      d.element.style.left = `${p.x * 100}%`;
+      d.element.style.top = `${p.y * 100}%`;
+      d.element.style.width = `${(size.width / d.scene.width) * 100}%`;
+      d.element.style.aspectRatio = `${size.width}/${size.height}`;
+      d.element.style.transform = `translate(-50%, -50%) rotate(${p.rotation}deg)`;
+      setGuides(nextGuides);
     });
   };
   const end = (event: PointerEvent<HTMLDivElement>) => {
@@ -335,14 +425,33 @@ export function WatermarkEditor({
     cancelAnimationFrame(frame.current);
     change(d.id, d.next);
     drag.current = null;
+    setGuides(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const base = source && dimensions.get(source);
+  const backgroundVisible = (() => {
+    if (!base || !base.opaque) return true;
+    try {
+      return !sourceCoversCanvas(base.w, base.h, canvas);
+    } catch {
+      return true;
+    }
+  })();
   return (
     <div className="watermark-layout watermark-free-editor">
       <section className="watermark-input-panel">
         <h3>第一张样本 · 自由摆放</h3>
+        <label className="watermark-snap-control">
+          <input
+            type="checkbox"
+            checked={snapEnabled}
+            disabled={disabled}
+            onChange={(event) => setSnapEnabled(event.target.checked)}
+          />
+          贴边自动吸附
+          <span>继续拖动可越过边界 · 电脑按住 Alt 可暂时关闭</span>
+        </label>
         <div className="watermark-stage dom-watermark-stage">
           {base && sourceUrl ? (
             <div
@@ -386,9 +495,9 @@ export function WatermarkEditor({
                     style={{
                       left: `${layer.x * 100}%`,
                       top: `${layer.y * 100}%`,
-                      width: `${(layer.scale / canvas.canvasWidth) * 100}%`,
+                      width: `${((layer.scale * layerStretch(layer.scaleX)) / canvas.canvasWidth) * 100}%`,
                       zIndex: i,
-                      aspectRatio: `${dim.w * widthFactor}/${dim.h * heightFactor}`,
+                      aspectRatio: `${dim.w * widthFactor * layerStretch(layer.scaleX)}/${dim.h * heightFactor * layerStretch(layer.scaleY)}`,
                       transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
                     }}
                     tabIndex={disabled || layer.locked ? -1 : 0}
@@ -417,6 +526,19 @@ export function WatermarkEditor({
                     </div>
                     {layer.id === selectedId && !disabled && !layer.locked && (
                       <>
+                        {(['left', 'right', 'top', 'bottom'] as const).map(
+                          (edge) => (
+                            <button
+                              key={edge}
+                              type="button"
+                              tabIndex={-1}
+                              className={`stretch-handle stretch-${edge}`}
+                              data-action={`stretch-${edge}`}
+                              aria-label={`向${{ left: '左', right: '右', top: '上', bottom: '下' }[edge]}拉伸当前图层`}
+                              title="拖动此边可独立拉伸宽或高"
+                            />
+                          ),
+                        )}
                         <i
                           className="transform-handle top-left"
                           data-action="scale"
@@ -443,6 +565,28 @@ export function WatermarkEditor({
                   </div>
                 );
               })}
+              {guides && (
+                <svg
+                  className="watermark-alignment-guides"
+                  viewBox={`0 0 ${base.w * canvas.canvasWidth} ${base.h * canvas.canvasHeight}`}
+                  aria-hidden="true"
+                >
+                  <polygon
+                    points={guides.outline
+                      .map((point) => `${point.x},${point.y}`)
+                      .join(' ')}
+                  />
+                  {guides.lines.map((line) => (
+                    <line
+                      key={line.label}
+                      x1={line.from.x}
+                      y1={line.from.y}
+                      x2={line.to.x}
+                      y2={line.to.y}
+                    />
+                  ))}
+                </svg>
+              )}
             </div>
           ) : (
             <div className="watermark-stage-empty">
@@ -450,8 +594,13 @@ export function WatermarkEditor({
             </div>
           )}
         </div>
+        <output className="watermark-alignment-status">
+          {guides
+            ? `对齐提示：${guides.lines.map((line) => line.label).join(' · ')}`
+            : '拖动水印靠近原图边缘或中心，会出现对齐参考线。'}
+        </output>
         <p className="stage-tip">
-          原图默认锁定；解锁后与水印一样可拖动、缩放、旋转和裁切。四角缩放，顶部圆点旋转，也可用右侧滑块。原图外的内容保留在扩展画布内，只有超出画布边界的部分不导出。样本按比例应用到整批。
+          四角等比缩放，四条边中间的手柄分别拉伸宽、高，顶部圆点旋转；也可用滑块调整。原图默认锁定。对齐线只作辅助，水印可以放在原图外；摆好后点击“一键适应内容”收齐导出边界。样本按比例应用到整批。
         </p>
         {error && <p className="error-banner">{error}</p>}
       </section>
@@ -461,7 +610,38 @@ export function WatermarkEditor({
       >
         <h3>画布、图层与变换</h3>
         <div className="composition-controls">
-          <p>扩展画布可容纳相框；图层的大小不会随画布扩展而被自动拉伸。</p>
+          <p>
+            摆好原图和水印后，一键收齐四周边界。图层大小和相对位置保持不变。
+          </p>
+          <Button
+            type="button"
+            disabled={
+              !base || layers.some((layer) => !dimensions.has(layer.file))
+            }
+            onClick={() => {
+              if (!base) return;
+              try {
+                const fitted = fitCompositionToContent(
+                  base.w,
+                  base.h,
+                  layers,
+                  layers.map((layer) => {
+                    const d = dimensions.get(layer.file)!;
+                    return { width: d.w, height: d.h, bounds: d.bounds };
+                  }),
+                  canvas,
+                  sourceKind === 'video' ? undefined : base.bounds,
+                );
+                publishChange(fitted.layers, fitted.composition);
+                setError('');
+              } catch (e) {
+                setError(e instanceof Error ? e.message : '无法调整画布');
+              }
+            }}
+          >
+            <Scan />
+            一键适应内容
+          </Button>
           <Button
             className="composition-reset"
             variant="outline"
@@ -501,34 +681,45 @@ export function WatermarkEditor({
                   label={
                     key === 'canvasWidth' ? '画布宽度百分比' : '画布高度百分比'
                   }
-                  onChange={(value) =>
-                    onChange(layers, { ...canvas, [key]: value })
-                  }
+                  onChange={(value) => {
+                    const next = { ...canvas, [key]: value };
+                    try {
+                      if (base) compositionSize(base.w, base.h, next);
+                      onChange(layers, next);
+                      setError('');
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '画布尺寸无效');
+                    }
+                  }}
                 />
               </label>
             ))}
-            <label>
-              <span>画布底色</span>
-              <select
-                aria-label="画布底色"
-                value={
-                  canvas.background === 'transparent' ? 'transparent' : 'color'
-                }
-                onChange={(e) =>
-                  onChange(layers, {
-                    ...canvas,
-                    background:
-                      e.target.value === 'transparent'
-                        ? 'transparent'
-                        : '#ffffff',
-                  })
-                }
-              >
-                <option value="transparent">透明</option>
-                <option value="color">自定义颜色</option>
-              </select>
-            </label>
-            {canvas.background !== 'transparent' && (
+            {backgroundVisible && (
+              <label>
+                <span>空白区域</span>
+                <select
+                  aria-label="空白区域底色"
+                  value={
+                    canvas.background === 'transparent'
+                      ? 'transparent'
+                      : 'color'
+                  }
+                  onChange={(e) =>
+                    onChange(layers, {
+                      ...canvas,
+                      background:
+                        e.target.value === 'transparent'
+                          ? 'transparent'
+                          : '#ffffff',
+                    })
+                  }
+                >
+                  <option value="transparent">保留透明</option>
+                  <option value="color">自定义颜色</option>
+                </select>
+              </label>
+            )}
+            {backgroundVisible && canvas.background !== 'transparent' && (
               <label>
                 <span>自定义底色</span>
                 <input
@@ -542,6 +733,13 @@ export function WatermarkEditor({
               </label>
             )}
           </div>
+          <p className="canvas-background-note">
+            {backgroundVisible
+              ? sourceKind === 'video'
+                ? '底色只填原视频以外或透出的空白。保留透明会导出 WebM，处理较慢；选择颜色可导出更快的 MP4。'
+                : '底色只填原图以外或透出的空白；透明棋盘格仅用于预览，不会出现在成品中。'
+              : '原图已铺满画布，底色不会影响成品。'}
+          </p>
         </div>
         <div className="layer-source-actions">
           <label className="mini-file">
@@ -659,6 +857,36 @@ export function WatermarkEditor({
               <RefreshCw />
               重置本层
             </Button>
+            {selected.id !== SOURCE_LAYER_ID && base && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const dim = dimensions.get(selected.file);
+                  if (!dim) return;
+                  try {
+                    const size = compositionSize(base.w, base.h, canvas);
+                    change(
+                      selected.id,
+                      fitLayerToSource(
+                        selected,
+                        { width: dim.w, height: dim.h, bounds: dim.bounds },
+                        canvas.source,
+                        { width: base.w, height: base.h },
+                        { ...size, referenceWidth: base.w },
+                      ),
+                    );
+                    setError('');
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : '无法贴合原图');
+                  }
+                }}
+              >
+                <Scan />
+                拉伸贴合原图
+              </Button>
+            )}
             <div className="transform-grid">
               {(
                 [
@@ -678,7 +906,21 @@ export function WatermarkEditor({
                   },
                   {
                     key: 'scale',
-                    label: '缩放',
+                    label: '等比缩放',
+                    min: 0.01,
+                    max: 6,
+                    step: 0.005,
+                  },
+                  {
+                    key: 'scaleX',
+                    label: '横向拉伸',
+                    min: 0.01,
+                    max: 6,
+                    step: 0.005,
+                  },
+                  {
+                    key: 'scaleY',
+                    label: '纵向拉伸',
                     min: 0.01,
                     max: 6,
                     step: 0.005,
@@ -704,7 +946,7 @@ export function WatermarkEditor({
                     {control.label} ·{' '}
                     {control.key === 'rotation'
                       ? `${Math.round(selected.rotation)}°`
-                      : `${Math.round(selected[control.key] * 100)}%`}
+                      : `${Math.round((selected[control.key] ?? 1) * 100)}%`}
                   </span>
                   <input
                     aria-label={control.label}
@@ -717,7 +959,7 @@ export function WatermarkEditor({
                     }
                     step={control.step}
                     type="range"
-                    value={selected[control.key]}
+                    value={selected[control.key] ?? 1}
                   />
                 </label>
               ))}

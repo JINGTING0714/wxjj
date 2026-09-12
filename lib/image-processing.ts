@@ -1,7 +1,10 @@
 import {
   compositionSize,
   compositionStack,
+  fitCompositionToContent,
+  layerGeometry,
   resolveComposition,
+  type ContentBounds,
   type LayerTransform,
   type WatermarkComposition,
 } from './watermark-composition';
@@ -24,15 +27,8 @@ export type WatermarkCrop = {
   left: number;
 };
 
-export type WatermarkLayerInput = {
+export type WatermarkLayerInput = LayerTransform & {
   file: File;
-  opacity: number;
-  x: number;
-  y: number;
-  scale: number;
-  rotation: number;
-  crop: WatermarkCrop;
-  locked?: boolean;
 };
 
 export type ProcessedImage = {
@@ -95,6 +91,84 @@ export function canvasBlob(
       quality,
     );
   });
+}
+
+const contentMeasurements = new WeakMap<
+  HTMLImageElement,
+  { bounds: ContentBounds | null; opaque: boolean }
+>();
+/** Scan in strips: transparent PNG padding must not enlarge an automatic canvas. */
+export function imageContentBounds(image: HTMLImageElement) {
+  const cached = contentMeasurements.get(image);
+  if (cached) return cached;
+  const width = image.naturalWidth,
+    height = image.naturalHeight;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = Math.min(128, height);
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('无法测量图层边界');
+  let left = width,
+    right = 0,
+    top = height,
+    bottom = 0,
+    opaque = true;
+  try {
+    for (let y = 0; y < height; y += canvas.height) {
+      const rows = Math.min(canvas.height, height - y);
+      context.clearRect(0, 0, width, canvas.height);
+      context.drawImage(image, 0, y, width, rows, 0, 0, width, rows);
+      const pixels = context.getImageData(0, 0, width, rows).data;
+      for (let i = 3; i < pixels.length; i += 4) {
+        if (pixels[i] < 255) opaque = false;
+        if (!pixels[i]) continue;
+        const x = ((i - 3) / 4) % width,
+          py = y + Math.floor((i - 3) / 4 / width);
+        left = Math.min(left, x);
+        right = Math.max(right, x + 1);
+        top = Math.min(top, py);
+        bottom = Math.max(bottom, py + 1);
+      }
+    }
+    const result = {
+      bounds:
+        right > left
+          ? {
+              left: left / width,
+              top: top / height,
+              right: right / width,
+              bottom: bottom / height,
+            }
+          : null,
+      opaque,
+    };
+    contentMeasurements.set(image, result);
+    return result;
+  } finally {
+    canvas.width = canvas.height = 0;
+  }
+}
+
+export function fitImageComposition<T extends WatermarkLayerInput>(
+  width: number,
+  height: number,
+  layers: T[],
+  decoded: HTMLImageElement[],
+  composition?: WatermarkComposition,
+  source?: HTMLImageElement,
+) {
+  return fitCompositionToContent(
+    width,
+    height,
+    layers,
+    decoded.map((image) => ({
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      bounds: imageContentBounds(image).bounds,
+    })),
+    composition,
+    source ? imageContentBounds(source).bounds : undefined,
+  );
 }
 
 function drawCover(
@@ -184,16 +258,14 @@ export function drawCompositionLayer(
   naturalHeight: number,
   referenceWidth: number,
 ) {
-  const cropLeft = Math.max(0, Math.min(0.49, layer.crop.left));
-  const cropRight = Math.max(0, Math.min(0.49, layer.crop.right));
-  const cropTop = Math.max(0, Math.min(0.49, layer.crop.top));
-  const cropBottom = Math.max(0, Math.min(0.49, layer.crop.bottom));
-  const sourceX = naturalWidth * cropLeft;
-  const sourceY = naturalHeight * cropTop;
-  const sourceWidth = naturalWidth * Math.max(0.02, 1 - cropLeft - cropRight);
-  const sourceHeight = naturalHeight * Math.max(0.02, 1 - cropTop - cropBottom);
-  const drawWidth = referenceWidth * Math.max(0.01, Math.min(6, layer.scale));
-  const drawHeight = drawWidth / (sourceWidth / sourceHeight);
+  const {
+    sx: sourceX,
+    sy: sourceY,
+    sw: sourceWidth,
+    sh: sourceHeight,
+    width: drawWidth,
+    height: drawHeight,
+  } = layerGeometry(layer, naturalWidth, naturalHeight, referenceWidth);
   context.save();
   context.globalAlpha = Math.max(0, Math.min(layer.opacity, 1));
   context.translate(width * layer.x, height * layer.y);
@@ -274,11 +346,21 @@ export async function applyWatermarks(
     signal?.throwIfAborted();
     const file = files[index];
     const base = await loadImage(file);
+    const fitted = composition?.fitContent
+      ? fitImageComposition(
+          base.naturalWidth,
+          base.naturalHeight,
+          layers,
+          decodedLayers,
+          composition,
+          base,
+        )
+      : { layers, composition };
     const canvas = document.createElement('canvas');
     const size = compositionSize(
       base.naturalWidth,
       base.naturalHeight,
-      composition,
+      fitted.composition,
     );
     canvas.width = size.width;
     canvas.height = size.height;
@@ -291,9 +373,9 @@ export async function applyWatermarks(
       base,
       base.naturalWidth,
       base.naturalHeight,
-      layers,
+      fitted.layers,
       decodedLayers,
-      composition,
+      fitted.composition,
     );
     signal?.throwIfAborted();
 

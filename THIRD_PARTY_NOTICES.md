@@ -12,6 +12,7 @@ PRISM includes or builds upon the following open-source projects. Their original
 - JSZip — Copyright Stuart Knightley and contributors, MIT License (used under the MIT option).
 - PDF.js — Copyright Mozilla Foundation, Apache License 2.0.
 - fix-webm-duration — Copyright Yusitnikov and contributors, MIT License.
+- Mediabunny 1.56.1 — Copyright Vanilagy and contributors, Mozilla Public License 2.0. Distributed without upstream source modifications. License: `public/licenses/mediabunny-MPL-2.0.txt`. Exact corresponding source is included in the [1.56.1 package archive](https://registry.npmjs.org/mediabunny/-/mediabunny-1.56.1.tgz).
 - @ffmpeg/ffmpeg 0.12.15 — Copyright ffmpeg.wasm contributors, MIT License.
 - @ffmpeg/core 0.12.10 — FFmpeg and its linked codec libraries, GPL-2.0-or-later. This is not covered by the wrapper's MIT license. It is distributed unmodified, split into static chunks and reconstructed byte-for-byte in the browser. License copies and corresponding upstream source/build references are available in `public/licenses/` and `public/media-engine-notices.html`.
 - Fontsource Geist / Geist Mono packages — bundled font files under SIL Open Font License 1.1.

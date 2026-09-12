@@ -606,7 +606,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 </div>
               </div>
               <div className="record-secret">
-                <div className="recipe-entry-list">
+                <div className="record-secret-value recipe-entry-list">
                   {[...entries, ...(recipe.manualEntries || [])].map((e) => (
                     <div key={e.id}>
                       <span>

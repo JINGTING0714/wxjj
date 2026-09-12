@@ -142,12 +142,13 @@ test('bulk deletion changes only selected records and blobs, never their collect
   assert.equal((await loadEncryptedBlobs(key, 'asset-image:a')).length, 0);
 });
 
-test('expanded canvas, source transform, layer order and locks survive full backup restore exactly', async () => {
+test('fitted canvas, independent stretch, layer order and locks survive full backup restore exactly', async () => {
   const key = await createVault('composition-test-password');
   const composition = defaultComposition();
   composition.canvasWidth = 1.5;
   composition.canvasHeight = 1.2;
   composition.sourceIndex = 1;
+  composition.fitContent = true;
   composition.source = {
     ...composition.source,
     locked: false,
@@ -155,13 +156,24 @@ test('expanded canvas, source transform, layer order and locks survive full back
     y: 0.6,
     rotation: 37,
     scale: 0.72,
+    scaleX: 1.4,
+    scaleY: 0.65,
   };
   const data = {
     batches: [
       {
         id: 'one',
         composition,
-        layers: [{ id: 'frame', locked: true, x: 0.5, y: 0.5 }],
+        layers: [
+          {
+            id: 'frame',
+            locked: true,
+            x: 0.5,
+            y: 0.5,
+            scaleX: 0.75,
+            scaleY: 2.3,
+          },
+        ],
       },
     ],
   };

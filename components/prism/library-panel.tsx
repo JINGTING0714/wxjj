@@ -615,7 +615,9 @@ function SimpleLibraryPanel({
                 </div>
               </div>
               <div className="record-secret">
-                <div className={!isRevealed ? 'is-obscured' : ''}>
+                <div
+                  className={`record-secret-value ${!isRevealed ? 'is-obscured' : ''}`}
+                >
                   <code>{visibleValue}</code>
                 </div>
                 {kind === 'profile' && (

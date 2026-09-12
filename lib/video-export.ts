@@ -1,5 +1,7 @@
 import {
   compositionSize,
+  layerGeometry,
+  layerStretch,
   resolveComposition,
   type WatermarkComposition,
 } from './watermark-composition';
@@ -30,6 +32,7 @@ export function videoExportPlan(
   composition: WatermarkComposition | undefined,
   options: VideoExportOptions,
   hasTransparency: boolean,
+  sourceHasTransparency = false,
 ) {
   const c = resolveComposition(composition);
   const size = compositionSize(width, height, c);
@@ -49,25 +52,62 @@ export function videoExportPlan(
   const sh =
     height *
     Math.max(0.02, 1 - crop(c.source.crop.top) - crop(c.source.crop.bottom));
-  const dw = Math.max(
-    1,
-    Math.round(width * Math.max(0.01, Math.min(6, c.source.scale))),
-  );
-  const dh = Math.max(1, Math.round((dw * sh) / sw));
+  const geometry = layerGeometry(c.source, width, height, width);
+  const dw = Math.max(1, Math.round(geometry.width));
+  const dh = Math.max(1, Math.round(geometry.height));
   const number = (n: number) => {
     if (!Number.isFinite(n)) throw new Error('水印变换参数无效');
     return String(Math.round(n * 1000000) / 1000000);
   };
   const angle = number((c.source.rotation * Math.PI) / 180);
-  const sourceFilter = `crop=${number(sw)}:${number(sh)}:${number(width * crop(c.source.crop.left))}:${number(height * crop(c.source.crop.top))}:exact=1,scale=${dw}:${dh}:flags=lanczos,format=rgba,colorchannelmixer=aa=${number(c.source.opacity)},rotate=${angle}:ow=rotw(${angle}):oh=roth(${angle}):c=none`;
-  const filter = [
-    '[0:v]setpts=PTS-STARTPTS,split[video][clock]',
-    `[clock]scale=${size.width}:${size.height},format=rgba,colorchannelmixer=aa=0[empty]`,
-    '[empty][1:v]overlay=0:0:format=auto:shortest=1[bg]',
-    `[video]${sourceFilter}[src]`,
-    `[bg][src]overlay=x=${number(size.width * c.source.x)}-overlay_w/2:y=${number(size.height * c.source.y)}-overlay_h/2:format=auto:shortest=1[body]`,
-    `[body][2:v]overlay=0:0:format=auto:shortest=1${alpha ? ',format=yuva420p' : ',pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p'}[out]`,
-  ].join(';');
+  const sourceFilter = [
+    ...(Object.values(c.source.crop).some(Boolean)
+      ? [
+          `crop=${number(sw)}:${number(sh)}:${number(width * crop(c.source.crop.left))}:${number(height * crop(c.source.crop.top))}:exact=1`,
+        ]
+      : []),
+    ...(dw !== Math.round(sw) || dh !== Math.round(sh)
+      ? [`scale=${dw}:${dh}:flags=lanczos`]
+      : []),
+    'format=rgba',
+    ...(c.source.opacity !== 1
+      ? [`colorchannelmixer=aa=${number(c.source.opacity)}`]
+      : []),
+    ...(c.source.rotation % 360 !== 0
+      ? [`rotate=${angle}:ow=rotw(${angle}):oh=roth(${angle}):c=none`]
+      : []),
+  ].join(',');
+  const direct =
+    !alpha &&
+    !sourceHasTransparency &&
+    size.width === width &&
+    size.height === height &&
+    c.source.scale === 1 &&
+    layerStretch(c.source.scaleX) === 1 &&
+    layerStretch(c.source.scaleY) === 1 &&
+    c.source.x === 0.5 &&
+    c.source.y === 0.5 &&
+    c.source.opacity === 1 &&
+    c.source.rotation % 360 === 0 &&
+    !Object.values(c.source.crop).some(Boolean);
+  const finalFormat = alpha
+    ? ',format=yuva420p,setsar=1'
+    : ',pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p,setsar=1';
+  // Output dimensions describe square canvas pixels. In particular the 1x1
+  // timing layer must not leave its own aspect ratio in the encoded metadata.
+  const filter = direct
+    ? [
+        '[0:v]setpts=PTS-STARTPTS[body]',
+        `[body][1:v]overlay=0:0:format=auto:eof_action=repeat${finalFormat}[out]`,
+      ].join(';')
+    : [
+        '[0:v]setpts=PTS-STARTPTS,split[video][clock]',
+        `[clock]crop=1:1:0:0:exact=1,format=rgba,colorchannelmixer=aa=0,scale=${size.width}:${size.height}:flags=neighbor[empty]`,
+        '[empty][1:v]overlay=0:0:format=auto:eof_action=repeat[bg]',
+        `[video]${sourceFilter}[src]`,
+        `[bg][src]overlay=x=${number(size.width * c.source.x)}-overlay_w/2:y=${number(size.height * c.source.y)}-overlay_h/2:format=auto:shortest=1[body]`,
+        `[body][2:v]overlay=0:0:format=auto:eof_action=repeat${finalFormat}[out]`,
+      ].join(';');
   const crf = options.quality === 'ultra' ? '16' : '20';
   // This pinned WASM core's VP9 alpha path crashes on real-sized video.
   // VP8 carries the same WebM alpha channel; use a generous pixel-based
@@ -82,15 +122,11 @@ export function videoExportPlan(
     extension,
     mime: alpha ? 'video/webm' : 'video/mp4',
     filter,
+    direct,
     args: [
       '-i',
       'input',
-      '-loop',
-      '1',
-      '-i',
-      'under.png',
-      '-loop',
-      '1',
+      ...(!direct ? ['-i', 'under.png'] : []),
       '-i',
       'over.png',
       '-filter_complex_threads',
@@ -120,9 +156,9 @@ export function videoExportPlan(
             '-lag-in-frames',
             '0',
             '-deadline',
-            'good',
+            options.quality === 'ultra' ? 'good' : 'realtime',
             '-cpu-used',
-            '4',
+            options.quality === 'ultra' ? '4' : '8',
             '-metadata:s:v:0',
             'alpha_mode=1',
             '-c:a',
@@ -134,7 +170,7 @@ export function videoExportPlan(
             '-crf',
             crf,
             '-preset',
-            'fast',
+            options.quality === 'ultra' ? 'fast' : 'ultrafast',
             '-pix_fmt',
             'yuv420p',
             '-movflags',
