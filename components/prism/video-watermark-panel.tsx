@@ -6,6 +6,7 @@ import {
   Layers3,
   Pause,
   SlidersHorizontal,
+  Settings2,
   Trash2,
   Upload,
   Video,
@@ -69,6 +70,7 @@ export function VideoWatermarkPanel() {
   const [mobilePanel, setMobilePanel] = useState<VideoMobilePanel>('preview');
   const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [outputSettingsOpen, setOutputSettingsOpen] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const task = useRef<Promise<void> | null>(null);
   const urls = useFileUrls(state.outputs.map((o) => o.file));
@@ -337,7 +339,7 @@ export function VideoWatermarkPanel() {
               <h3>格式、处理与成品</h3>
               <p>{state.outputs.length} 个视频成品。</p>
             </div>
-            <div className="video-export-settings">
+            <div className="video-export-settings desktop-workspace-only">
               <label>
                 <span>视频格式</span>
                 <select
@@ -382,6 +384,20 @@ export function VideoWatermarkPanel() {
                 </select>
               </label>
             </div>
+            <button
+              className="mobile-output-settings-summary mobile-workspace-only"
+              onClick={() => setOutputSettingsOpen(true)}
+              type="button"
+            >
+              <span>
+                <strong>视频导出配置</strong>
+                <small>
+                  {(state.exportOptions || defaultVideoExport).format} ·{' '}
+                  {(state.exportOptions || defaultVideoExport).quality}
+                </small>
+              </span>
+              <Settings2 />
+            </button>
             <div className="video-mobile-progress mobile-workspace-only">
               {progress && <p role="status">{progress}</p>}
               {busy && (
@@ -547,6 +563,57 @@ export function VideoWatermarkPanel() {
           openByDefault
           sources={state.sources}
         />
+      </MobileWorkspaceSheet>
+      <MobileWorkspaceSheet
+        description="格式与质量按需设置，主输出页只保留当前配置摘要。"
+        onOpenChange={setOutputSettingsOpen}
+        open={outputSettingsOpen}
+        title="视频导出配置"
+      >
+        <div className="video-export-settings mobile-video-export-settings">
+          <label>
+            <span>视频格式</span>
+            <select
+              aria-label="视频格式"
+              disabled={busy || importing || !workspace.ready}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  exportOptions: {
+                    ...(current.exportOptions || defaultVideoExport),
+                    format: event.target.value as VideoExportOptions['format'],
+                  },
+                }))
+              }
+              value={(state.exportOptions || defaultVideoExport).format}
+            >
+              <option value="auto">自动 · 普通 MP4 / 透明 WebM</option>
+              <option value="mp4">MP4 · 通用播放（不支持透明）</option>
+              <option value="webm-alpha">WebM · 保留透明背景</option>
+            </select>
+          </label>
+          <label>
+            <span>视频质量</span>
+            <select
+              aria-label="视频质量"
+              disabled={busy || importing || !workspace.ready}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  exportOptions: {
+                    ...(current.exportOptions || defaultVideoExport),
+                    quality: event.target
+                      .value as VideoExportOptions['quality'],
+                  },
+                }))
+              }
+              value={(state.exportOptions || defaultVideoExport).quality}
+            >
+              <option value="high">高清 · 原始分辨率</option>
+              <option value="ultra">更高质量 · 文件更大</option>
+            </select>
+          </label>
+        </div>
       </MobileWorkspaceSheet>
       <MobileWorkspaceSheet
         description="完整视频预览与下载只在这里展开，不占用主工作台高度。"

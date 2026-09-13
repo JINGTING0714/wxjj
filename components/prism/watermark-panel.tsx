@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   SlidersHorizontal,
+  Settings2,
   Stamp,
   Trash2,
   Upload,
@@ -261,6 +262,7 @@ export function WatermarkPanel({
   const [batchSheetOpen, setBatchSheetOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
+  const [outputSettingsOpen, setOutputSettingsOpen] = useState(false);
   const batch =
     state.batches.find((b) => b.id === state.active) || state.batches[0];
   const update = (id: string, change: (old: Batch) => Batch) =>
@@ -686,7 +688,7 @@ export function WatermarkPanel({
                     {batch.sources.length} 张原图 · {batch.layers.length} 层水印
                   </p>
                 </div>
-                <label className="check-line">
+                <label className="check-line desktop-workspace-only">
                   <input
                     checked={batch.autoSend}
                     disabled={running[batch.id] !== undefined}
@@ -700,6 +702,19 @@ export function WatermarkPanel({
                   />
                   每张完成后自动送入拼图队列（仍可在等待区标记不合格并移除）
                 </label>
+                <button
+                  className="mobile-output-settings-summary mobile-workspace-only"
+                  onClick={() => setOutputSettingsOpen(true)}
+                  type="button"
+                >
+                  <span>
+                    <strong>导出配置</strong>
+                    <small>
+                      {batch.autoSend ? '完成后自动送入拼图' : '仅保留水印成品'}
+                    </small>
+                  </span>
+                  <Settings2 />
+                </button>
                 <div className="result-actions desktop-workspace-only">
                   <Button
                     disabled={!batch.sources.length || !batch.layers.length}
@@ -802,6 +817,31 @@ export function WatermarkPanel({
                   await workspace.flush();
                 }}
               />
+            </MobileWorkspaceSheet>
+
+            <MobileWorkspaceSheet
+              description="导出细节按需设置，主页面只保留配置摘要。"
+              onOpenChange={setOutputSettingsOpen}
+              open={outputSettingsOpen}
+              title={`${batch.title} · 导出配置`}
+            >
+              <label className="check-line mobile-sheet-check-line">
+                <input
+                  checked={batch.autoSend}
+                  disabled={running[batch.id] !== undefined}
+                  onChange={(event) =>
+                    update(batch.id, (current) => ({
+                      ...current,
+                      autoSend: event.target.checked,
+                    }))
+                  }
+                  type="checkbox"
+                />
+                每张完成后自动送入拼图队列
+              </label>
+              <p className="mobile-detail-copy">
+                关闭后，成品仍会保留在本批结果视图中，可稍后手动下载或送入拼图。
+              </p>
             </MobileWorkspaceSheet>
 
             <MobileWorkspaceSheet

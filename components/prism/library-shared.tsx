@@ -1,5 +1,7 @@
 'use client';
 import {
+  Check,
+  ChevronDown,
   CircleAlert,
   Eye,
   EyeOff,
@@ -21,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import type { AssetImage, CollectionRecord } from '@/lib/prism-types';
 import { ExampleImage } from './example-image';
+import { MobileWorkspaceSheet } from './mobile-workspace';
 
 export function CollectionRail({
   noun,
@@ -39,14 +42,33 @@ export function CollectionRail({
   onEdit: (item: CollectionRecord) => void;
   onDelete: (id: string) => void;
 }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const options = [
+    { id: 'all', name: `全部${noun}` },
+    { id: 'unfiled', name: '未分类' },
+    ...collections,
+  ];
+  const current = options.find((item) => item.id === active) || options[0];
+  const countFor = (id: string) =>
+    id === 'all'
+      ? records.length
+      : records.filter((record) => (record.collection || 'unfiled') === id)
+          .length;
   return (
     <div className="collection-rail">
-      <div className="collection-tabs">
-        {[
-          { id: 'all', name: `全部${noun}` },
-          { id: 'unfiled', name: '未分类' },
-          ...collections,
-        ].map((c) => (
+      <button
+        className="mobile-collection-summary mobile-workspace-only"
+        onClick={() => setMobileOpen(true)}
+        type="button"
+      >
+        <span>
+          <strong>{current.name}</strong>
+          <small>{countFor(current.id)} 条资产 · 点击切换分类</small>
+        </span>
+        <ChevronDown aria-hidden="true" />
+      </button>
+      <div className="collection-tabs desktop-workspace-only">
+        {options.map((c) => (
           <div className="collection-tab-group" key={c.id}>
             <button
               type="button"
@@ -54,12 +76,7 @@ export function CollectionRail({
               onClick={() => onSelect(c.id)}
             >
               <span>{c.name}</span>
-              <small>
-                {c.id === 'all'
-                  ? records.length
-                  : records.filter((r) => (r.collection || 'unfiled') === c.id)
-                      .length}
-              </small>
+              <small>{countFor(c.id)}</small>
             </button>
             {!['all', 'unfiled'].includes(c.id) && (
               <div className="collection-tab-tools">
@@ -86,6 +103,55 @@ export function CollectionRail({
         <CircleAlert />
         分类可随时重命名或删除；删除分类不会删除资产。
       </p>
+      <MobileWorkspaceSheet
+        description="主页面只保留当前分类摘要；在这里切换、重命名或删除分类。"
+        onOpenChange={setMobileOpen}
+        open={mobileOpen}
+        title={`选择${noun}库`}
+      >
+        <div className="mobile-collection-list">
+          {options.map((collection) => (
+            <div className="mobile-collection-row" key={collection.id}>
+              <button
+                className={active === collection.id ? 'is-active' : ''}
+                onClick={() => {
+                  onSelect(collection.id);
+                  setMobileOpen(false);
+                }}
+                type="button"
+              >
+                <span>
+                  <strong>{collection.name}</strong>
+                  <small>{countFor(collection.id)} 条资产</small>
+                </span>
+                {active === collection.id && <Check aria-hidden="true" />}
+              </button>
+              {!['all', 'unfiled'].includes(collection.id) && (
+                <div>
+                  <Button
+                    aria-label={`重命名 ${collection.name}`}
+                    onClick={() => onEdit(collection)}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    aria-label={`删除库 ${collection.name}`}
+                    onClick={() => onDelete(collection.id)}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </MobileWorkspaceSheet>
     </div>
   );
 }

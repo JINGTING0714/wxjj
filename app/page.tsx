@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   CircleDot,
   Droplets,
-  Eye,
   Folder,
   Grid3X3,
   Image as ImageIcon,
@@ -20,13 +19,11 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Stamp,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -45,6 +42,7 @@ import {
   WatermarkLibraryPanel,
 } from '@/components/prism/studio-panels';
 import { useVault } from '@/components/prism/vault-provider';
+import { MobileWorkspaceSheet } from '@/components/prism/mobile-workspace';
 
 type ViewId =
   | 'overview'
@@ -82,6 +80,47 @@ const pipelineNav: NavEntry[] = [
   { id: 'gallery' as const, label: '图片收纳', icon: Folder },
   { id: 'watermark' as const, label: '水印工坊', icon: Stamp },
   { id: 'collage' as const, label: '拼图工坊', icon: Grid3X3 },
+];
+
+type MobileNavGroupId = 'assets' | 'workshop' | 'library' | 'more';
+
+const mobileNavGroups: Array<{
+  id: MobileNavGroupId;
+  label: string;
+  icon: LucideIcon;
+  items: NavEntry[];
+}> = [
+  {
+    id: 'assets',
+    label: '资产',
+    icon: Blocks,
+    items: primaryNav.filter((item) =>
+      ['prompts', 'profiles', 'moodboards', 'recipes'].includes(item.id),
+    ),
+  },
+  {
+    id: 'workshop',
+    label: '工坊',
+    icon: Stamp,
+    items: pipelineNav.filter((item) =>
+      ['watermark', 'collage'].includes(item.id),
+    ),
+  },
+  {
+    id: 'library',
+    label: '库',
+    icon: Library,
+    items: [
+      primaryNav.find((item) => item.id === 'watermarks')!,
+      pipelineNav.find((item) => item.id === 'gallery')!,
+    ],
+  },
+  {
+    id: 'more',
+    label: '更多',
+    icon: Menu,
+    items: [{ id: 'security', label: '安全与备份', icon: ShieldCheck }],
+  },
 ];
 
 const workflowSteps: Array<{
@@ -260,6 +299,9 @@ export default function Home() {
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
   const [globalQuery, setGlobalQuery] = useState('');
+  const [mobileNavOpen, setMobileNavOpen] = useState<MobileNavGroupId | null>(
+    null,
+  );
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -293,6 +335,12 @@ export default function Home() {
     : vault.status === 'uninitialized'
       ? '第一步 · 创建本地保险库'
       : '第一步 · 解锁本地保险库';
+  const activeMobileGroup = mobileNavGroups.find((group) =>
+    group.items.some((item) => item.id === activeView),
+  );
+  const openedMobileGroup = mobileNavGroups.find(
+    (group) => group.id === mobileNavOpen,
+  );
 
   return (
     <TooltipProvider>
@@ -651,6 +699,70 @@ export default function Home() {
             <SecurityPanel />
           </div>
         </section>
+        <nav
+          className="mobile-primary-nav mobile-workspace-only"
+          aria-label="手机主导航"
+        >
+          <button
+            aria-current={activeView === 'overview' ? 'page' : undefined}
+            className={activeView === 'overview' ? 'is-active' : ''}
+            onClick={() => setActiveView('overview')}
+            type="button"
+          >
+            <Aperture aria-hidden="true" />
+            <span>首页</span>
+          </button>
+          {mobileNavGroups.map((group) => {
+            const Icon = group.icon;
+            const active = activeMobileGroup?.id === group.id;
+            return (
+              <button
+                aria-current={active ? 'page' : undefined}
+                className={active ? 'is-active' : ''}
+                key={group.id}
+                onClick={() => setMobileNavOpen(group.id)}
+                type="button"
+              >
+                <Icon aria-hidden="true" />
+                <span>{group.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <MobileWorkspaceSheet
+          description="选择要打开的模块。未来新增工具会归入分组，不再扩张一级导航。"
+          onOpenChange={(open) => {
+            if (!open) setMobileNavOpen(null);
+          }}
+          open={mobileNavOpen !== null}
+          title={openedMobileGroup?.label || '选择模块'}
+        >
+          <div className="mobile-module-list">
+            {openedMobileGroup?.items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  className={activeView === item.id ? 'is-active' : ''}
+                  key={item.id}
+                  onClick={() => {
+                    setActiveView(item.id);
+                    setMobileNavOpen(null);
+                  }}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" />
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>
+                      {activeView === item.id ? '当前模块' : '点击进入'}
+                    </small>
+                  </span>
+                  <ArrowRight aria-hidden="true" />
+                </button>
+              );
+            })}
+          </div>
+        </MobileWorkspaceSheet>
       </main>
     </TooltipProvider>
   );

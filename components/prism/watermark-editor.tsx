@@ -4,7 +4,11 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  Eye,
+  EyeOff,
   Lock,
+  Maximize2,
+  Minimize2,
   Move,
   Unlock,
   Plus,
@@ -119,6 +123,7 @@ export function WatermarkEditor({
   const [active, setActive] = useState('');
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
+  const [mobilePreviewFullscreen, setMobilePreviewFullscreen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [guides, setGuides] = useState<AlignmentGuides | null>(null);
   const [dimensions, setDimensions] = useState(
@@ -132,9 +137,21 @@ export function WatermarkEditor({
     Array<{ record: StoredWatermark; file: File }>
   >([]);
   useEffect(() => {
-    if (mobilePanel && mobilePanel !== 'preview') setMobileTouchEditing(false);
+    if (mobilePanel && mobilePanel !== 'preview') {
+      setMobileTouchEditing(false);
+      setMobilePreviewFullscreen(false);
+    }
   }, [mobilePanel]);
+  useEffect(() => {
+    if (!mobilePreviewFullscreen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [mobilePreviewFullscreen]);
   const surface = useRef<HTMLDivElement>(null);
+  const hiddenLayerOpacity = useRef(new Map<string, number>());
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
   const canvas = resolveComposition(composition);
@@ -453,8 +470,9 @@ export function WatermarkEditor({
   return (
     <div className="watermark-layout watermark-free-editor">
       <section
-        className="watermark-input-panel mobile-workspace-preview"
+        className={`watermark-input-panel mobile-workspace-preview ${mobilePreviewFullscreen ? 'is-mobile-fullscreen' : ''}`}
         data-interaction={mobileTouchEditing ? 'edit' : 'scroll'}
+        data-fullscreen={mobilePreviewFullscreen ? 'true' : 'false'}
       >
         <h3>第一张样本 · 自由摆放</h3>
         <label className="watermark-snap-control">
@@ -613,16 +631,29 @@ export function WatermarkEditor({
           )}
         </div>
         <div className="mobile-preview-interaction mobile-workspace-only">
-          <Button
-            disabled={disabled || !base}
-            onClick={() => setMobileTouchEditing((editing) => !editing)}
-            size="sm"
-            type="button"
-            variant={mobileTouchEditing ? 'default' : 'outline'}
-          >
-            {mobileTouchEditing ? <Check /> : <Move />}
-            {mobileTouchEditing ? '完成移动' : '移动 / 缩放水印'}
-          </Button>
+          <div>
+            <Button
+              disabled={disabled || !base}
+              onClick={() => setMobileTouchEditing((editing) => !editing)}
+              size="sm"
+              type="button"
+              variant={mobileTouchEditing ? 'default' : 'outline'}
+            >
+              {mobileTouchEditing ? <Check /> : <Move />}
+              {mobileTouchEditing ? '完成移动' : '移动 / 缩放'}
+            </Button>
+            <Button
+              aria-label={mobilePreviewFullscreen ? '退出全屏预览' : '全屏预览'}
+              disabled={!base}
+              onClick={() => setMobilePreviewFullscreen((open) => !open)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {mobilePreviewFullscreen ? <Minimize2 /> : <Maximize2 />}
+              {mobilePreviewFullscreen ? '退出全屏' : '全屏'}
+            </Button>
+          </div>
           <span>
             {mobileTouchEditing
               ? '画布手势已启用，完成后恢复页面滚动。'
@@ -840,6 +871,23 @@ export function WatermarkEditor({
                   </strong>
                 </button>
                 <span className="layer-order-actions">
+                  <button
+                    type="button"
+                    aria-label={layer.opacity <= 0 ? '显示图层' : '隐藏图层'}
+                    onClick={() => {
+                      if (layer.opacity <= 0) {
+                        change(layer.id, {
+                          opacity:
+                            hiddenLayerOpacity.current.get(layer.id) ?? 1,
+                        });
+                      } else {
+                        hiddenLayerOpacity.current.set(layer.id, layer.opacity);
+                        change(layer.id, { opacity: 0 });
+                      }
+                    }}
+                  >
+                    {layer.opacity <= 0 ? <EyeOff /> : <Eye />}
+                  </button>
                   <button
                     type="button"
                     aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : '水印层'}`}
