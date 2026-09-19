@@ -1,11 +1,14 @@
 // Optional local browser regression: requires Playwright and a running PRISM preview.
 // Uses a fresh isolated browser vault; never opens the user's stored vault.
-const { chromium } = require(
-  process.env.PRISM_PLAYWRIGHT_MODULE || 'playwright',
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+const { chromium } = await import(
+  process.env.PRISM_PLAYWRIGHT_MODULE
+    ? pathToFileURL(process.env.PRISM_PLAYWRIGHT_MODULE).href
+    : 'playwright'
 );
-const fs = require('node:fs');
-const path = require('node:path');
-const assert = require('node:assert/strict');
 const phase = process.argv[2] || 'review';
 fs.mkdirSync('work', { recursive: true });
 (async () => {

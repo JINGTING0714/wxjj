@@ -75,8 +75,8 @@ is one active panel plus on-demand details, not a non-scrolling viewport or hidd
 
 ## Reproduction
 
-`tests/mobile-ux.review.cjs` runs against a local preview and needs an available Playwright
-installation. Optional environment variables: `PRISM_PLAYWRIGHT_MODULE` (module path),
+`tests/mobile-ux.review.mjs` runs against a local preview and needs an available Playwright
+installation. Optional environment variables: `PRISM_PLAYWRIGHT_MODULE` (module entry file path),
 `PRISM_BROWSER_PATH` (browser executable), `PRISM_REVIEW_URL` (defaults to localhost:3000).
 Run from the repository root. Reports and screenshots go into ignored `work/`.
 
