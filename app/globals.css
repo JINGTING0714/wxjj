@@ -7087,6 +7087,144 @@ button {
   }
 }
 
+/* Mobile review: size the actual preview and keep details out of the workspace. */
+.collage-preview-frame,
+.workspace-detail-desktop,
+.collage-number-details {
+  display: contents;
+}
+@media (max-width: 780px) {
+  .collage-mobile-workspace > .workshop-fieldset {
+    display: contents;
+  }
+  .collage-mobile-workspace .collage-preview-frame {
+    position: sticky;
+    top: 66px;
+    z-index: 12;
+    order: 10;
+    display: grid;
+    grid-template-rows: 20px minmax(0, 1fr) 36px 36px;
+    justify-items: center;
+    gap: 4px;
+    height: 38dvh;
+    background: #eee7f3;
+    padding: 4px 0;
+  }
+  .collage-preview-frame .preview-heading,
+  .collage-preview-frame .preview-pagination {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .collage-mobile-workspace .board-preview {
+    width: min(100%, calc((38dvh - 112px) * var(--collage-ratio)));
+    height: auto;
+    max-height: calc(38dvh - 112px);
+    min-height: 0;
+    align-self: center;
+    margin: 0;
+  }
+  .collage-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + 38dvh);
+    z-index: 12;
+    margin-top: 0;
+  }
+  .collage-mobile-workspace .preview-edit-tools {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+  }
+  .collage-mobile-workspace .preview-edit-tools .workspace-detail-summary {
+    display: block !important;
+    padding: 0;
+  }
+  .collage-mobile-workspace .mobile-collage-reorder.mobile-workspace-only {
+    width: auto;
+    min-height: 32px;
+  }
+  .collage-mobile-workspace .preview-edit-tools button {
+    min-height: 32px;
+    height: 32px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  .collage-mobile-workspace .source-file-list,
+  .collage-page > .collage-empty-note,
+  .collage-mobile-workspace .numbering-section > p {
+    display: none;
+  }
+  .collage-mobile-workspace .control-section {
+    padding: 12px 0;
+  }
+  .collage-mobile-workspace .control-title {
+    margin-bottom: 10px;
+  }
+  .collage-mobile-workspace .collage-drop {
+    min-height: 80px;
+    padding: 10px;
+    gap: 5px;
+  }
+  .collage-mobile-workspace .collage-drop > span,
+  .collage-mobile-workspace .collage-drop > svg {
+    display: none;
+  }
+  .workspace-detail-summary.mobile-workspace-only {
+    display: grid !important;
+    gap: 10px;
+    padding-block: 8px;
+  }
+  .collage-quick-fields,
+  .collage-mobile-workspace .number-style-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .collage-quick-fields label {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .collage-quick-fields select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    border: 1px solid #c5b7d1;
+    background: #fff;
+    padding: 8px;
+  }
+  .collage-mobile-workspace .number-style-grid > label:nth-child(3),
+  .collage-mobile-workspace .number-style-grid > .workspace-detail-summary {
+    grid-column: 1 / -1;
+  }
+  .mobile-workspace-sheet-body .source-selection-list {
+    max-height: none;
+    overflow: visible;
+  }
+  .mobile-workspace-sheet-body .collage-number-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .collage-page > .studio-head,
+  .watermark-page > .studio-head {
+    margin-bottom: 12px;
+    padding-block: 12px;
+  }
+  .collage-page > .studio-head h1,
+  .watermark-page > .studio-head h1 {
+    margin-block: 4px;
+    font-size: 28px;
+  }
+  .collage-page > .studio-head > div > p:last-child,
+  .watermark-page > .studio-head > div > p:last-child {
+    display: none;
+  }
+}
+
 @media (max-width: 780px) {
   .mobile-workspace.collage-mobile-workspace {
     display: flex;
@@ -7399,6 +7537,54 @@ button {
     margin: 8px 0 10px;
     font-size: 15px;
   }
+  .watermark-page .workshop-tabs {
+    margin-block: 4px;
+  }
+  .watermark-page .mobile-batch-selector {
+    margin-top: 8px;
+    padding-block: 8px;
+  }
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen) {
+    position: sticky;
+    top: 66px;
+    z-index: 12;
+    display: grid;
+    grid-template-rows: 26px minmax(0, 1fr) 44px;
+    gap: 4px;
+    height: 38dvh;
+    background: #eee7f3;
+    padding: 4px 0;
+  }
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen)
+    > h3,
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen)
+    > .watermark-alignment-status {
+    display: none;
+  }
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen)
+    .dom-watermark-stage {
+    height: 100%;
+    max-height: 100%;
+  }
+  .watermark-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + 38dvh);
+    z-index: 12;
+  }
+  .watermark-mobile-workspace .mobile-workspace-panel-heading > p,
+  .watermark-mobile-workspace .watermark-library-note,
+  .watermark-mobile-workspace .watermark-layers-mobile-panel > .stage-tip {
+    display: none;
+  }
+  .watermark-mobile-workspace .mobile-workspace-panel-heading {
+    margin-bottom: 8px;
+  }
+  .watermark-mobile-workspace .mobile-workspace-panel-heading h3 {
+    font-size: 15px;
+  }
   .watermark-input-panel .watermark-snap-control {
     margin-bottom: 9px;
     font-size: 12px;
@@ -7416,11 +7602,12 @@ button {
     overflow: hidden;
     overscroll-behavior: auto;
     touch-action: pan-y;
+    container-type: size;
   }
   .watermark-mobile-workspace .watermark-surface {
-    width: auto;
+    width: min(100cqw, calc(100cqh * var(--watermark-ratio)));
     max-width: 100%;
-    height: 100%;
+    height: auto;
     max-height: 100%;
     flex: 0 1 auto;
     touch-action: pan-y;
@@ -7521,6 +7708,33 @@ button {
     border: 0;
     background: transparent;
     padding: 0;
+  }
+  .watermark-adjust-mobile-panel .transform-controls {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .watermark-adjust-mobile-panel .mobile-position-grid {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: center;
+    margin: 0;
+  }
+  .watermark-adjust-mobile-panel .transform-grid {
+    grid-column: 2;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin: 0;
+  }
+  .watermark-adjust-mobile-panel .transform-grid input[type='range'] {
+    min-height: 32px;
+    margin: 0;
+    touch-action: pan-y;
+  }
+  .watermark-adjust-mobile-panel .mobile-advanced-trigger {
+    grid-column: 1 / -1;
+    margin-top: 0;
   }
   .watermark-adjust-mobile-panel .transform-controls legend {
     padding-top: 0;

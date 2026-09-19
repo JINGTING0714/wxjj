@@ -146,8 +146,19 @@ export function WatermarkEditor({
     if (!mobilePreviewFullscreen) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobilePreviewFullscreen(false);
+    };
+    const desktop = window.matchMedia('(min-width: 781px)');
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMobilePreviewFullscreen(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    desktop.addEventListener('change', closeOnDesktop);
     return () => {
       document.body.style.overflow = previous;
+      document.removeEventListener('keydown', closeOnEscape);
+      desktop.removeEventListener('change', closeOnDesktop);
     };
   }, [mobilePreviewFullscreen]);
   const surface = useRef<HTMLDivElement>(null);
@@ -494,10 +505,15 @@ export function WatermarkEditor({
               aria-label="水印样本编辑画布"
               className="watermark-surface"
               ref={surface}
-              style={{
-                aspectRatio: `${base.w * canvas.canvasWidth}/${base.h * canvas.canvasHeight}`,
-                backgroundColor: canvas.background,
-              }}
+              style={
+                {
+                  aspectRatio: `${base.w * canvas.canvasWidth}/${base.h * canvas.canvasHeight}`,
+                  '--watermark-ratio':
+                    (base.w * canvas.canvasWidth) /
+                    (base.h * canvas.canvasHeight),
+                  backgroundColor: canvas.background,
+                } as React.CSSProperties
+              }
             >
               {stack.map((layer, i) => {
                 const dim = dimensions.get(layer.file);
@@ -1151,7 +1167,7 @@ export function WatermarkEditor({
                 variant="outline"
               >
                 <SlidersHorizontal />
-                精确位置、裁切与画布设置
+                更多调整 →
               </Button>
             </fieldset>
           )}

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -130,5 +130,38 @@ export function MobileWorkspaceSheet({
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+/** Keep existing desktop controls, and reveal their mobile detail on demand. */
+export function MobileWorkspaceDetails({
+  title,
+  summary,
+  children,
+  disabled = false,
+}: {
+  title: string;
+  summary?: ReactNode;
+  children: ReactNode;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div className="desktop-workspace-only workspace-detail-desktop">
+        {children}
+      </div>
+      <div className="mobile-workspace-only workspace-detail-summary">
+        {summary}
+        <Button type="button" variant="outline" onClick={() => setOpen(true)}>
+          {title} →
+        </Button>
+      </div>
+      <MobileWorkspaceSheet open={open} onOpenChange={setOpen} title={title}>
+        <fieldset className="workshop-fieldset" disabled={disabled}>
+          {children}
+        </fieldset>
+      </MobileWorkspaceSheet>
+    </>
   );
 }
