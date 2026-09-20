@@ -140,8 +140,13 @@ export function WatermarkEditor({
     if (mobilePanel && mobilePanel !== 'preview') {
       setMobileTouchEditing(false);
       setMobilePreviewFullscreen(false);
+    } else if (typeof window !== 'undefined' && source) {
+      // The preview is the primary mobile workspace.  Start in direct-edit
+      // mode so the first gesture acts on the selected layer instead of
+      // forcing the user to hunt for a separate editing panel.
+      setMobileTouchEditing(window.matchMedia('(max-width: 780px)').matches);
     }
-  }, [mobilePanel]);
+  }, [mobilePanel, source]);
   useEffect(() => {
     if (!mobilePreviewFullscreen) return;
     const previous = document.body.style.overflow;
@@ -647,7 +652,74 @@ export function WatermarkEditor({
           )}
         </div>
         <div className="mobile-preview-interaction mobile-workspace-only">
-          <div>
+          <div className="mobile-preview-actions" aria-label="预览快捷操作">
+            <label className="mini-file mobile-preview-action">
+              <Plus />
+              导入水印
+              <input
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  void add(Array.from(e.target.files || []));
+                  e.target.value = '';
+                }}
+                type="file"
+              />
+            </label>
+            <Button
+              disabled={disabled || !selected || selected.id === SOURCE_LAYER_ID || !base}
+              onClick={() => {
+                if (!selected || selected.id === SOURCE_LAYER_ID || !base) return;
+                const dim = dimensions.get(selected.file);
+                if (!dim) return;
+                try {
+                  const size = compositionSize(base.w, base.h, canvas);
+                  change(
+                    selected.id,
+                    fitLayerToSource(
+                      selected,
+                      { width: dim.w, height: dim.h, bounds: dim.bounds },
+                      canvas.source,
+                      { width: base.w, height: base.h },
+                      { ...size, referenceWidth: base.w },
+                    ),
+                  );
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : '无法贴合原图');
+                }
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Scan />
+              一键贴合
+            </Button>
+            <Button
+              aria-label={selected?.locked ? '解锁当前图层' : '锁定当前图层'}
+              disabled={disabled || !selected}
+              onClick={() => selected && change(selected.id, { locked: !selected.locked })}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {selected?.locked ? <Lock /> : <Unlock />}
+              {selected?.locked ? '解锁' : '锁定'}
+            </Button>
+            <Button
+              aria-label="删除当前水印图层"
+              disabled={disabled || !selected || selected.id === SOURCE_LAYER_ID || selected.locked}
+              onClick={() => {
+                if (selected && selected.id !== SOURCE_LAYER_ID && !selected.locked)
+                  publishStack(stack.filter((layer) => layer.id !== selected.id));
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <X />
+              删除
+            </Button>
             <Button
               disabled={disabled || !base}
               onClick={() => setMobileTouchEditing((editing) => !editing)}
@@ -672,8 +744,8 @@ export function WatermarkEditor({
           </div>
           <span>
             {mobileTouchEditing
-              ? '画布手势已启用，完成后恢复页面滚动。'
-              : '当前可在预览上直接上下滑动页面。'}
+              ? '直接拖动图层；四角缩放，顶部圆点旋转。'
+              : '点击“移动 / 缩放”后可直接操作预览。'}
           </span>
         </div>
         <output className="watermark-alignment-status">
