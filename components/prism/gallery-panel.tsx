@@ -2,7 +2,9 @@
 import { BulkActions } from './bulk-selection';
 
 import {
+  Check,
   CheckSquare2,
+  ChevronDown,
   CircleAlert,
   Download,
   FolderPlus,
@@ -35,6 +37,7 @@ import type {
   GalleryImageMeta,
 } from '@/lib/prism-types';
 import { prismId } from '@/lib/prism-types';
+import { MobileWorkspaceSheet } from './mobile-workspace';
 
 const coreCollections: CollectionRecord[] = [{ id: 'daily', name: '每日刷图' }];
 
@@ -54,6 +57,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [mobileLibrariesOpen, setMobileLibrariesOpen] = useState(false);
   const visible = useMemo(
     () => images.filter((image) => image.collection === active),
     [active, images],
@@ -331,8 +335,21 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
           <CircleAlert /> {error}
         </p>
       )}
+      <button
+        className="mobile-gallery-library-summary mobile-workspace-only"
+        onClick={() => setMobileLibrariesOpen(true)}
+        type="button"
+      >
+        <span>
+          <strong>
+            {collections.find((item) => item.id === active)?.name}
+          </strong>
+          <small>{visible.length} 张图片 · 点击切换图库</small>
+        </span>
+        <ChevronDown />
+      </button>
       <div className="gallery-layout">
-        <aside className="gallery-libraries">
+        <aside className="gallery-libraries desktop-workspace-only">
           <p className="eyebrow">YOUR LIBRARIES</p>
           {collections.map((collection, index) => (
             <button
@@ -518,6 +535,66 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
           </div>
         </section>
       </div>
+      <MobileWorkspaceSheet
+        description="图库详情按需打开，主页面只保留当前图库和图片。"
+        onOpenChange={setMobileLibrariesOpen}
+        open={mobileLibrariesOpen}
+        title="选择图库"
+      >
+        <div className="mobile-gallery-library-list">
+          {collections.map((collection) => (
+            <div key={collection.id}>
+              <button
+                className={active === collection.id ? 'is-active' : ''}
+                onClick={() => {
+                  setActive(collection.id);
+                  setSelected(new Set());
+                  setMobileLibrariesOpen(false);
+                }}
+                type="button"
+              >
+                <span>
+                  <strong>{collection.name}</strong>
+                  <small>
+                    {
+                      images.filter(
+                        (image) => image.collection === collection.id,
+                      ).length
+                    }{' '}
+                    张图片
+                  </small>
+                </span>
+                {active === collection.id && <Check />}
+              </button>
+              {collection.id !== 'daily' && (
+                <span>
+                  <Button
+                    aria-label={`重命名 ${collection.name}`}
+                    onClick={() =>
+                      setCollectionDialog({
+                        id: collection.id,
+                        name: collection.name,
+                      })
+                    }
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    aria-label={`删除 ${collection.name}`}
+                    onClick={() => removeCollection(collection.id)}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <Trash2 />
+                  </Button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </MobileWorkspaceSheet>
 
       <Dialog
         onOpenChange={(open) => !open && setCollectionDialog(null)}

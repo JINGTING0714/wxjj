@@ -1,6 +1,16 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Download, Pause, Trash2, Upload, Video } from 'lucide-react';
+import {
+  Download,
+  Image as ImageIcon,
+  Layers3,
+  Pause,
+  SlidersHorizontal,
+  Settings2,
+  Trash2,
+  Upload,
+  Video,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { WatermarkEditor, type EditorLayer } from './watermark-editor';
@@ -17,8 +27,25 @@ import {
   defaultVideoExport,
   type VideoExportOptions,
 } from '@/lib/video-export';
+import {
+  MobileWorkspace,
+  MobileWorkspacePanel,
+  MobileWorkspacePrimaryAction,
+  MobileWorkspaceSheet,
+  MobileWorkspaceTabs,
+  type MobileWorkspaceTab,
+} from './mobile-workspace';
 type VideoSource = { id: string; file: File; frame: File };
 type VideoOutput = { id: string; file: File };
+type VideoMobilePanel = 'preview' | 'watermarks' | 'adjust' | 'output';
+
+const videoMobileTabs: MobileWorkspaceTab<VideoMobilePanel>[] = [
+  { value: 'preview', label: '预览', icon: <ImageIcon /> },
+  { value: 'watermarks', label: '水印', icon: <Layers3 /> },
+  { value: 'adjust', label: '调整', icon: <SlidersHorizontal /> },
+  { value: 'output', label: '输出', icon: <Download /> },
+];
+
 export function VideoWatermarkPanel() {
   const workspace = useWorkspaceState('video-watermarks', {
     sources: [] as VideoSource[],
@@ -40,6 +67,10 @@ export function VideoWatermarkPanel() {
   const [progress, setProgress] = useState('');
   const [progressValue, setProgressValue] = useState(0);
   const [error, setError] = useState('');
+  const [mobilePanel, setMobilePanel] = useState<VideoMobilePanel>('preview');
+  const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [outputSettingsOpen, setOutputSettingsOpen] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const task = useRef<Promise<void> | null>(null);
   const urls = useFileUrls(state.outputs.map((o) => o.file));
@@ -155,13 +186,16 @@ export function VideoWatermarkPanel() {
   return (
     <section className="video-workshop">
       <h2>视频水印 · 独立工区</h2>
-      <p>
+      <p className="desktop-workspace-only">
         最多 10
         个视频，使用第一段视频的第一帧作为整批模板。按原始分辨率与帧时间编码，扩展画布同比例输出并保留音轨。普通画面优先
         MP4，透明画面用
         WebM；视频会重新编码，不是原文件无损复制，也不会自动修复低清素材。
       </p>
-      <p className="import-warning">
+      <p className="video-mobile-summary mobile-workspace-only">
+        最多 10 个视频，共用第一段视频的首帧模板；处理逻辑和桌面端一致。
+      </p>
+      <p className="import-warning desktop-workspace-only">
         自动选择本机快速处理，兼容音轨会直接保留。透明视频或浏览器不支持快速处理时，使用兼容引擎（首次约
         32 MB，同批只加载一次）。每个文件最多 512
         MB；大分辨率、长视频可能耗时较长或超出设备内存。处理不依赖前台播放；系统休眠、关窗或刷新仍会中断，可从未完成视频继续。MP4
@@ -179,141 +213,270 @@ export function VideoWatermarkPanel() {
           {error || workspace.saveError}
         </p>
       )}
-      {progress && <p role="status">{progress}</p>}
+      {progress && (
+        <p className="desktop-workspace-only" role="status">
+          {progress}
+        </p>
+      )}
       {busy && (
         <progress
-          className="video-processing-progress"
           aria-label="当前视频处理进度"
+          className="video-processing-progress desktop-workspace-only"
           max={1}
           value={progressValue}
         />
       )}
-      <fieldset
-        className="workshop-fieldset"
-        disabled={busy || importing || !workspace.ready}
-      >
-        <label className="mini-file">
-          <Upload />
-          导入视频（{state.sources.length}/10）
-          <input
-            accept="video/*,.mp4,.webm,.mov,.m4v"
-            multiple
-            onChange={(e) => {
-              void choose(Array.from(e.target.files || []));
-              e.target.value = '';
-            }}
-            type="file"
-          />
-        </label>
-        <div className="source-file-list">
-          {state.sources.map((s, i) => (
-            <span key={s.id}>
-              {i + 1}. {s.file.name}
-              <button
-                aria-label={`移除视频 ${s.file.name}`}
-                onClick={() =>
+      <div className="workshop-fieldset">
+        <MobileWorkspace className="watermark-mobile-workspace video-mobile-workspace">
+          <MobileWorkspacePanel
+            active={mobilePanel === 'preview'}
+            className="watermark-source-panel video-source-panel"
+            label="视频源文件"
+          >
+            <div className="mobile-workspace-panel-heading mobile-workspace-only">
+              <p className="eyebrow">SOURCE</p>
+              <h3>视频与首帧模板</h3>
+              <p>{state.sources.length} / 10 个视频。</p>
+            </div>
+            <label className="mini-file">
+              <Upload />
+              导入视频（{state.sources.length}/10）
+              <input
+                accept="video/*,.mp4,.webm,.mov,.m4v"
+                disabled={busy || importing || !workspace.ready}
+                multiple
+                onChange={(event) => {
+                  void choose(Array.from(event.target.files || []));
+                  event.target.value = '';
+                }}
+                type="file"
+              />
+            </label>
+            <div className="source-file-list desktop-workspace-only">
+              {state.sources.map((source, index) => (
+                <span key={source.id}>
+                  {index + 1}. {source.file.name}
+                  <button
+                    aria-label={`移除视频 ${source.file.name}`}
+                    disabled={busy || importing}
+                    onClick={() =>
+                      setState((current) => ({
+                        ...current,
+                        sources: current.sources.filter(
+                          (item) => item.id !== source.id,
+                        ),
+                      }))
+                    }
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="desktop-workspace-only">
+              <SourceSelection
+                disabled={busy}
+                onRemove={async (ids) => {
                   setState((current) => ({
                     ...current,
-                    sources: current.sources.filter((item) => item.id !== s.id),
-                  }))
-                }
+                    sources: current.sources.filter(
+                      (source) => !ids.includes(source.id),
+                    ),
+                    job: null,
+                  }));
+                  await workspace.flush();
+                }}
+                sources={state.sources}
+              />
+            </div>
+            {state.sources.length > 0 && (
+              <button
+                className="mobile-source-summary mobile-workspace-only"
+                disabled={busy}
+                onClick={() => setSourceSheetOpen(true)}
                 type="button"
               >
-                ×
+                <span>
+                  <strong>管理视频文件</strong>
+                  <small>{state.sources.length} 个 · 搜索、多选或移除</small>
+                </span>
+                <Video />
               </button>
-            </span>
-          ))}
-        </div>
-        <SourceSelection
-          sources={state.sources}
-          disabled={busy}
-          onRemove={async (ids) => {
-            setState((s) => ({
-              ...s,
-              sources: s.sources.filter((source) => !ids.includes(source.id)),
-              job: null,
-            }));
-            await workspace.flush();
-          }}
-        />
-        <WatermarkEditor
-          sourceKind="video"
-          disabled={busy || importing}
-          layers={state.layers}
-          composition={state.composition}
-          onChange={(layers, composition) =>
-            setState((s) => ({
-              ...s,
-              layers,
-              ...(composition ? { composition } : {}),
-            }))
-          }
-          source={state.sources[0]?.frame}
-        />
-        <div className="video-export-settings">
-          <label>
-            <span>视频格式</span>
-            <select
-              aria-label="视频格式"
-              value={(state.exportOptions || defaultVideoExport).format}
-              onChange={(e) =>
-                setState((s) => ({
-                  ...s,
-                  exportOptions: {
-                    ...(s.exportOptions || defaultVideoExport),
-                    format: e.target.value as VideoExportOptions['format'],
-                  },
-                }))
-              }
-            >
-              <option value="auto">自动 · 普通 MP4 / 透明 WebM</option>
-              <option value="mp4">MP4 · 通用播放（不支持透明）</option>
-              <option value="webm-alpha">WebM · 保留透明背景</option>
-            </select>
-          </label>
-          <label>
-            <span>视频质量</span>
-            <select
-              aria-label="视频质量"
-              value={(state.exportOptions || defaultVideoExport).quality}
-              onChange={(e) =>
-                setState((s) => ({
-                  ...s,
-                  exportOptions: {
-                    ...(s.exportOptions || defaultVideoExport),
-                    quality: e.target.value as VideoExportOptions['quality'],
-                  },
-                }))
-              }
-            >
-              <option value="high">高清 · 原始分辨率</option>
-              <option value="ultra">更高质量 · 文件更大</option>
-            </select>
-          </label>
-        </div>
-        <div className="result-actions">
-          <Button
-            disabled={!state.sources.length || !state.layers.length}
-            onClick={() => run()}
+            )}
+          </MobileWorkspacePanel>
+
+          <WatermarkEditor
+            composition={state.composition}
+            disabled={busy || importing}
+            layers={state.layers}
+            mobilePanel={mobilePanel}
+            onChange={(layers, composition) =>
+              setState((current) => ({
+                ...current,
+                layers,
+                ...(composition ? { composition } : {}),
+              }))
+            }
+            source={state.sources[0]?.frame}
+            sourceKind="video"
+          />
+
+          <MobileWorkspaceTabs
+            label="视频水印功能"
+            onValueChange={setMobilePanel}
+            tabs={videoMobileTabs}
+            value={mobilePanel}
+          />
+
+          <MobileWorkspacePanel
+            active={mobilePanel === 'output'}
+            className="watermark-output-panel video-output-panel"
+            label="视频输出"
           >
-            <Video />
-            确认首帧模板，开始视频水印
-          </Button>
-          {state.job && (
-            <Button onClick={() => run(true)} variant="outline">
-              继续未完成视频（{state.job.next}/{state.job.todo.length}）
-            </Button>
-          )}
-        </div>
-      </fieldset>
+            <div className="mobile-workspace-panel-heading mobile-workspace-only">
+              <p className="eyebrow">OUTPUT</p>
+              <h3>格式、处理与成品</h3>
+              <p>{state.outputs.length} 个视频成品。</p>
+            </div>
+            <div className="video-export-settings desktop-workspace-only">
+              <label>
+                <span>视频格式</span>
+                <select
+                  aria-label="视频格式"
+                  disabled={busy || importing || !workspace.ready}
+                  onChange={(event) =>
+                    setState((current) => ({
+                      ...current,
+                      exportOptions: {
+                        ...(current.exportOptions || defaultVideoExport),
+                        format: event.target
+                          .value as VideoExportOptions['format'],
+                      },
+                    }))
+                  }
+                  value={(state.exportOptions || defaultVideoExport).format}
+                >
+                  <option value="auto">自动 · 普通 MP4 / 透明 WebM</option>
+                  <option value="mp4">MP4 · 通用播放（不支持透明）</option>
+                  <option value="webm-alpha">WebM · 保留透明背景</option>
+                </select>
+              </label>
+              <label>
+                <span>视频质量</span>
+                <select
+                  aria-label="视频质量"
+                  disabled={busy || importing || !workspace.ready}
+                  onChange={(event) =>
+                    setState((current) => ({
+                      ...current,
+                      exportOptions: {
+                        ...(current.exportOptions || defaultVideoExport),
+                        quality: event.target
+                          .value as VideoExportOptions['quality'],
+                      },
+                    }))
+                  }
+                  value={(state.exportOptions || defaultVideoExport).quality}
+                >
+                  <option value="high">高清 · 原始分辨率</option>
+                  <option value="ultra">更高质量 · 文件更大</option>
+                </select>
+              </label>
+            </div>
+            <button
+              className="mobile-output-settings-summary mobile-workspace-only"
+              onClick={() => setOutputSettingsOpen(true)}
+              type="button"
+            >
+              <span>
+                <strong>视频导出配置</strong>
+                <small>
+                  {(state.exportOptions || defaultVideoExport).format} ·{' '}
+                  {(state.exportOptions || defaultVideoExport).quality}
+                </small>
+              </span>
+              <Settings2 />
+            </button>
+            <div className="video-mobile-progress mobile-workspace-only">
+              {progress && <p role="status">{progress}</p>}
+              {busy && (
+                <progress
+                  aria-label="当前视频处理进度"
+                  className="video-processing-progress"
+                  max={1}
+                  value={progressValue}
+                />
+              )}
+            </div>
+            <div className="result-actions desktop-workspace-only">
+              <Button
+                disabled={!state.sources.length || !state.layers.length}
+                onClick={() => run()}
+              >
+                <Video />
+                确认首帧模板，开始视频水印
+              </Button>
+              {state.job && (
+                <Button onClick={() => run(true)} variant="outline">
+                  继续未完成视频（{state.job.next}/{state.job.todo.length}）
+                </Button>
+              )}
+            </div>
+            {state.outputs.length > 0 && (
+              <div className="mobile-result-summary mobile-workspace-only">
+                <span>
+                  <strong>{state.outputs.length} 个视频成品</strong>
+                  <small>按需展开预览、下载和批量管理。</small>
+                </span>
+                <Button onClick={() => setResultsOpen(true)} variant="outline">
+                  查看结果
+                </Button>
+              </div>
+            )}
+          </MobileWorkspacePanel>
+
+          <MobileWorkspacePrimaryAction>
+            {busy ? (
+              <Button
+                onClick={() => controller.current?.abort()}
+                variant="outline"
+              >
+                <Pause /> 暂停本批视频 · {Math.round(progressValue * 100)}%
+              </Button>
+            ) : state.job ? (
+              <Button onClick={() => run(true)}>
+                <Video />
+                继续未完成（{state.job.next}/{state.job.todo.length}）
+              </Button>
+            ) : (
+              <Button
+                disabled={
+                  importing ||
+                  !workspace.ready ||
+                  !state.sources.length ||
+                  !state.layers.length
+                }
+                onClick={() => run()}
+              >
+                <Video /> 确认首帧模板，开始处理
+              </Button>
+            )}
+          </MobileWorkspacePrimaryAction>
+        </MobileWorkspace>
+      </div>
       {busy && (
-        <Button onClick={() => controller.current?.abort()} variant="outline">
+        <Button
+          className="desktop-workspace-only"
+          onClick={() => controller.current?.abort()}
+          variant="outline"
+        >
           <Pause />
           暂停本批视频
         </Button>
       )}
       {state.outputs.length > 0 && (
-        <section className="result-zone">
+        <section className="result-zone desktop-workspace-results">
           <div className="result-head">
             <h3>视频成品 · {state.outputs.length} 个</h3>
             <Button
@@ -379,6 +542,161 @@ export function VideoWatermarkPanel() {
           </div>
         </section>
       )}
+      <MobileWorkspaceSheet
+        description="主工作台只保留数量摘要；在这里搜索、多选或移除视频。"
+        onOpenChange={setSourceSheetOpen}
+        open={sourceSheetOpen}
+        title="视频源文件"
+      >
+        <SourceSelection
+          disabled={busy}
+          onRemove={async (ids) => {
+            setState((current) => ({
+              ...current,
+              sources: current.sources.filter(
+                (source) => !ids.includes(source.id),
+              ),
+              job: null,
+            }));
+            await workspace.flush();
+          }}
+          openByDefault
+          sources={state.sources}
+        />
+      </MobileWorkspaceSheet>
+      <MobileWorkspaceSheet
+        description="格式与质量按需设置，主输出页只保留当前配置摘要。"
+        onOpenChange={setOutputSettingsOpen}
+        open={outputSettingsOpen}
+        title="视频导出配置"
+      >
+        <div className="video-export-settings mobile-video-export-settings">
+          <label>
+            <span>视频格式</span>
+            <select
+              aria-label="视频格式"
+              disabled={busy || importing || !workspace.ready}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  exportOptions: {
+                    ...(current.exportOptions || defaultVideoExport),
+                    format: event.target.value as VideoExportOptions['format'],
+                  },
+                }))
+              }
+              value={(state.exportOptions || defaultVideoExport).format}
+            >
+              <option value="auto">自动 · 普通 MP4 / 透明 WebM</option>
+              <option value="mp4">MP4 · 通用播放（不支持透明）</option>
+              <option value="webm-alpha">WebM · 保留透明背景</option>
+            </select>
+          </label>
+          <label>
+            <span>视频质量</span>
+            <select
+              aria-label="视频质量"
+              disabled={busy || importing || !workspace.ready}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  exportOptions: {
+                    ...(current.exportOptions || defaultVideoExport),
+                    quality: event.target
+                      .value as VideoExportOptions['quality'],
+                  },
+                }))
+              }
+              value={(state.exportOptions || defaultVideoExport).quality}
+            >
+              <option value="high">高清 · 原始分辨率</option>
+              <option value="ultra">更高质量 · 文件更大</option>
+            </select>
+          </label>
+        </div>
+      </MobileWorkspaceSheet>
+      <MobileWorkspaceSheet
+        description="完整视频预览与下载只在这里展开，不占用主工作台高度。"
+        onOpenChange={setResultsOpen}
+        open={resultsOpen}
+        title={`视频成品 · ${state.outputs.length} 个`}
+      >
+        {state.outputs.length > 0 ? (
+          <section className="video-mobile-results">
+            <div className="result-head">
+              <Button
+                onClick={() =>
+                  downloadZip(
+                    state.outputs.map((output) => ({
+                      name: output.file.name,
+                      blob: output.file,
+                    })),
+                    'wxjj-视频水印.zip',
+                  )
+                }
+                variant="outline"
+              >
+                <Download /> 下载全部视频
+              </Button>
+            </div>
+            <BulkActions
+              disabled={busy}
+              noun="个视频成品"
+              onDelete={async (ids) => {
+                setState((current) => ({
+                  ...current,
+                  outputs: current.outputs.filter(
+                    (output) => !ids.includes(output.id),
+                  ),
+                }));
+                await workspace.flush();
+              }}
+              selection={selection}
+            />
+            <div className="video-result-grid">
+              {state.outputs.map((output, index) => (
+                <article key={output.id}>
+                  <SelectItem
+                    id={output.id}
+                    name={output.file.name}
+                    selection={selection}
+                  />
+                  <video
+                    controls
+                    playsInline
+                    preload="metadata"
+                    src={urls[index]}
+                  />
+                  <p>{output.file.name}</p>
+                  <Button
+                    onClick={() => downloadBlob(output.file, output.file.name)}
+                    variant="outline"
+                  >
+                    <Download /> 下载
+                  </Button>
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      if (confirm('删除这个视频成品的本地副本？原视频保留。'))
+                        setState((current) => ({
+                          ...current,
+                          outputs: current.outputs.filter(
+                            (item) => item.id !== output.id,
+                          ),
+                        }));
+                    }}
+                    variant="outline"
+                  >
+                    <Trash2 /> 删除
+                  </Button>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <p className="mobile-workspace-empty">还没有视频成品。</p>
+        )}
+      </MobileWorkspaceSheet>
     </section>
   );
 }

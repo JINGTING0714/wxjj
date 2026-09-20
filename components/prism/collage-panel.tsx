@@ -3,6 +3,13 @@ import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 import { SourceSelection } from './source-selection';
+import {
+  MobileWorkspace,
+  MobileWorkspaceDetails,
+  MobileWorkspacePrimaryAction,
+  MobileWorkspaceSheet,
+  MobileWorkspaceTabs,
+} from './mobile-workspace';
 
 import {
   CircleAlert,
@@ -19,6 +26,7 @@ import {
   Upload,
   WandSparkles,
   X,
+  Move,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -77,6 +85,11 @@ export function CollagePanel() {
   const confirmation = useConfirmation();
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<
+    'sources' | 'layout' | 'numbering' | 'output'
+  >('sources');
+  const [mobileReordering, setMobileReordering] = useState(false);
+  const [mobileResultsOpen, setMobileResultsOpen] = useState(false);
   const drag = useRef<{ id: string; x: number; y: number } | null>(null);
   const workspace = useWorkspaceState('collage', {
     sources: [] as PipelineSource[],
@@ -497,676 +510,867 @@ export function CollagePanel() {
       {workspace.saveError && (
         <p className="error-banner">{workspace.saveError}</p>
       )}
-      <fieldset
-        disabled={!workspace.ready || processing || vault.busy}
-        className="workshop-fieldset"
-      >
-        <div className="collage-layout">
-          <section className="collage-controls">
-            <div className="control-section">
-              <div className="control-title">
-                <span>01</span>
-                <div>
-                  <p className="eyebrow">SOURCE IMAGES</p>
-                  <h2>选择图片</h2>
-                </div>
-                <Badge variant="outline">{files.length} / 1000</Badge>
-              </div>
-              <label className="collage-drop">
-                <Upload />
-                <strong>
-                  {files.length
-                    ? `已进入队列 ${files.length} 张`
-                    : '批量上传或从水印区/图库送入'}
-                </strong>
-                <span>未占满的最后一板只保留实际图片，空格不会编号</span>
-                <input
-                  accept="image/*"
-                  multiple
-                  onChange={(event) => addFiles(event.target.files)}
-                  type="file"
-                />
-              </label>
-              {files.length > 0 && (
-                <>
-                  <div className="source-file-list">
-                    {files.slice(0, 12).map((file, index) => (
-                      <span key={`${file.name}-${file.lastModified}-${index}`}>
-                        {file.name}
-                        <button
-                          aria-label={`移除 ${file.name}`}
-                          onClick={() => removeSource(index)}
-                          type="button"
-                        >
-                          <X />
-                        </button>
-                      </span>
-                    ))}
-                    {files.length > 12 && <b>+{files.length - 12}</b>}
-                  </div>
-                  <SourceSelection
-                    sources={state.sources}
-                    disabled={processing}
-                    onRemove={async (ids) => {
-                      setState((s) => ({
-                        ...s,
-                        sources: s.sources.filter(
-                          (source) => !ids.includes(source.id),
-                        ),
-                        job: null,
-                      }));
-                      setPreviewBoard(0);
-                      await workspace.flush();
-                    }}
-                  />
-                  <Button
-                    disabled={files.length < 2}
-                    onClick={() => {
-                      setState((current) => ({
-                        ...current,
-                        sources: shuffleSources(current.sources),
-                      }));
-                      setPreviewBoard(0);
-                    }}
-                    type="button"
-                    variant="outline"
-                  >
-                    <Shuffle />
-                    一键打乱全部顺序
-                  </Button>
-                  <button
-                    className="clear-files"
-                    onClick={() => setFiles([])}
-                    type="button"
-                  >
-                    <Trash2 /> 清空这一批
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="control-section">
-              <div className="control-title">
-                <span>02</span>
-                <div>
-                  <p className="eyebrow">CANVAS SIZE</p>
-                  <h2>拼图尺寸</h2>
-                </div>
-              </div>
-              <div className="preset-grid ratio-grid">
-                {ratioPresets.map((item) => (
-                  <button
-                    className={
-                      !customRatio && ratio.label === item.label
-                        ? 'is-active'
-                        : ''
-                    }
-                    key={item.label}
-                    onClick={() => {
-                      setRatio(item);
-                      setCustomRatio(false);
-                    }}
-                    type="button"
-                  >
-                    <i style={{ aspectRatio: `${item.w}/${item.h}` }} />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-                <button
-                  className={customRatio ? 'is-active' : ''}
-                  onClick={() => setCustomRatio(true)}
-                  type="button"
-                >
-                  <i className="custom-ratio-icon" />
-                  <span>自定义像素</span>
-                </button>
-              </div>
-              {customRatio && (
-                <div className="custom-fields custom-pixel-fields">
-                  <label>
-                    <span>画布宽 px</span>
-                    <Input
-                      max="8000"
-                      min="320"
-                      onChange={(event) =>
-                        setRatioWidth(Number(event.target.value))
-                      }
-                      type="number"
-                      value={ratioWidth}
-                    />
-                  </label>
-                  <b>×</b>
-                  <label>
-                    <span>画布高 px</span>
-                    <Input
-                      max="8000"
-                      min="320"
-                      onChange={(event) =>
-                        setRatioHeight(Number(event.target.value))
-                      }
-                      type="number"
-                      value={ratioHeight}
-                    />
-                  </label>
-                  <small>生成文件会严格使用这个像素尺寸。</small>
-                </div>
-              )}
-            </div>
-            <div className="control-section">
-              <div className="control-title">
-                <span>03</span>
-                <div>
-                  <p className="eyebrow">GRID SYSTEM</p>
-                  <h2>宫格数量</h2>
-                </div>
-              </div>
-              <div className="grid-preset-row">
-                {gridPresets.map((item) => (
-                  <button
-                    className={
-                      !customGrid && grid.label === item.label
-                        ? 'is-active'
-                        : ''
-                    }
-                    key={item.label}
-                    onClick={() => {
-                      setGrid(item);
-                      setCustomGrid(false);
-                    }}
-                    type="button"
-                  >
-                    <Grid3X3 />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-                <button
-                  className={customGrid ? 'is-active' : ''}
-                  onClick={() => setCustomGrid(true)}
-                  type="button"
-                >
-                  <Plus />
-                  <span>自定义</span>
-                </button>
-              </div>
-              {customGrid && (
-                <div className="custom-fields">
-                  <label>
-                    <span>列数</span>
-                    <Input
-                      max="20"
-                      min="1"
-                      onChange={(event) =>
-                        setGridColumns(Number(event.target.value))
-                      }
-                      type="number"
-                      value={gridColumns}
-                    />
-                  </label>
-                  <b>×</b>
-                  <label>
-                    <span>行数</span>
-                    <Input
-                      max="20"
-                      min="1"
-                      onChange={(event) =>
-                        setGridRows(Number(event.target.value))
-                      }
-                      type="number"
-                      value={gridRows}
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-            <div className="control-section numbering-section">
-              <div className="control-title">
-                <span>04</span>
-                <div>
-                  <p className="eyebrow">NUMBERING</p>
-                  <h2>编号与输出</h2>
-                </div>
-                <button
-                  aria-pressed={numberImages}
-                  className={`switch-control ${numberImages ? 'is-on' : ''}`}
-                  onClick={() => setNumberImages((value) => !value)}
-                  type="button"
-                >
-                  <i />
-                </button>
-              </div>
-              <div className="number-style-grid">
-                <label>
-                  <span>起始序号</span>
-                  <Input
-                    disabled={!numberImages}
-                    min="0"
-                    onChange={(event) =>
-                      setStartNumber(Number(event.target.value))
-                    }
-                    type="number"
-                    value={startNumber}
-                  />
-                </label>
-                <label>
-                  <span>编号位置</span>
-                  <select
-                    disabled={!numberImages}
-                    onChange={(event) =>
-                      setNumberPosition(event.target.value as NumberPosition)
-                    }
-                    value={numberPosition}
-                  >
-                    {numberPositions.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>编号大小 · {Math.round(numberSize * 100)}%</span>
-                  <input
-                    disabled={!numberImages}
-                    max="0.4"
-                    min="0.03"
-                    onChange={(event) =>
-                      setNumberSize(Number(event.target.value))
-                    }
-                    step="0.005"
-                    type="range"
-                    value={numberSize}
-                  />
-                </label>
-                <label>
-                  <span>字重</span>
-                  <select
-                    disabled={!numberImages}
-                    onChange={(event) =>
-                      setNumberWeight(
-                        Number(event.target.value) as 400 | 600 | 800,
-                      )
-                    }
-                    value={numberWeight}
-                  >
-                    <option value="400">常规</option>
-                    <option value="600">半粗</option>
-                    <option value="800">粗体</option>
-                  </select>
-                </label>
-                <label>
-                  <span>补零位数</span>
-                  <select
-                    disabled={!numberImages}
-                    onChange={(event) =>
-                      setNumberDigits(Number(event.target.value))
-                    }
-                    value={numberDigits}
-                  >
-                    <option value="0">不补零</option>
-                    <option value="2">2 位</option>
-                    <option value="3">3 位</option>
-                    <option value="4">4 位</option>
-                    <option value="5">5 位</option>
-                  </select>
-                </label>
-                <label>
-                  <span>底板形状</span>
-                  <select
-                    disabled={!numberImages}
-                    onChange={(event) =>
-                      setNumberShape(
-                        event.target.value as 'none' | 'square' | 'pill',
-                      )
-                    }
-                    value={numberShape}
-                  >
-                    <option value="none">无底板</option>
-                    <option value="square">直角底板</option>
-                    <option value="pill">圆角胶囊</option>
-                  </select>
-                </label>
-                <label>
-                  <span>文字颜色</span>
-                  <input
-                    disabled={!numberImages}
-                    onChange={(event) => setNumberColor(event.target.value)}
-                    type="color"
-                    value={numberColor}
-                  />
-                </label>
-                <label>
-                  <span>底板颜色</span>
-                  <input
-                    disabled={!numberImages || numberShape === 'none'}
-                    onChange={(event) =>
-                      setNumberBackground(event.target.value)
-                    }
-                    type="color"
-                    value={numberBackground}
-                  />
-                </label>
-                <label>
-                  <span>
-                    底板透明度 · {Math.round(numberBackgroundOpacity * 100)}%
-                  </span>
-                  <input
-                    disabled={!numberImages || numberShape === 'none'}
-                    max="1"
-                    min="0"
-                    onChange={(event) =>
-                      setNumberBackgroundOpacity(Number(event.target.value))
-                    }
-                    step="0.01"
-                    type="range"
-                    value={numberBackgroundOpacity}
-                  />
-                </label>
-                <label>
-                  <span>输出格式</span>
-                  <select
-                    onChange={(event) =>
-                      setFormat(
-                        event.target.value as 'image/png' | 'image/jpeg',
-                      )
-                    }
-                    value={format}
-                  >
-                    <option value="image/jpeg">JPG · 较小</option>
-                    <option value="image/png">PNG · 无损</option>
-                  </select>
-                </label>
-              </div>
-              <p>
-                <CircleAlert />{' '}
-                编号样式会实时反映在右侧预览；生成时按每个格子的实际尺寸精确计算。
-              </p>
-            </div>
-          </section>
-          <aside className="collage-preview">
-            <div className="preview-sticky">
-              <div className="preview-heading">
-                <p className="eyebrow">LIVE SPEC</p>
-                <span>{activeRatio.label}</span>
-              </div>
+      <MobileWorkspace className="collage-mobile-workspace">
+        <fieldset
+          disabled={!workspace.ready || processing || vault.busy}
+          className="workshop-fieldset"
+        >
+          <div className="collage-layout">
+            <MobileWorkspaceTabs
+              label="拼图工作区"
+              onValueChange={(value) => {
+                setMobilePanel(value);
+                if (value !== 'sources') setMobileReordering(false);
+              }}
+              tabs={[
+                { value: 'sources', label: '图片', icon: <ImageIcon /> },
+                { value: 'layout', label: '布局', icon: <Grid3X3 /> },
+                { value: 'numbering', label: '编号', icon: <Plus /> },
+                { value: 'output', label: '输出', icon: <Download /> },
+              ]}
+              value={mobilePanel}
+            />
+            <section className="collage-controls">
               <div
-                className="board-preview"
-                style={{
-                  aspectRatio: `${activeRatio.w}/${activeRatio.h}`,
-                  maxWidth: `${(480 * activeRatio.w) / activeRatio.h}px`,
-                  gridTemplateColumns: `repeat(${activeGrid.columns}, minmax(0, 1fr))`,
-                  gridTemplateRows: `repeat(${activeGrid.rows}, minmax(0, 1fr))`,
-                }}
+                className="control-section collage-mobile-panel"
+                data-mobile-active={mobilePanel === 'sources'}
               >
-                {Array.from({ length: previewCells }, (_, index) => (
-                  <button
-                    type="button"
-                    data-collage-index={currentPreview * previewCells + index}
-                    className={`real-preview-cell ${state.sources[currentPreview * previewCells + index]?.id === selectedSource ? 'is-selected' : ''} ${dragOver === currentPreview * previewCells + index ? 'is-drag-over' : ''}`}
-                    key={
-                      state.sources[currentPreview * previewCells + index]
-                        ?.id || `empty-${index}`
-                    }
-                    aria-label={
-                      previewUrls[index]
-                        ? `选择第 ${currentPreview * previewCells + index + 1} 张图片`
-                        : '空格'
-                    }
-                    disabled={!previewUrls[index] || processing}
-                    onClick={() =>
-                      setSelectedSource(
-                        state.sources[currentPreview * previewCells + index]
-                          ?.id || null,
-                      )
-                    }
-                    onDoubleClick={() =>
-                      document
-                        .getElementById('collage-selected-preview')
-                        ?.querySelector<HTMLButtonElement>('button')
-                        ?.click()
-                    }
-                    onFocus={() => {
-                      const source =
-                        state.sources[currentPreview * previewCells + index];
-                      if (source) setSelectedSource(source.id);
-                    }}
-                    onPointerDown={(e) => {
-                      const source =
-                        state.sources[currentPreview * previewCells + index];
-                      if (!source || processing) return;
-                      setSelectedSource(source.id);
-                      drag.current = {
-                        id: source.id,
-                        x: e.clientX,
-                        y: e.clientY,
-                      };
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                    }}
-                    onPointerMove={(e) => {
-                      if (!drag.current) return;
-                      const cell = document
-                        .elementFromPoint(e.clientX, e.clientY)
-                        ?.closest<HTMLElement>('[data-collage-index]');
-                      setDragOver(
-                        cell ? Number(cell.dataset.collageIndex) : null,
-                      );
-                    }}
-                    onPointerCancel={() => {
-                      drag.current = null;
-                      setDragOver(null);
-                    }}
-                    onPointerUp={(e) => {
-                      const item = drag.current;
-                      drag.current = null;
-                      setDragOver(null);
-                      if (
-                        !item ||
-                        Math.hypot(e.clientX - item.x, e.clientY - item.y) < 5
-                      )
-                        return;
-                      const cell = document
-                        .elementFromPoint(e.clientX, e.clientY)
-                        ?.closest<HTMLElement>('[data-collage-index]');
-                      if (cell)
-                        setState((s) => ({
-                          ...s,
-                          sources: moveSource(
-                            s.sources,
-                            item.id,
-                            Number(cell.dataset.collageIndex),
-                          ),
-                          job: null,
-                        }));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Delete' || e.key === 'Backspace') {
-                        e.preventDefault();
-                        void deleteSelected();
-                      }
-                      if (
-                        e.altKey &&
-                        ['ArrowLeft', 'ArrowRight'].includes(e.key)
-                      ) {
-                        e.preventDefault();
-                        moveSelected(
-                          selectedIndex + (e.key === 'ArrowLeft' ? -1 : 1),
-                        );
-                      }
-                    }}
-                  >
-                    {previewUrls[index] && (
-                      <img
-                        alt={`第 ${currentPreview * previewCells + index + 1} 张`}
-                        src={previewUrls[index]}
-                      />
-                    )}
-                    {numberImages && index < previewUrls.length && (
-                      <span
-                        className={`${previewPositionClass} shape-${numberShape}`}
-                        style={{
-                          backgroundColor:
-                            numberShape === 'none'
-                              ? 'transparent'
-                              : `${numberBackground}${Math.round(
-                                  numberBackgroundOpacity * 255,
-                                )
-                                  .toString(16)
-                                  .padStart(2, '0')}`,
-                          color: numberColor,
-                          fontSize: `${numberSize * 100}cqmin`,
-                          fontWeight: numberWeight,
-                        }}
-                      >
-                        {String(
-                          Math.max(0, Math.round(startNumber)) +
-                            currentPreview * previewCells +
-                            index,
-                        ).padStart(numberDigits, '0')}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="preview-edit-tools">
-                <p>
-                  点击选中，拖到目标格重新排序；可跨板移动。这里只调整待拼队列，不改原图。
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={selectedIndex <= 0 || processing}
-                  onClick={() => moveSelected(selectedIndex - 1)}
-                >
-                  <ArrowLeft />
-                  前移
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    selectedIndex < 0 ||
-                    selectedIndex >= files.length - 1 ||
-                    processing
-                  }
-                  onClick={() => moveSelected(selectedIndex + 1)}
-                >
-                  后移
-                  <ArrowRight />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={selectedIndex < 0 || processing}
-                  onClick={() => void deleteSelected()}
-                >
-                  <Trash2 />
-                  移除所选
-                </Button>
-                {selectedIndex >= 0 && (
+                <div className="control-title">
+                  <span>01</span>
+                  <div>
+                    <p className="eyebrow">SOURCE IMAGES</p>
+                    <h2>选择图片</h2>
+                  </div>
+                  <Badge variant="outline">{files.length} / 1000</Badge>
+                </div>
+                <label className="collage-drop">
+                  <Upload />
+                  <strong>
+                    {files.length
+                      ? `已进入队列 ${files.length} 张`
+                      : '批量上传或从水印区/图库送入'}
+                  </strong>
+                  <span>未占满的最后一板只保留实际图片，空格不会编号</span>
+                  <input
+                    accept="image/*"
+                    multiple
+                    onChange={(event) => addFiles(event.target.files)}
+                    type="file"
+                  />
+                </label>
+                {files.length > 0 && (
                   <>
-                    <label className="preview-move-position">
-                      移到第{' '}
-                      <Input
-                        aria-label="移到队列序号"
-                        disabled={processing}
-                        type="number"
-                        min={1}
-                        max={files.length}
-                        key={selectedIndex}
-                        defaultValue={selectedIndex + 1}
-                        onBlur={(e) => {
-                          const value = Number(e.target.value);
-                          if (Number.isFinite(value) && value >= 1)
-                            moveSelected(value - 1);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur();
-                        }}
-                      />{' '}
-                      张
-                    </label>
-                    <div
-                      className="selected-preview-image"
-                      id="collage-selected-preview"
-                    >
-                      <ExampleImage
-                        src={selectedUrl || ''}
-                        alt={files[selectedIndex]?.name || '已选图片'}
-                      />
+                    <div className="source-file-list">
+                      {files.slice(0, 12).map((file, index) => (
+                        <span
+                          key={`${file.name}-${file.lastModified}-${index}`}
+                        >
+                          {file.name}
+                          <button
+                            aria-label={`移除 ${file.name}`}
+                            onClick={() => removeSource(index)}
+                            type="button"
+                          >
+                            <X />
+                          </button>
+                        </span>
+                      ))}
+                      {files.length > 12 && <b>+{files.length - 12}</b>}
                     </div>
+                    <MobileWorkspaceDetails
+                      title="管理原图"
+                      disabled={processing || vault.busy || !workspace.ready}
+                    >
+                      <SourceSelection
+                        sources={state.sources}
+                        disabled={processing}
+                        onRemove={async (ids) => {
+                          setState((s) => ({
+                            ...s,
+                            sources: s.sources.filter(
+                              (source) => !ids.includes(source.id),
+                            ),
+                            job: null,
+                          }));
+                          setPreviewBoard(0);
+                          await workspace.flush();
+                        }}
+                      />
+                    </MobileWorkspaceDetails>
+                    <Button
+                      disabled={files.length < 2}
+                      onClick={() => {
+                        setState((current) => ({
+                          ...current,
+                          sources: shuffleSources(current.sources),
+                        }));
+                        setPreviewBoard(0);
+                      }}
+                      type="button"
+                      variant="outline"
+                    >
+                      <Shuffle />
+                      一键打乱全部顺序
+                    </Button>
+                    <button
+                      className="clear-files"
+                      onClick={() => setFiles([])}
+                      type="button"
+                    >
+                      <Trash2 /> 清空这一批
+                    </button>
                   </>
                 )}
               </div>
-              <div className="preview-pagination">
-                <Button
-                  disabled={currentPreview === 0}
-                  onClick={() => setPreviewBoard(currentPreview - 1)}
-                  size="sm"
-                  variant="outline"
+              <div
+                className="collage-layout-settings collage-mobile-panel"
+                data-mobile-active={mobilePanel === 'layout'}
+              >
+                <MobileWorkspaceDetails
+                  disabled={processing || vault.busy || !workspace.ready}
+                  title="精确布局设置"
+                  summary={
+                    <div className="collage-quick-fields">
+                      <label>
+                        画布比例
+                        <select
+                          aria-label="画布比例"
+                          value={customRatio ? 'custom' : ratio.label}
+                          onChange={(e) => {
+                            const preset = ratioPresets.find(
+                              (item) => item.label === e.target.value,
+                            );
+                            if (preset) {
+                              setRatio(preset);
+                              setCustomRatio(false);
+                            }
+                          }}
+                        >
+                          {ratioPresets.map((item) => (
+                            <option key={item.label}>{item.label}</option>
+                          ))}
+                          {customRatio && (
+                            <option value="custom">
+                              自定义 {ratioWidth} × {ratioHeight}
+                            </option>
+                          )}
+                        </select>
+                      </label>
+                      <label>
+                        宫格数量
+                        <select
+                          aria-label="宫格数量"
+                          value={customGrid ? 'custom' : grid.label}
+                          onChange={(e) => {
+                            const preset = gridPresets.find(
+                              (item) => item.label === e.target.value,
+                            );
+                            if (preset) {
+                              setGrid(preset);
+                              setCustomGrid(false);
+                            }
+                          }}
+                        >
+                          {gridPresets.map((item) => (
+                            <option key={item.label}>{item.label}</option>
+                          ))}
+                          {customGrid && (
+                            <option value="custom">
+                              自定义 {gridColumns} × {gridRows}
+                            </option>
+                          )}
+                        </select>
+                      </label>
+                    </div>
+                  }
                 >
-                  上一板
-                </Button>
-                <span>
-                  {currentPreview + 1} / {Math.max(1, boardCount)}
-                </span>
-                <Button
-                  disabled={currentPreview >= boardCount - 1}
-                  onClick={() => setPreviewBoard(currentPreview + 1)}
-                  size="sm"
-                  variant="outline"
-                >
-                  下一板
-                </Button>
+                  <div className="control-section">
+                    <div className="control-title">
+                      <span>02</span>
+                      <div>
+                        <p className="eyebrow">CANVAS SIZE</p>
+                        <h2>拼图尺寸</h2>
+                      </div>
+                    </div>
+                    <div className="preset-grid ratio-grid">
+                      {ratioPresets.map((item) => (
+                        <button
+                          className={
+                            !customRatio && ratio.label === item.label
+                              ? 'is-active'
+                              : ''
+                          }
+                          key={item.label}
+                          onClick={() => {
+                            setRatio(item);
+                            setCustomRatio(false);
+                          }}
+                          type="button"
+                        >
+                          <i style={{ aspectRatio: `${item.w}/${item.h}` }} />
+                          <span>{item.label}</span>
+                        </button>
+                      ))}
+                      <button
+                        className={customRatio ? 'is-active' : ''}
+                        onClick={() => setCustomRatio(true)}
+                        type="button"
+                      >
+                        <i className="custom-ratio-icon" />
+                        <span>自定义像素</span>
+                      </button>
+                    </div>
+                    {customRatio && (
+                      <div className="custom-fields custom-pixel-fields">
+                        <label>
+                          <span>画布宽 px</span>
+                          <Input
+                            max="8000"
+                            min="320"
+                            onChange={(event) =>
+                              setRatioWidth(Number(event.target.value))
+                            }
+                            type="number"
+                            value={ratioWidth}
+                          />
+                        </label>
+                        <b>×</b>
+                        <label>
+                          <span>画布高 px</span>
+                          <Input
+                            max="8000"
+                            min="320"
+                            onChange={(event) =>
+                              setRatioHeight(Number(event.target.value))
+                            }
+                            type="number"
+                            value={ratioHeight}
+                          />
+                        </label>
+                        <small>生成文件会严格使用这个像素尺寸。</small>
+                      </div>
+                    )}
+                  </div>
+                  <div className="control-section">
+                    <div className="control-title">
+                      <span>03</span>
+                      <div>
+                        <p className="eyebrow">GRID SYSTEM</p>
+                        <h2>宫格数量</h2>
+                      </div>
+                    </div>
+                    <div className="grid-preset-row">
+                      {gridPresets.map((item) => (
+                        <button
+                          className={
+                            !customGrid && grid.label === item.label
+                              ? 'is-active'
+                              : ''
+                          }
+                          key={item.label}
+                          onClick={() => {
+                            setGrid(item);
+                            setCustomGrid(false);
+                          }}
+                          type="button"
+                        >
+                          <Grid3X3 />
+                          <span>{item.label}</span>
+                        </button>
+                      ))}
+                      <button
+                        className={customGrid ? 'is-active' : ''}
+                        onClick={() => setCustomGrid(true)}
+                        type="button"
+                      >
+                        <Plus />
+                        <span>自定义</span>
+                      </button>
+                    </div>
+                    {customGrid && (
+                      <div className="custom-fields">
+                        <label>
+                          <span>列数</span>
+                          <Input
+                            max="20"
+                            min="1"
+                            onChange={(event) =>
+                              setGridColumns(Number(event.target.value))
+                            }
+                            type="number"
+                            value={gridColumns}
+                          />
+                        </label>
+                        <b>×</b>
+                        <label>
+                          <span>行数</span>
+                          <Input
+                            max="20"
+                            min="1"
+                            onChange={(event) =>
+                              setGridRows(Number(event.target.value))
+                            }
+                            type="number"
+                            value={gridRows}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </MobileWorkspaceDetails>
               </div>
-              <div className="spec-list">
-                <div>
-                  <span>单板容量</span>
-                  <strong>{activeGrid.columns * activeGrid.rows} 张</strong>
+              <div
+                className="control-section numbering-section collage-mobile-panel"
+                data-mobile-active={mobilePanel === 'numbering'}
+              >
+                <div className="control-title">
+                  <span>04</span>
+                  <div>
+                    <p className="eyebrow">NUMBERING</p>
+                    <h2>编号与输出</h2>
+                  </div>
+                  <button
+                    aria-label="启用图片编号"
+                    aria-pressed={numberImages}
+                    className={`switch-control ${numberImages ? 'is-on' : ''}`}
+                    onClick={() => setNumberImages((value) => !value)}
+                    type="button"
+                  >
+                    <i />
+                  </button>
                 </div>
-                <div>
-                  <span>预计生成</span>
-                  <strong>{boardCount} 张拼图</strong>
+                <div className="number-style-grid">
+                  <label>
+                    <span>起始序号</span>
+                    <Input
+                      disabled={!numberImages}
+                      min="0"
+                      onChange={(event) =>
+                        setStartNumber(Number(event.target.value))
+                      }
+                      type="number"
+                      value={startNumber}
+                    />
+                  </label>
+                  <label>
+                    <span>编号位置</span>
+                    <select
+                      disabled={!numberImages}
+                      onChange={(event) =>
+                        setNumberPosition(event.target.value as NumberPosition)
+                      }
+                      value={numberPosition}
+                    >
+                      {numberPositions.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>编号大小 · {Math.round(numberSize * 100)}%</span>
+                    <input
+                      disabled={!numberImages}
+                      max="0.4"
+                      min="0.03"
+                      onChange={(event) =>
+                        setNumberSize(Number(event.target.value))
+                      }
+                      step="0.005"
+                      type="range"
+                      value={numberSize}
+                    />
+                  </label>
+                  <MobileWorkspaceDetails
+                    title="编号样式与输出格式"
+                    disabled={processing || vault.busy || !workspace.ready}
+                  >
+                    <div className="number-style-grid collage-number-details">
+                      <label>
+                        <span>字重</span>
+                        <select
+                          disabled={!numberImages}
+                          onChange={(event) =>
+                            setNumberWeight(
+                              Number(event.target.value) as 400 | 600 | 800,
+                            )
+                          }
+                          value={numberWeight}
+                        >
+                          <option value="400">常规</option>
+                          <option value="600">半粗</option>
+                          <option value="800">粗体</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>补零位数</span>
+                        <select
+                          disabled={!numberImages}
+                          onChange={(event) =>
+                            setNumberDigits(Number(event.target.value))
+                          }
+                          value={numberDigits}
+                        >
+                          <option value="0">不补零</option>
+                          <option value="2">2 位</option>
+                          <option value="3">3 位</option>
+                          <option value="4">4 位</option>
+                          <option value="5">5 位</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>底板形状</span>
+                        <select
+                          disabled={!numberImages}
+                          onChange={(event) =>
+                            setNumberShape(
+                              event.target.value as 'none' | 'square' | 'pill',
+                            )
+                          }
+                          value={numberShape}
+                        >
+                          <option value="none">无底板</option>
+                          <option value="square">直角底板</option>
+                          <option value="pill">圆角胶囊</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>文字颜色</span>
+                        <input
+                          disabled={!numberImages}
+                          onChange={(event) =>
+                            setNumberColor(event.target.value)
+                          }
+                          type="color"
+                          value={numberColor}
+                        />
+                      </label>
+                      <label>
+                        <span>底板颜色</span>
+                        <input
+                          disabled={!numberImages || numberShape === 'none'}
+                          onChange={(event) =>
+                            setNumberBackground(event.target.value)
+                          }
+                          type="color"
+                          value={numberBackground}
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          底板透明度 ·{' '}
+                          {Math.round(numberBackgroundOpacity * 100)}%
+                        </span>
+                        <input
+                          disabled={!numberImages || numberShape === 'none'}
+                          max="1"
+                          min="0"
+                          onChange={(event) =>
+                            setNumberBackgroundOpacity(
+                              Number(event.target.value),
+                            )
+                          }
+                          step="0.01"
+                          type="range"
+                          value={numberBackgroundOpacity}
+                        />
+                      </label>
+                      <label>
+                        <span>输出格式</span>
+                        <select
+                          onChange={(event) =>
+                            setFormat(
+                              event.target.value as 'image/png' | 'image/jpeg',
+                            )
+                          }
+                          value={format}
+                        >
+                          <option value="image/jpeg">JPG · 较小</option>
+                          <option value="image/png">PNG · 无损</option>
+                        </select>
+                      </label>
+                    </div>
+                  </MobileWorkspaceDetails>
                 </div>
-                <div>
-                  <span>今日已收纳</span>
-                  <strong>{outputs.length} 张</strong>
+                <p>
+                  <CircleAlert />{' '}
+                  编号样式会实时反映在右侧预览；生成时按每个格子的实际尺寸精确计算。
+                </p>
+              </div>
+            </section>
+            <aside className="collage-preview">
+              <div className="preview-sticky">
+                <div className="collage-preview-frame">
+                  <div className="preview-heading">
+                    <p className="eyebrow">LIVE SPEC</p>
+                    <span>{activeRatio.label}</span>
+                  </div>
+                  <div
+                    className="board-preview"
+                    data-interaction={mobileReordering ? 'reorder' : 'scroll'}
+                    style={
+                      {
+                        aspectRatio: `${activeRatio.w}/${activeRatio.h}`,
+                        maxWidth: `${(480 * activeRatio.w) / activeRatio.h}px`,
+                        '--collage-ratio': activeRatio.w / activeRatio.h,
+                        gridTemplateColumns: `repeat(${activeGrid.columns}, minmax(0, 1fr))`,
+                        gridTemplateRows: `repeat(${activeGrid.rows}, minmax(0, 1fr))`,
+                      } as React.CSSProperties
+                    }
+                  >
+                    {Array.from({ length: previewCells }, (_, index) => (
+                      <button
+                        type="button"
+                        data-collage-index={
+                          currentPreview * previewCells + index
+                        }
+                        className={`real-preview-cell ${state.sources[currentPreview * previewCells + index]?.id === selectedSource ? 'is-selected' : ''} ${dragOver === currentPreview * previewCells + index ? 'is-drag-over' : ''}`}
+                        key={
+                          state.sources[currentPreview * previewCells + index]
+                            ?.id || `empty-${index}`
+                        }
+                        aria-label={
+                          previewUrls[index]
+                            ? `选择第 ${currentPreview * previewCells + index + 1} 张图片`
+                            : '空格'
+                        }
+                        disabled={!previewUrls[index] || processing}
+                        onClick={() =>
+                          setSelectedSource(
+                            state.sources[currentPreview * previewCells + index]
+                              ?.id || null,
+                          )
+                        }
+                        onDoubleClick={() =>
+                          document
+                            .getElementById('collage-selected-preview')
+                            ?.querySelector<HTMLButtonElement>('button')
+                            ?.click()
+                        }
+                        onFocus={() => {
+                          const source =
+                            state.sources[
+                              currentPreview * previewCells + index
+                            ];
+                          if (source) setSelectedSource(source.id);
+                        }}
+                        onPointerDown={(e) => {
+                          const source =
+                            state.sources[
+                              currentPreview * previewCells + index
+                            ];
+                          if (!source || processing) return;
+                          if (
+                            window.matchMedia('(max-width: 780px)').matches &&
+                            !mobileReordering
+                          )
+                            return;
+                          setSelectedSource(source.id);
+                          drag.current = {
+                            id: source.id,
+                            x: e.clientX,
+                            y: e.clientY,
+                          };
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                        }}
+                        onPointerMove={(e) => {
+                          if (!drag.current) return;
+                          const cell = document
+                            .elementFromPoint(e.clientX, e.clientY)
+                            ?.closest<HTMLElement>('[data-collage-index]');
+                          setDragOver(
+                            cell ? Number(cell.dataset.collageIndex) : null,
+                          );
+                        }}
+                        onPointerCancel={() => {
+                          drag.current = null;
+                          setDragOver(null);
+                        }}
+                        onPointerUp={(e) => {
+                          const item = drag.current;
+                          drag.current = null;
+                          setDragOver(null);
+                          if (
+                            !item ||
+                            Math.hypot(e.clientX - item.x, e.clientY - item.y) <
+                              5
+                          )
+                            return;
+                          const cell = document
+                            .elementFromPoint(e.clientX, e.clientY)
+                            ?.closest<HTMLElement>('[data-collage-index]');
+                          if (cell)
+                            setState((s) => ({
+                              ...s,
+                              sources: moveSource(
+                                s.sources,
+                                item.id,
+                                Number(cell.dataset.collageIndex),
+                              ),
+                              job: null,
+                            }));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Delete' || e.key === 'Backspace') {
+                            e.preventDefault();
+                            void deleteSelected();
+                          }
+                          if (
+                            e.altKey &&
+                            ['ArrowLeft', 'ArrowRight'].includes(e.key)
+                          ) {
+                            e.preventDefault();
+                            moveSelected(
+                              selectedIndex + (e.key === 'ArrowLeft' ? -1 : 1),
+                            );
+                          }
+                        }}
+                      >
+                        {previewUrls[index] && (
+                          <img
+                            alt={`第 ${currentPreview * previewCells + index + 1} 张`}
+                            src={previewUrls[index]}
+                          />
+                        )}
+                        {numberImages && index < previewUrls.length && (
+                          <span
+                            className={`${previewPositionClass} shape-${numberShape}`}
+                            style={{
+                              backgroundColor:
+                                numberShape === 'none'
+                                  ? 'transparent'
+                                  : `${numberBackground}${Math.round(
+                                      numberBackgroundOpacity * 255,
+                                    )
+                                      .toString(16)
+                                      .padStart(2, '0')}`,
+                              color: numberColor,
+                              fontSize: `${numberSize * 100}cqmin`,
+                              fontWeight: numberWeight,
+                            }}
+                          >
+                            {String(
+                              Math.max(0, Math.round(startNumber)) +
+                                currentPreview * previewCells +
+                                index,
+                            ).padStart(numberDigits, '0')}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="preview-edit-tools">
+                    <p>
+                      点击选中，拖到目标格重新排序；可跨板移动。这里只调整待拼队列，不改原图。
+                    </p>
+                    <Button
+                      aria-pressed={mobileReordering}
+                      className="mobile-workspace-only mobile-collage-reorder"
+                      onClick={() => setMobileReordering((value) => !value)}
+                      size="sm"
+                      variant={mobileReordering ? 'default' : 'outline'}
+                    >
+                      <Move />
+                      {mobileReordering ? '完成排序' : '进入排序模式'}
+                    </Button>
+                    <MobileWorkspaceDetails
+                      title="调整图片顺序"
+                      disabled={processing || vault.busy || !workspace.ready}
+                    >
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={selectedIndex <= 0 || processing}
+                        onClick={() => moveSelected(selectedIndex - 1)}
+                      >
+                        <ArrowLeft />
+                        前移
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          selectedIndex < 0 ||
+                          selectedIndex >= files.length - 1 ||
+                          processing
+                        }
+                        onClick={() => moveSelected(selectedIndex + 1)}
+                      >
+                        后移
+                        <ArrowRight />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={selectedIndex < 0 || processing}
+                        onClick={() => void deleteSelected()}
+                      >
+                        <Trash2 />
+                        移除所选
+                      </Button>
+                      {selectedIndex >= 0 && (
+                        <>
+                          <label className="preview-move-position">
+                            移到第{' '}
+                            <Input
+                              aria-label="移到队列序号"
+                              disabled={processing}
+                              type="number"
+                              min={1}
+                              max={files.length}
+                              key={selectedIndex}
+                              defaultValue={selectedIndex + 1}
+                              onBlur={(e) => {
+                                const value = Number(e.target.value);
+                                if (Number.isFinite(value) && value >= 1)
+                                  moveSelected(value - 1);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.currentTarget.blur();
+                              }}
+                            />{' '}
+                            张
+                          </label>
+                          <div
+                            className="selected-preview-image"
+                            id="collage-selected-preview"
+                          >
+                            <ExampleImage
+                              src={selectedUrl || ''}
+                              alt={files[selectedIndex]?.name || '已选图片'}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </MobileWorkspaceDetails>
+                  </div>
+                  <div className="preview-pagination">
+                    <Button
+                      disabled={currentPreview === 0}
+                      onClick={() => setPreviewBoard(currentPreview - 1)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      上一板
+                    </Button>
+                    <span>
+                      {currentPreview + 1} / {Math.max(1, boardCount)}
+                    </span>
+                    <Button
+                      disabled={currentPreview >= boardCount - 1}
+                      onClick={() => setPreviewBoard(currentPreview + 1)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      下一板
+                    </Button>
+                  </div>
                 </div>
-                <div>
-                  <span>自动图库</span>
-                  <strong>
-                    {vault.status === 'unlocked'
-                      ? `${today} 拼图`
-                      : '解锁后启用'}
-                  </strong>
+                <div
+                  className="collage-output-panel collage-mobile-panel"
+                  data-mobile-active={mobilePanel === 'output'}
+                >
+                  <div className="spec-list">
+                    <div>
+                      <span>单板容量</span>
+                      <strong>{activeGrid.columns * activeGrid.rows} 张</strong>
+                    </div>
+                    <div>
+                      <span>预计生成</span>
+                      <strong>{boardCount} 张拼图</strong>
+                    </div>
+                    <div>
+                      <span>今日已收纳</span>
+                      <strong>{outputs.length} 张</strong>
+                    </div>
+                    <div>
+                      <span>自动图库</span>
+                      <strong>
+                        {vault.status === 'unlocked'
+                          ? `${today} 拼图`
+                          : '解锁后启用'}
+                      </strong>
+                    </div>
+                  </div>
+                  {processing ? (
+                    <Progress className="collage-progress" value={progress}>
+                      <ProgressLabel>正在拼贴</ProgressLabel>
+                      <ProgressValue>{() => `${progress}%`}</ProgressValue>
+                    </Progress>
+                  ) : (
+                    <Button
+                      className="generate-button"
+                      disabled={!files.length}
+                      onClick={() => generate(false)}
+                    >
+                      <WandSparkles /> 开始批量拼图
+                    </Button>
+                  )}
+                  <p className="local-note">
+                    <ShieldCheck /> 全程在本机处理，不上传原图。
+                  </p>
+                  {outputs.length > 0 && (
+                    <button
+                      className="mobile-result-summary mobile-workspace-only"
+                      onClick={() => setMobileResultsOpen(true)}
+                      type="button"
+                    >
+                      <span>
+                        <strong>查看今天的拼图结果</strong>
+                        <small>
+                          {outputs.length} 张 · 按需预览、下载或删除
+                        </small>
+                      </span>
+                      <ArrowRight />
+                    </button>
+                  )}
                 </div>
               </div>
-              {processing ? (
-                <Progress className="collage-progress" value={progress}>
-                  <ProgressLabel>正在拼贴</ProgressLabel>
-                  <ProgressValue>{() => `${progress}%`}</ProgressValue>
-                </Progress>
-              ) : (
-                <Button
-                  className="generate-button"
-                  disabled={!files.length}
-                  onClick={() => generate(false)}
-                >
-                  <WandSparkles /> 开始批量拼图
-                </Button>
-              )}
-              <p className="local-note">
-                <ShieldCheck /> 全程在本机处理，不上传原图。
-              </p>
-            </div>
-          </aside>
-        </div>
-      </fieldset>
+            </aside>
+          </div>
+        </fieldset>
+        <MobileWorkspacePrimaryAction>
+          {processing ? (
+            <Button
+              onClick={() => controller.current?.abort()}
+              variant="outline"
+            >
+              <Pause /> 暂停并保留进度
+            </Button>
+          ) : state.job ? (
+            <Button
+              disabled={!workspace.ready || vault.busy}
+              onClick={() => generate(true)}
+            >
+              <WandSparkles /> 继续未完成拼图（已完成 {state.job.nextBoard} 板）
+            </Button>
+          ) : (
+            <Button
+              disabled={!files.length || !workspace.ready || vault.busy}
+              onClick={() => generate(false)}
+            >
+              <WandSparkles /> 开始批量拼图
+            </Button>
+          )}
+        </MobileWorkspacePrimaryAction>
+      </MobileWorkspace>
       {processing && (
-        <Button onClick={() => controller.current?.abort()} variant="outline">
+        <Button
+          className="desktop-workspace-only"
+          onClick={() => controller.current?.abort()}
+          variant="outline"
+        >
           <Pause />
           暂停并保留进度
         </Button>
       )}
       {state.job && !processing && (
-        <Button onClick={() => generate(true)} variant="outline">
+        <Button
+          className="desktop-workspace-only"
+          onClick={() => generate(true)}
+          variant="outline"
+        >
           继续未完成拼图（已完成 {state.job.nextBoard} 板）
         </Button>
       )}
@@ -1176,7 +1380,7 @@ export function CollagePanel() {
         </p>
       )}
       {outputs.length > 0 && (
-        <section className="collage-results">
+        <section className="collage-results desktop-workspace-results">
           <div className="result-head">
             <div>
               <p className="eyebrow">GENERATED TODAY</p>
@@ -1233,6 +1437,48 @@ export function CollagePanel() {
           <span>今天还没有生成拼图。</span>
         </div>
       )}
+      <MobileWorkspaceSheet
+        description={`${today} · 共 ${outputs.length} 张，结果不会永久铺在编辑页下方。`}
+        footer={
+          outputs.length > 0 ? (
+            <Button disabled={downloading} onClick={downloadAll}>
+              <Download /> {downloading ? '正在打包…' : '下载全部'}
+            </Button>
+          ) : undefined
+        }
+        onOpenChange={setMobileResultsOpen}
+        open={mobileResultsOpen}
+        title="拼图结果"
+      >
+        {outputs.length ? (
+          <div className="mobile-collage-results">
+            {outputs.map((output) => (
+              <article key={output.id}>
+                <ExampleImage alt={output.name} src={output.url} />
+                <div>
+                  <span>{output.name}</span>
+                  <Button
+                    onClick={() => downloadBlob(output.blob, output.name)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <Download /> 下载
+                  </Button>
+                  <Button
+                    onClick={() => deleteOutput(output)}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <Trash2 /> 删除
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="mobile-workspace-empty">今天还没有生成拼图。</p>
+        )}
+      </MobileWorkspaceSheet>
     </div>
   );
 }
