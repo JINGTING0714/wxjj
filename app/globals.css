@@ -7087,6 +7087,236 @@ button {
   }
 }
 
+/* Final mobile-editor pass: keep preview-first sizing after all legacy mobile
+   rules, including the existing stacked-workspace review styles. */
+@media (max-width: 780px) {
+  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) {
+    height: clamp(420px, 54dvh, 620px) !important;
+    min-height: 420px !important;
+    grid-template-rows: 22px minmax(0, 1fr) auto !important;
+    background: #17131b !important;
+    color: #fff;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
+  }
+  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) .dom-watermark-stage {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    background: #211b27;
+    overscroll-behavior: contain;
+  }
+  .watermark-mobile-workspace .mobile-preview-interaction {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 0;
+    padding-top: 6px;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions {
+    display: flex;
+    min-width: 0;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions::-webkit-scrollbar,
+  .collage-mobile-workspace .preview-edit-tools::-webkit-scrollbar {
+    display: none;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions > *,
+  .collage-mobile-workspace .preview-edit-tools [data-slot='button'],
+  .collage-mobile-workspace .preview-edit-tools .workspace-detail-summary {
+    flex: 0 0 auto;
+    min-height: 38px;
+    white-space: nowrap;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button'],
+  .watermark-mobile-workspace .mobile-preview-action {
+    border-color: rgb(255 255 255 / 22%);
+    background: #302638;
+    color: #fff;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button']:first-of-type {
+    background: #b8ff3d;
+    border-color: #b8ff3d;
+    color: #17131b;
+  }
+  .watermark-mobile-workspace .mobile-preview-interaction > span {
+    overflow: hidden;
+    color: #cfc4d7;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .watermark-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + clamp(420px, 54dvh, 620px)) !important;
+    margin-top: 0;
+  }
+  .collage-mobile-workspace .collage-preview-frame {
+    height: clamp(390px, 50dvh, 580px) !important;
+    min-height: 390px !important;
+    grid-template-rows: 22px minmax(0, 1fr) auto 36px !important;
+    background: #17131b !important;
+    color: #fff;
+  }
+  .collage-mobile-workspace .board-preview {
+    width: min(100%, calc((50dvh - 112px) * var(--collage-ratio))) !important;
+    max-height: calc(50dvh - 112px) !important;
+    touch-action: pan-y;
+  }
+  .collage-mobile-workspace .board-preview[data-interaction='reorder'],
+  .collage-mobile-workspace .board-preview[data-interaction='reorder'] .real-preview-cell {
+    touch-action: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools {
+    width: 100%;
+    margin: 0;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools > p {
+    display: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools [data-slot='button'],
+  .collage-mobile-workspace .preview-edit-tools .workspace-detail-summary {
+    border-color: rgb(255 255 255 / 22%);
+    background: #302638;
+    color: #fff;
+  }
+  .collage-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + clamp(390px, 50dvh, 580px)) !important;
+    margin-top: 0;
+  }
+}
+
+/* Preview-first mobile editor: the canvas is the workspace, controls are its
+   compact transport bar. Keep this override after the stacked-panel rules. */
+@media (max-width: 780px) {
+  .watermark-mobile-workspace .mobile-workspace-preview:not(.is-mobile-fullscreen) {
+    position: sticky;
+    top: 66px;
+    z-index: 12;
+    grid-template-rows: 22px minmax(0, 1fr) auto;
+    height: clamp(420px, 54dvh, 620px);
+    min-height: 420px;
+    margin-inline: -1px;
+    border: 0;
+    background: #17131b;
+    color: #fff;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    box-shadow: 0 12px 30px rgb(34 20 48 / 18%);
+  }
+  .watermark-mobile-workspace .mobile-workspace-preview:not(.is-mobile-fullscreen) .dom-watermark-stage {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    margin: 0;
+    padding: 8px;
+    background: #211b27;
+    overscroll-behavior: contain;
+  }
+  .watermark-mobile-workspace .mobile-workspace-preview:not(.is-mobile-fullscreen) .watermark-surface {
+    max-height: 100%;
+  }
+  .watermark-mobile-workspace .mobile-preview-interaction {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 0;
+    padding-top: 6px;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions {
+    display: flex;
+    min-width: 0;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding: 1px 0 2px;
+    scrollbar-width: none;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions::-webkit-scrollbar {
+    display: none;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions > * {
+    flex: 0 0 auto;
+    min-height: 38px;
+    white-space: nowrap;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button'],
+  .watermark-mobile-workspace .mobile-preview-action {
+    border-color: rgb(255 255 255 / 22%);
+    background: #302638;
+    color: #fff;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button']:first-of-type {
+    background: #b8ff3d;
+    border-color: #b8ff3d;
+    color: #17131b;
+  }
+  .watermark-mobile-workspace .mobile-preview-interaction > span {
+    overflow: hidden;
+    color: #cfc4d7;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .watermark-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + clamp(420px, 54dvh, 620px));
+    margin-top: 0;
+    border-radius: 0;
+  }
+  .collage-mobile-workspace .collage-preview-frame {
+    position: sticky;
+    top: 66px;
+    z-index: 12;
+    grid-template-rows: 22px minmax(0, 1fr) auto 36px;
+    height: clamp(390px, 50dvh, 580px);
+    min-height: 390px;
+    padding: 8px;
+    background: #17131b;
+    color: #fff;
+  }
+  .collage-mobile-workspace .board-preview {
+    width: min(100%, calc((50dvh - 112px) * var(--collage-ratio)));
+    max-height: calc(50dvh - 112px);
+    align-self: center;
+    touch-action: pan-y;
+  }
+  .collage-mobile-workspace .board-preview[data-interaction='reorder'],
+  .collage-mobile-workspace .board-preview[data-interaction='reorder'] .real-preview-cell {
+    touch-action: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools {
+    width: 100%;
+    margin: 0;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools::-webkit-scrollbar {
+    display: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools > p {
+    display: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools [data-slot='button'],
+  .collage-mobile-workspace .preview-edit-tools .workspace-detail-summary {
+    flex: 0 0 auto;
+    min-height: 36px;
+    border-color: rgb(255 255 255 / 22%);
+    background: #302638;
+    color: #fff;
+  }
+  .collage-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + clamp(390px, 50dvh, 580px));
+    margin-top: 0;
+  }
+}
+
 /* Mobile review: size the actual preview and keep details out of the workspace. */
 .collage-preview-frame,
 .workspace-detail-desktop,
@@ -8160,5 +8390,109 @@ button {
   }
   .module-guide-card > p {
     min-height: 0;
+  }
+}
+
+/* Preview-first mobile editor: final cascade after legacy workspace rules. */
+@media (max-width: 780px) {
+  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) {
+    height: clamp(420px, 54dvh, 620px) !important;
+    min-height: 420px !important;
+    grid-template-rows: 22px minmax(0, 1fr) auto !important;
+    background: #17131b !important;
+    color: #fff;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
+  }
+  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) .dom-watermark-stage {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    background: #211b27;
+    overscroll-behavior: contain;
+  }
+  .watermark-mobile-workspace .mobile-preview-interaction {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 0;
+    padding-top: 6px;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions {
+    display: flex;
+    min-width: 0;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions::-webkit-scrollbar,
+  .collage-mobile-workspace .preview-edit-tools::-webkit-scrollbar {
+    display: none;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions > *,
+  .collage-mobile-workspace .preview-edit-tools [data-slot='button'],
+  .collage-mobile-workspace .preview-edit-tools .workspace-detail-summary {
+    flex: 0 0 auto;
+    min-height: 38px;
+    white-space: nowrap;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button'],
+  .watermark-mobile-workspace .mobile-preview-action {
+    border-color: rgb(255 255 255 / 22%);
+    background: #302638;
+    color: #fff;
+  }
+  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button']:first-of-type {
+    background: #b8ff3d;
+    border-color: #b8ff3d;
+    color: #17131b;
+  }
+  .watermark-mobile-workspace .mobile-preview-interaction > span {
+    overflow: hidden;
+    color: #cfc4d7;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .watermark-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + clamp(420px, 54dvh, 620px)) !important;
+    margin-top: 0;
+  }
+  .collage-mobile-workspace .collage-preview-frame {
+    height: clamp(390px, 50dvh, 580px) !important;
+    min-height: 390px !important;
+    grid-template-rows: 22px minmax(0, 1fr) auto 36px !important;
+    background: #17131b !important;
+    color: #fff;
+  }
+  .collage-mobile-workspace .board-preview {
+    width: min(100%, calc((50dvh - 112px) * var(--collage-ratio))) !important;
+    max-height: calc(50dvh - 112px) !important;
+    touch-action: pan-y;
+  }
+  .collage-mobile-workspace .board-preview[data-interaction='reorder'],
+  .collage-mobile-workspace .board-preview[data-interaction='reorder'] .real-preview-cell {
+    touch-action: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools {
+    width: 100%;
+    margin: 0;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools > p {
+    display: none;
+  }
+  .collage-mobile-workspace .preview-edit-tools [data-slot='button'],
+  .collage-mobile-workspace .preview-edit-tools .workspace-detail-summary {
+    border-color: rgb(255 255 255 / 22%);
+    background: #302638;
+    color: #fff;
+  }
+  .collage-mobile-workspace .mobile-workspace-tabs {
+    top: calc(66px + clamp(390px, 50dvh, 580px)) !important;
+    margin-top: 0;
   }
 }
