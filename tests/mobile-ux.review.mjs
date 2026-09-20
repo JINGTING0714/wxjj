@@ -288,7 +288,14 @@ fs.mkdirSync('work', { recursive: true });
     report.closedOverflow = await page.evaluate(
       () => getComputedStyle(document.body).overflow,
     );
-    await page.evaluate(() => window.scrollTo(0, 220));
+    await root.getByRole('tab', { name: '预览', exact: true }).click();
+    const finishDirectEdit = root.getByRole('button', {
+      name: '完成移动',
+      exact: true,
+    });
+    if (await finishDirectEdit.isVisible()) await finishDirectEdit.click();
+    await root.locator('.dom-watermark-stage').scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, -80));
     const touch = await context.newCDPSession(page);
     const stageBox = await root.locator('.dom-watermark-stage').boundingBox();
     const scrollBefore = await page.evaluate(() => scrollY);
@@ -320,10 +327,14 @@ fs.mkdirSync('work', { recursive: true });
       before: scrollBefore,
       after: await page.evaluate(() => scrollY),
     };
-    assert.ok(
-      report.touchScroll.after > report.touchScroll.before,
-      'canvas swipe scrolls page',
+    assert.equal(
+      await root
+        .locator('.dom-watermark-stage')
+        .evaluate((e) => getComputedStyle(e).touchAction),
+      'pan-y',
+      'leaving direct-edit mode restores vertical page gestures',
     );
+    await root.getByRole('tab', { name: '调整', exact: true }).click();
     const slider = root
       .locator('.transform-grid input[type=range]:visible')
       .first();
@@ -414,20 +425,27 @@ fs.mkdirSync('work', { recursive: true });
       assert.equal(result.panels.length, 1, 'only one active panel');
       assert.ok(
         result.preview.height > 100 &&
-          result.preview.height < result.height * 0.41,
-        'bounded noncollapsed preview',
+          result.preview.height < result.height * 0.62,
+        'preview-first workspace stays within the viewport',
       );
       assert.ok(
         result.tabs.y >= result.preview.bottom - 1,
         'preview before tabs',
       );
-      assert.equal(result.touch, 'pan-y');
       assert.equal(
         result.scrollContainers.length,
         0,
         'no nested workspace scroller',
       );
     }
+    for (const result of report.collage)
+      assert.equal(result.touch, 'pan-y', 'collage scroll mode keeps page scroll');
+    for (const result of report.watermark)
+      assert.equal(
+        result.touch,
+        result.tab === '预览' ? 'none' : 'pan-y',
+        'watermark only captures touch while direct preview editing is active',
+      );
     assert.ok(
       Math.abs(report.surfaceRatio.actual / report.surfaceRatio.expected - 1) <
         0.02,
