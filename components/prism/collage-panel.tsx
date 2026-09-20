@@ -27,6 +27,8 @@ import {
   WandSparkles,
   X,
   Move,
+  Redo2,
+  Undo2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -120,6 +122,75 @@ export function CollagePanel() {
     } | null,
   });
   const { state, setState } = workspace;
+  type CollageEditableState = Omit<typeof state, 'job'>;
+  const editableState = (value: typeof state): CollageEditableState => {
+    const { job: _job, ...editable } = value;
+    return editable;
+  };
+  const collageHistory = useRef<{
+    current: CollageEditableState;
+    past: CollageEditableState[];
+    future: CollageEditableState[];
+    applying: boolean;
+  }>({
+    current: editableState(state),
+    past: [],
+    future: [],
+    applying: false,
+  });
+  const [historyAvailability, setHistoryAvailability] = useState({
+    undo: false,
+    redo: false,
+  });
+  const refreshHistoryAvailability = () =>
+    setHistoryAvailability({
+      undo: collageHistory.current.past.length > 0,
+      redo: collageHistory.current.future.length > 0,
+    });
+  useEffect(() => {
+    const next = editableState(state);
+    if (!workspace.ready) {
+      collageHistory.current.current = next;
+      collageHistory.current.past = [];
+      collageHistory.current.future = [];
+      return;
+    }
+    if (collageHistory.current.applying) {
+      collageHistory.current.applying = false;
+      collageHistory.current.current = next;
+      refreshHistoryAvailability();
+      return;
+    }
+    const previous = collageHistory.current.current;
+    const changed = (
+      Object.keys(next) as Array<keyof CollageEditableState>
+    ).some((key) => previous[key] !== next[key]);
+    if (!changed) return;
+    collageHistory.current.past.push(previous);
+    if (collageHistory.current.past.length > 80)
+      collageHistory.current.past.shift();
+    collageHistory.current.current = next;
+    collageHistory.current.future = [];
+    refreshHistoryAvailability();
+  }, [state, workspace.ready]);
+  const undo = () => {
+    const previous = collageHistory.current.past.pop();
+    if (!previous || processing) return;
+    collageHistory.current.future.push(editableState(state));
+    collageHistory.current.applying = true;
+    setState((current) => ({ ...current, ...previous, job: null }));
+    refreshHistoryAvailability();
+  };
+  const redo = () => {
+    const next = collageHistory.current.future.pop();
+    if (!next || processing) return;
+    collageHistory.current.past.push(editableState(state));
+    collageHistory.current.applying = true;
+    setState((current) => ({ ...current, ...next, job: null }));
+    refreshHistoryAvailability();
+  };
+  const canUndo = historyAvailability.undo;
+  const canRedo = historyAvailability.redo;
   const {
     ratio,
     grid,
@@ -507,6 +578,24 @@ export function CollagePanel() {
         title="拼图工坊"
         description="最多 1000 张批量分板；尺寸、宫格、编号位置与视觉样式全部开放给你。"
       />
+      <div className="editor-history-actions desktop-workspace-only">
+        <Button
+          disabled={processing || !canUndo}
+          onClick={undo}
+          size="sm"
+          variant="outline"
+        >
+          <Undo2 /> 撤销
+        </Button>
+        <Button
+          disabled={processing || !canRedo}
+          onClick={redo}
+          size="sm"
+          variant="outline"
+        >
+          <Redo2 /> 重做
+        </Button>
+      </div>
       {workspace.saveError && (
         <p className="error-banner">{workspace.saveError}</p>
       )}
@@ -1165,6 +1254,26 @@ export function CollagePanel() {
                       点击选中，拖到目标格重新排序；可跨板移动。这里只调整待拼队列，不改原图。
                     </p>
                     <Button
+                      aria-label="撤销上一步拼图操作"
+                      className="mobile-workspace-only"
+                      disabled={processing || !canUndo}
+                      onClick={undo}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Undo2 /> 撤销
+                    </Button>
+                    <Button
+                      aria-label="重做上一步拼图操作"
+                      className="mobile-workspace-only"
+                      disabled={processing || !canRedo}
+                      onClick={redo}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Redo2 /> 重做
+                    </Button>
+                    <Button
                       aria-pressed={mobileReordering}
                       className="mobile-workspace-only mobile-collage-reorder"
                       onClick={() => setMobileReordering((value) => !value)}
@@ -1330,7 +1439,9 @@ export function CollagePanel() {
             </aside>
           </div>
         </fieldset>
-        <MobileWorkspacePrimaryAction>
+        <MobileWorkspacePrimaryAction
+          className={mobilePanel === 'output' ? 'is-visible' : 'is-contextual'}
+        >
           {processing ? (
             <Button
               onClick={() => controller.current?.abort()}
