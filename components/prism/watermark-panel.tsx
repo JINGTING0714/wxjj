@@ -766,7 +766,11 @@ export function WatermarkPanel({
                 )}
               </MobileWorkspacePanel>
 
-              <MobileWorkspacePrimaryAction>
+              <MobileWorkspacePrimaryAction
+                className={
+                  mobilePanel === 'output' ? 'is-visible' : 'is-contextual'
+                }
+              >
                 {running[batch.id] !== undefined ? (
                   <Button
                     onClick={() => controllers.current.get(batch.id)?.abort()}

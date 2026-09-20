@@ -60,6 +60,23 @@ fs.mkdirSync('work', { recursive: true });
       .first()
       .waitFor({ state: 'attached' });
     const report = { phase, collage: [], watermark: [], errors };
+    const collageUndo = page
+      .locator('.collage-mobile-workspace')
+      .getByRole('button', { name: '撤销上一步拼图操作', exact: true });
+    await collageUndo.click();
+    await page
+      .locator('.collage-page .real-preview-cell img')
+      .first()
+      .waitFor({ state: 'detached' });
+    await page
+      .locator('.collage-mobile-workspace')
+      .getByRole('button', { name: '重做上一步拼图操作', exact: true })
+      .click();
+    await page
+      .locator('.collage-page .real-preview-cell img')
+      .first()
+      .waitFor({ state: 'attached' });
+    report.collageHistory = true;
     async function measure(rootSelector, previewSelector, panelSelector) {
       return page
         .locator(rootSelector)
@@ -190,6 +207,10 @@ fs.mkdirSync('work', { recursive: true });
       .filter({ hasText: '42' })
       .waitFor();
     await page
+      .locator('.collage-page')
+      .getByRole('tab', { name: '输出', exact: true })
+      .click();
+    await page
       .locator(
         '.collage-mobile-workspace .mobile-workspace-primary-action button',
       )
@@ -219,6 +240,17 @@ fs.mkdirSync('work', { recursive: true });
       .locator('.watermark-layers-mobile-panel input[type=file]')
       .setInputFiles('public/og.png');
     await root.locator('.transform-layer-list article').nth(1).waitFor();
+    await root
+      .getByRole('button', { name: '撤销上一步水印操作', exact: true })
+      .click();
+    await root.locator('.transform-layer-list article').nth(1).waitFor({
+      state: 'detached',
+    });
+    await root
+      .getByRole('button', { name: '重做上一步水印操作', exact: true })
+      .click();
+    await root.locator('.transform-layer-list article').nth(1).waitFor();
+    report.watermarkHistory = true;
     for (const width of [360, 375, 390, 414, 430, 768]) {
       await page.setViewportSize({ width, height: 844 });
       for (const tab of ['预览', '水印', '调整', '输出']) {
@@ -338,9 +370,7 @@ fs.mkdirSync('work', { recursive: true });
     const slider = root
       .locator('.transform-grid input[type=range]:visible')
       .first();
-    await slider.evaluate((e) =>
-      window.scrollBy(0, e.getBoundingClientRect().y - 530),
-    );
+    await slider.scrollIntoViewIfNeeded();
     const sliderBox = await slider.boundingBox();
     assert.ok(
       await slider.evaluate((e) => {
@@ -412,6 +442,40 @@ fs.mkdirSync('work', { recursive: true });
         columns: getComputedStyle(e).gridTemplateColumns,
       }));
     await page.screenshot({ path: `work/${phase}-desktop.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await nav('资产', '提示词库');
+    const emptyState = page
+      .locator('.studio-page .record-list > .empty-state:visible')
+      .filter({ hasText: '没有找到匹配资产' });
+    await emptyState.waitFor();
+    report.emptyState = await emptyState.evaluate((element) => {
+      const host = element.getBoundingClientRect();
+      const visibleChildren = [...element.children]
+        .map((child) => child.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      const content = {
+        left: Math.min(...visibleChildren.map((rect) => rect.left)),
+        right: Math.max(...visibleChildren.map((rect) => rect.right)),
+        top: Math.min(...visibleChildren.map((rect) => rect.top)),
+        bottom: Math.max(...visibleChildren.map((rect) => rect.bottom)),
+      };
+      return {
+        horizontalDelta:
+          (content.left + content.right) / 2 - (host.left + host.right) / 2,
+        verticalDelta:
+          (content.top + content.bottom) / 2 - (host.top + host.bottom) / 2,
+        host: host.toJSON(),
+        content,
+      };
+    });
+    assert.ok(
+      Math.abs(report.emptyState.horizontalDelta) < 3,
+      'mobile empty state is horizontally centered',
+    );
+    assert.ok(
+      Math.abs(report.emptyState.verticalDelta) < 3,
+      'mobile empty state is vertically centered in the result area',
+    );
     fs.writeFileSync(
       path.resolve(`work/${phase}-review.json`),
       JSON.stringify(report, null, 2),
@@ -432,14 +496,24 @@ fs.mkdirSync('work', { recursive: true });
         result.tabs.y >= result.preview.bottom - 1,
         'preview before tabs',
       );
-      assert.equal(
-        result.scrollContainers.length,
-        0,
-        'no nested workspace scroller',
+      assert.ok(
+        result.tabs.bottom <= result.height - 67,
+        'workshop tool rail stays above the fixed app navigation',
+      );
+      assert.ok(
+        result.scrollContainers.length <= 1 &&
+          result.scrollContainers.every((item) =>
+            /mobile-panel|mobile-workspace-panel/.test(item.class),
+          ),
+        'only the expanded lower tool tray may scroll',
       );
     }
     for (const result of report.collage)
-      assert.equal(result.touch, 'pan-y', 'collage scroll mode keeps page scroll');
+      assert.equal(
+        result.touch,
+        'pan-y',
+        'collage scroll mode keeps page scroll',
+      );
     for (const result of report.watermark)
       assert.equal(
         result.touch,

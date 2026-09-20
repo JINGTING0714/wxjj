@@ -15,6 +15,8 @@ import {
   RefreshCw,
   Scan,
   SlidersHorizontal,
+  Redo2,
+  Undo2,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -133,9 +135,64 @@ export function WatermarkEditor({
     >(),
   );
   const [error, setError] = useState('');
+  const history = useRef<{
+    source?: File;
+    current: { layers: EditorLayer[]; composition?: WatermarkComposition };
+    past: Array<{ layers: EditorLayer[]; composition?: WatermarkComposition }>;
+    future: Array<{
+      layers: EditorLayer[];
+      composition?: WatermarkComposition;
+    }>;
+    applying: boolean;
+  }>({
+    source,
+    current: { layers, composition },
+    past: [],
+    future: [],
+    applying: false,
+  });
+  const [historyAvailability, setHistoryAvailability] = useState({
+    undo: false,
+    redo: false,
+  });
+  const refreshHistoryAvailability = () =>
+    setHistoryAvailability({
+      undo: history.current.past.length > 0,
+      redo: history.current.future.length > 0,
+    });
   const [library, setLibrary] = useState<
     Array<{ record: StoredWatermark; file: File }>
   >([]);
+  useEffect(() => {
+    const next = { layers, composition };
+    if (history.current.source !== source) {
+      history.current = {
+        source,
+        current: next,
+        past: [],
+        future: [],
+        applying: false,
+      };
+      refreshHistoryAvailability();
+      return;
+    }
+    if (history.current.applying) {
+      history.current.applying = false;
+      history.current.current = next;
+      refreshHistoryAvailability();
+      return;
+    }
+    if (
+      history.current.current.layers !== layers ||
+      history.current.current.composition !== composition
+    ) {
+      history.current.past.push(history.current.current);
+      if (history.current.past.length > 80) history.current.past.shift();
+      history.current.current = next;
+      history.current.future = [];
+      refreshHistoryAvailability();
+    }
+  }, [composition, layers, source]);
   useEffect(() => {
     if (mobilePanel && mobilePanel !== 'preview') {
       setMobileTouchEditing(false);
@@ -171,6 +228,24 @@ export function WatermarkEditor({
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
   const canvas = resolveComposition(composition);
+  const undo = () => {
+    const previous = history.current.past.pop();
+    if (!previous || disabled) return;
+    history.current.future.push({ layers, composition });
+    history.current.applying = true;
+    publishChange(previous.layers, previous.composition);
+    refreshHistoryAvailability();
+  };
+  const redo = () => {
+    const next = history.current.future.pop();
+    if (!next || disabled) return;
+    history.current.past.push({ layers, composition });
+    history.current.applying = true;
+    publishChange(next.layers, next.composition);
+    refreshHistoryAvailability();
+  };
+  const canUndo = historyAvailability.undo;
+  const canRedo = historyAvailability.redo;
   const onChange = (
     nextLayers: EditorLayer[],
     nextCanvas?: WatermarkComposition,
@@ -653,6 +728,28 @@ export function WatermarkEditor({
         </div>
         <div className="mobile-preview-interaction mobile-workspace-only">
           <div className="mobile-preview-actions" aria-label="预览快捷操作">
+            <Button
+              aria-label="撤销上一步水印操作"
+              disabled={disabled || !canUndo}
+              onClick={undo}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Undo2 />
+              撤销
+            </Button>
+            <Button
+              aria-label="重做上一步水印操作"
+              disabled={disabled || !canRedo}
+              onClick={redo}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Redo2 />
+              重做
+            </Button>
             <label className="mini-file mobile-preview-action">
               <Plus />
               导入水印
@@ -667,9 +764,15 @@ export function WatermarkEditor({
               />
             </label>
             <Button
-              disabled={disabled || !selected || selected.id === SOURCE_LAYER_ID || !base}
+              disabled={
+                disabled ||
+                !selected ||
+                selected.id === SOURCE_LAYER_ID ||
+                !base
+              }
               onClick={() => {
-                if (!selected || selected.id === SOURCE_LAYER_ID || !base) return;
+                if (!selected || selected.id === SOURCE_LAYER_ID || !base)
+                  return;
                 const dim = dimensions.get(selected.file);
                 if (!dim) return;
                 try {
@@ -698,7 +801,9 @@ export function WatermarkEditor({
             <Button
               aria-label={selected?.locked ? '解锁当前图层' : '锁定当前图层'}
               disabled={disabled || !selected}
-              onClick={() => selected && change(selected.id, { locked: !selected.locked })}
+              onClick={() =>
+                selected && change(selected.id, { locked: !selected.locked })
+              }
               size="sm"
               type="button"
               variant="outline"
@@ -708,10 +813,21 @@ export function WatermarkEditor({
             </Button>
             <Button
               aria-label="删除当前水印图层"
-              disabled={disabled || !selected || selected.id === SOURCE_LAYER_ID || selected.locked}
+              disabled={
+                disabled ||
+                !selected ||
+                selected.id === SOURCE_LAYER_ID ||
+                selected.locked
+              }
               onClick={() => {
-                if (selected && selected.id !== SOURCE_LAYER_ID && !selected.locked)
-                  publishStack(stack.filter((layer) => layer.id !== selected.id));
+                if (
+                  selected &&
+                  selected.id !== SOURCE_LAYER_ID &&
+                  !selected.locked
+                )
+                  publishStack(
+                    stack.filter((layer) => layer.id !== selected.id),
+                  );
               }}
               size="sm"
               type="button"
@@ -763,6 +879,24 @@ export function WatermarkEditor({
         className="watermark-layer-panel workshop-fieldset mobile-editor-controls"
       >
         <h3 className="desktop-workspace-only">画布、图层与变换</h3>
+        <div className="editor-history-actions desktop-workspace-only">
+          <Button
+            disabled={disabled || !canUndo}
+            onClick={undo}
+            size="sm"
+            variant="outline"
+          >
+            <Undo2 /> 撤销
+          </Button>
+          <Button
+            disabled={disabled || !canRedo}
+            onClick={redo}
+            size="sm"
+            variant="outline"
+          >
+            <Redo2 /> 重做
+          </Button>
+        </div>
         <div className="composition-controls desktop-workspace-only">
           <p>
             摆好原图和水印后，一键收齐四周边界。图层大小和相对位置保持不变。
