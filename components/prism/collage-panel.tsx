@@ -88,8 +88,8 @@ export function CollagePanel() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [mobilePanel, setMobilePanel] = useState<
-    'sources' | 'layout' | 'numbering' | 'output'
-  >('sources');
+    'sources' | 'layout' | 'numbering' | 'actions' | 'output' | null
+  >(null);
   const [mobileReordering, setMobileReordering] = useState(false);
   const [mobileResultsOpen, setMobileResultsOpen] = useState(false);
   const drag = useRef<{ id: string; x: number; y: number } | null>(null);
@@ -607,14 +607,19 @@ export function CollagePanel() {
           <div className="collage-layout">
             <MobileWorkspaceTabs
               label="拼图工作区"
+              onClose={() => {
+                setMobilePanel(null);
+                setMobileReordering(false);
+              }}
               onValueChange={(value) => {
                 setMobilePanel(value);
-                if (value !== 'sources') setMobileReordering(false);
+                if (value !== 'actions') setMobileReordering(false);
               }}
               tabs={[
                 { value: 'sources', label: '图片', icon: <ImageIcon /> },
                 { value: 'layout', label: '布局', icon: <Grid3X3 /> },
                 { value: 'numbering', label: '编号', icon: <Plus /> },
+                { value: 'actions', label: '操作', icon: <Move /> },
                 { value: 'output', label: '输出', icon: <Download /> },
               ]}
               value={mobilePanel}
@@ -1249,7 +1254,10 @@ export function CollagePanel() {
                       </button>
                     ))}
                   </div>
-                  <div className="preview-edit-tools">
+                  <div
+                    className="preview-edit-tools"
+                    data-mobile-active={mobilePanel === 'actions'}
+                  >
                     <p>
                       点击选中，拖到目标格重新排序；可跨板移动。这里只调整待拼队列，不改原图。
                     </p>

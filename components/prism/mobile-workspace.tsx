@@ -35,11 +35,13 @@ export function MobileWorkspaceTabs<Value extends string>({
   tabs,
   value,
   onValueChange,
+  onClose,
 }: {
   label: string;
   tabs: MobileWorkspaceTab<Value>[];
-  value: Value;
+  value: Value | null;
   onValueChange: (value: Value) => void;
+  onClose?: () => void;
 }) {
   return (
     <div className="mobile-workspace-tabs" role="tablist" aria-label={label}>
@@ -48,7 +50,11 @@ export function MobileWorkspaceTabs<Value extends string>({
           aria-selected={tab.value === value}
           className={tab.value === value ? 'is-active' : ''}
           key={tab.value}
-          onClick={() => onValueChange(tab.value)}
+          onClick={() =>
+            tab.value === value && onClose
+              ? onClose()
+              : onValueChange(tab.value)
+          }
           role="tab"
           type="button"
         >

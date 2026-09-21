@@ -3,9 +3,11 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Bold,
   Check,
   Eye,
   EyeOff,
+  Italic,
   Lock,
   Maximize2,
   Minimize2,
@@ -16,6 +18,8 @@ import {
   Scan,
   SlidersHorizontal,
   Redo2,
+  Type,
+  Underline,
   Undo2,
   X,
 } from 'lucide-react';
@@ -24,6 +28,7 @@ import { MobileWorkspacePanel, MobileWorkspaceSheet } from './mobile-workspace';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
 import {
+  canvasBlob,
   loadImage,
   imageContentBounds,
   type WatermarkLayerInput,
@@ -51,8 +56,93 @@ import {
   type StretchEdge,
 } from '@/lib/watermark-interaction';
 import type { LayerDimensions } from '@/lib/watermark-composition';
+import type { WatermarkMobilePanel } from './watermark-panel';
 
-export type EditorLayer = WatermarkLayerInput & { id: string };
+export type TextLayerStyle = {
+  content: string;
+  fontFamily: string;
+  fontLabel: string;
+  weight: 400 | 700;
+  italic: boolean;
+  underline: boolean;
+  color: string;
+};
+
+export type EditorLayer = WatermarkLayerInput & {
+  id: string;
+  text?: TextLayerStyle;
+};
+
+const textFontOptions = [
+  { label: '思源黑体', family: 'Noto Sans SC' },
+  { label: '思源宋体', family: 'Noto Serif SC' },
+  { label: '马善政毛笔', family: 'Ma Shan Zheng' },
+  { label: 'Bebas 海报体', family: 'Bebas Neue' },
+  { label: 'Caveat 手写体', family: 'Caveat' },
+] as const;
+
+const defaultTextStyle: TextLayerStyle = {
+  content: '双击编辑文字',
+  fontFamily: 'Noto Sans SC',
+  fontLabel: '思源黑体',
+  weight: 400,
+  italic: false,
+  underline: false,
+  color: '#ffffff',
+};
+
+async function renderTextLayer(style: TextLayerStyle) {
+  const content = style.content.trim() || '文字';
+  const fontSize = 144;
+  const font = `${style.italic ? 'italic ' : ''}${style.weight} ${fontSize}px "${style.fontFamily}"`;
+  await document.fonts.load(font, content).catch(() => []);
+  const measure = document.createElement('canvas');
+  const measuring = measure.getContext('2d');
+  if (!measuring) throw new Error('当前浏览器无法生成文字图层');
+  measuring.font = font;
+  const maxLineWidth = 2200;
+  const lines: string[] = [];
+  for (const paragraph of content.split(/\r?\n/)) {
+    let line = '';
+    for (const character of paragraph || ' ') {
+      const candidate = `${line}${character}`;
+      if (line && measuring.measureText(candidate).width > maxLineWidth) {
+        lines.push(line);
+        line = character;
+      } else line = candidate;
+    }
+    lines.push(line || ' ');
+  }
+  const padding = 44;
+  const lineHeight = Math.round(fontSize * 1.28);
+  const widths = lines.map((line) => measuring.measureText(line).width);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(160, Math.ceil(Math.max(...widths) + padding * 2));
+  canvas.height = Math.max(190, lines.length * lineHeight + padding * 2);
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前浏览器无法生成文字图层');
+  context.font = font;
+  context.fillStyle = style.color;
+  context.textBaseline = 'top';
+  lines.forEach((line, index) => {
+    const y = padding + index * lineHeight;
+    context.fillText(line, padding, y);
+    if (style.underline) {
+      context.fillRect(
+        padding,
+        y + fontSize + 8,
+        Math.max(1, widths[index]),
+        Math.max(4, Math.round(fontSize / 22)),
+      );
+    }
+  });
+  const blob = await canvasBlob(canvas, 'image/png');
+  canvas.width = canvas.height = 0;
+  return new File([blob], `文字-${content.slice(0, 18)}.png`, {
+    type: 'image/png',
+    lastModified: Date.now(),
+  });
+}
 export const defaultLayer = (file: File): EditorLayer => ({
   id: crypto.randomUUID(),
   file,
@@ -119,7 +209,7 @@ export function WatermarkEditor({
   composition?: WatermarkComposition;
   disabled?: boolean;
   sourceKind?: 'image' | 'video';
-  mobilePanel?: 'preview' | 'watermarks' | 'adjust' | 'output';
+  mobilePanel?: WatermarkMobilePanel | null;
 }) {
   const vault = useVault();
   const [active, setActive] = useState('');
@@ -127,6 +217,8 @@ export function WatermarkEditor({
   const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
   const [mobilePreviewFullscreen, setMobilePreviewFullscreen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [textDraft, setTextDraft] = useState<TextLayerStyle>(defaultTextStyle);
+  const [textBusy, setTextBusy] = useState(false);
   const [guides, setGuides] = useState<AlignmentGuides | null>(null);
   const [dimensions, setDimensions] = useState(
     new Map<
@@ -193,17 +285,7 @@ export function WatermarkEditor({
       refreshHistoryAvailability();
     }
   }, [composition, layers, source]);
-  useEffect(() => {
-    if (mobilePanel && mobilePanel !== 'preview') {
-      setMobileTouchEditing(false);
-      setMobilePreviewFullscreen(false);
-    } else if (typeof window !== 'undefined' && source) {
-      // The preview is the primary mobile workspace.  Start in direct-edit
-      // mode so the first gesture acts on the selected layer instead of
-      // forcing the user to hunt for a separate editing panel.
-      setMobileTouchEditing(window.matchMedia('(max-width: 780px)').matches);
-    }
-  }, [mobilePanel, source]);
+  const mobileDirectEditing = mobilePanel === 'actions' && mobileTouchEditing;
   useEffect(() => {
     if (!mobilePreviewFullscreen) return;
     const previous = document.body.style.overflow;
@@ -301,6 +383,36 @@ export function WatermarkEditor({
           l.id === id ? { ...l, ...patch } : l,
         ),
       );
+  };
+  const commitTextLayer = async () => {
+    if (disabled || textBusy || !source || !textDraft.content.trim()) return;
+    if (selected?.locked) return;
+    setTextBusy(true);
+    try {
+      const file = await renderTextLayer(textDraft);
+      if (selected?.text && selected.id !== SOURCE_LAYER_ID) {
+        change(selected.id, {
+          file,
+          text: { ...textDraft },
+          crop: { top: 0, right: 0, bottom: 0, left: 0 },
+          scaleX: 1,
+          scaleY: 1,
+        });
+      } else {
+        const layer: EditorLayer = {
+          ...defaultLayer(file),
+          scale: 0.36,
+          text: { ...textDraft },
+        };
+        onChange([...currentLayers.current, layer]);
+        setActive(layer.id);
+      }
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '文字图层生成失败');
+    } finally {
+      setTextBusy(false);
+    }
   };
   const publishStack = (next: EditorLayer[]) =>
     onChange(
@@ -414,7 +526,7 @@ export function WatermarkEditor({
   };
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
     if (disabled || layer.locked || !surface.current) return;
-    if (event.pointerType === 'touch' && !mobileTouchEditing) return;
+    if (event.pointerType === 'touch' && !mobileDirectEditing) return;
     if (drag.current && drag.current.pointer !== event.pointerId) return;
     const dim = dimensions.get(layer.file);
     const original = source && dimensions.get(source);
@@ -429,6 +541,7 @@ export function WatermarkEditor({
     event.preventDefault();
     event.stopPropagation();
     setActive(layer.id);
+    if (layer.text) setTextDraft(layer.text);
     const rect = surface.current.getBoundingClientRect();
     const cx = rect.left + rect.width * layer.x;
     const cy = rect.top + rect.height * layer.y;
@@ -562,7 +675,7 @@ export function WatermarkEditor({
     <div className="watermark-layout watermark-free-editor">
       <section
         className={`watermark-input-panel mobile-workspace-preview ${mobilePreviewFullscreen ? 'is-mobile-fullscreen' : ''}`}
-        data-interaction={mobileTouchEditing ? 'edit' : 'scroll'}
+        data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
         data-fullscreen={mobilePreviewFullscreen ? 'true' : 'false'}
       >
         <h3>第一张样本 · 自由摆放</h3>
@@ -578,7 +691,7 @@ export function WatermarkEditor({
         </label>
         <div
           className="watermark-stage dom-watermark-stage"
-          data-interaction={mobileTouchEditing ? 'edit' : 'scroll'}
+          data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
         >
           {base && sourceUrl ? (
             <div
@@ -726,7 +839,10 @@ export function WatermarkEditor({
             </div>
           )}
         </div>
-        <div className="mobile-preview-interaction mobile-workspace-only">
+        <div
+          className="mobile-preview-interaction mobile-workspace-only"
+          data-mobile-active={mobilePanel === 'actions'}
+        >
           <div className="mobile-preview-actions" aria-label="预览快捷操作">
             <Button
               aria-label="撤销上一步水印操作"
@@ -841,10 +957,10 @@ export function WatermarkEditor({
               onClick={() => setMobileTouchEditing((editing) => !editing)}
               size="sm"
               type="button"
-              variant={mobileTouchEditing ? 'default' : 'outline'}
+              variant={mobileDirectEditing ? 'default' : 'outline'}
             >
-              {mobileTouchEditing ? <Check /> : <Move />}
-              {mobileTouchEditing ? '完成移动' : '移动 / 缩放'}
+              {mobileDirectEditing ? <Check /> : <Move />}
+              {mobileDirectEditing ? '完成移动' : '移动 / 缩放'}
             </Button>
             <Button
               aria-label={mobilePreviewFullscreen ? '退出全屏预览' : '全屏预览'}
@@ -859,7 +975,7 @@ export function WatermarkEditor({
             </Button>
           </div>
           <span>
-            {mobileTouchEditing
+            {mobileDirectEditing
               ? '直接拖动图层；四角缩放，顶部圆点旋转。'
               : '点击“移动 / 缩放”后可直接操作预览。'}
           </span>
@@ -1030,7 +1146,7 @@ export function WatermarkEditor({
           </p>
         </div>
         <MobileWorkspacePanel
-          active={!mobilePanel || mobilePanel === 'watermarks'}
+          active={mobilePanel === 'watermarks'}
           className="watermark-layers-mobile-panel"
           label="水印图层"
         >
@@ -1083,12 +1199,19 @@ export function WatermarkEditor({
               >
                 <button
                   className="layer-select"
-                  onClick={() => setActive(layer.id)}
+                  onClick={() => {
+                    setActive(layer.id);
+                    if (layer.text) setTextDraft(layer.text);
+                  }}
                   type="button"
                 >
                   <strong>
-                    {layer.id === SOURCE_LAYER_ID ? '原图 · ' : '水印 · '}
-                    {layer.file.name}
+                    {layer.id === SOURCE_LAYER_ID
+                      ? '原图 · '
+                      : layer.text
+                        ? '文字 · '
+                        : '水印 · '}
+                    {layer.text?.content || layer.file.name}
                     {layer.locked ? ' · 已锁定' : ''}
                   </strong>
                 </button>
@@ -1112,7 +1235,7 @@ export function WatermarkEditor({
                   </button>
                   <button
                     type="button"
-                    aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : '水印层'}`}
+                    aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : layer.text ? '文字层' : '水印层'}`}
                     onClick={() => change(layer.id, { locked: !layer.locked })}
                   >
                     {layer.locked ? <Lock /> : <Unlock />}
@@ -1155,7 +1278,152 @@ export function WatermarkEditor({
           </p>
         </MobileWorkspacePanel>
         <MobileWorkspacePanel
-          active={!mobilePanel || mobilePanel === 'adjust'}
+          active={mobilePanel === 'text'}
+          className="watermark-text-mobile-panel"
+          label="添加与编辑文字"
+        >
+          <div className="mobile-workspace-panel-heading mobile-workspace-only">
+            <p className="eyebrow">TEXT</p>
+            <h3>{selected?.text ? '编辑文字图层' : '添加文字图层'}</h3>
+            <p>文字会作为普通图层参与拖动、缩放、排序和批量导出。</p>
+          </div>
+          <div className="watermark-text-controls">
+            <label className="watermark-text-content">
+              <span>文字内容</span>
+              <textarea
+                disabled={disabled || textBusy || Boolean(selected?.locked)}
+                maxLength={240}
+                onChange={(event) =>
+                  setTextDraft((current) => ({
+                    ...current,
+                    content: event.target.value,
+                  }))
+                }
+                placeholder="输入中文或 English…"
+                rows={2}
+                value={textDraft.content}
+              />
+            </label>
+            <label>
+              <span>字体</span>
+              <select
+                disabled={disabled || textBusy || Boolean(selected?.locked)}
+                onChange={(event) => {
+                  const font = textFontOptions.find(
+                    (item) => item.family === event.target.value,
+                  );
+                  if (font)
+                    setTextDraft((current) => ({
+                      ...current,
+                      fontFamily: font.family,
+                      fontLabel: font.label,
+                    }));
+                }}
+                value={textDraft.fontFamily}
+              >
+                {textFontOptions.map((font) => (
+                  <option key={font.family} value={font.family}>
+                    {font.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="watermark-text-style-buttons" aria-label="文字样式">
+              <button
+                aria-label="文字加粗"
+                aria-pressed={textDraft.weight === 700}
+                disabled={disabled || textBusy || Boolean(selected?.locked)}
+                onClick={() =>
+                  setTextDraft((current) => ({
+                    ...current,
+                    weight: current.weight === 700 ? 400 : 700,
+                  }))
+                }
+                type="button"
+              >
+                <Bold />
+                粗体
+              </button>
+              <button
+                aria-label="文字斜体"
+                aria-pressed={textDraft.italic}
+                disabled={disabled || textBusy || Boolean(selected?.locked)}
+                onClick={() =>
+                  setTextDraft((current) => ({
+                    ...current,
+                    italic: !current.italic,
+                  }))
+                }
+                type="button"
+              >
+                <Italic />
+                斜体
+              </button>
+              <button
+                aria-label="文字下划线"
+                aria-pressed={textDraft.underline}
+                disabled={disabled || textBusy || Boolean(selected?.locked)}
+                onClick={() =>
+                  setTextDraft((current) => ({
+                    ...current,
+                    underline: !current.underline,
+                  }))
+                }
+                type="button"
+              >
+                <Underline />
+                下划线
+              </button>
+              <label className="watermark-text-color">
+                <input
+                  aria-label="文字颜色"
+                  disabled={disabled || textBusy || Boolean(selected?.locked)}
+                  onChange={(event) =>
+                    setTextDraft((current) => ({
+                      ...current,
+                      color: event.target.value,
+                    }))
+                  }
+                  type="color"
+                  value={textDraft.color}
+                />
+                <span>颜色</span>
+              </label>
+            </div>
+            <p
+              className="watermark-text-sample"
+              style={{
+                color: textDraft.color,
+                fontFamily: textDraft.fontFamily,
+                fontStyle: textDraft.italic ? 'italic' : 'normal',
+                fontWeight: textDraft.weight,
+                textDecoration: textDraft.underline ? 'underline' : 'none',
+              }}
+            >
+              {textDraft.content || '文字预览 Text Preview'}
+            </p>
+            <Button
+              disabled={
+                disabled ||
+                textBusy ||
+                !source ||
+                !textDraft.content.trim() ||
+                Boolean(selected?.locked)
+              }
+              onClick={() => void commitTextLayer()}
+              type="button"
+            >
+              <Type />
+              {textBusy
+                ? '正在生成…'
+                : selected?.text
+                  ? '应用文字修改'
+                  : '添加文字图层'}
+            </Button>
+          </div>
+        </MobileWorkspacePanel>
+        <MobileWorkspacePanel
+          active={mobilePanel === 'adjust'}
           className="watermark-adjust-mobile-panel"
           label="调整图层"
         >
@@ -1170,7 +1438,11 @@ export function WatermarkEditor({
               disabled={disabled || selected.locked}
             >
               <legend>
-                {selected.id === SOURCE_LAYER_ID ? '原图' : '当前水印'}
+                {selected.id === SOURCE_LAYER_ID
+                  ? '原图'
+                  : selected.text
+                    ? '当前文字'
+                    : '当前水印'}
                 {selected.locked ? ' · 已锁定，请先解锁再调整' : ' · 自由调整'}
               </legend>
               <Button
@@ -1178,7 +1450,10 @@ export function WatermarkEditor({
                   change(selected.id, {
                     ...(selected.id === SOURCE_LAYER_ID
                       ? { ...defaultComposition().source, locked: false }
-                      : defaultLayer(selected.file)),
+                      : {
+                          ...defaultLayer(selected.file),
+                          ...(selected.text ? { text: selected.text } : {}),
+                        }),
                     id: selected.id,
                   })
                 }

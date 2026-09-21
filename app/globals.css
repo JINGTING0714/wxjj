@@ -7090,7 +7090,10 @@ button {
 /* Final mobile-editor pass: keep preview-first sizing after all legacy mobile
    rules, including the existing stacked-workspace review styles. */
 @media (max-width: 780px) {
-  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    ) {
     position: relative !important;
     top: auto !important;
     height: clamp(420px, 54dvh, 620px) !important;
@@ -7100,7 +7103,11 @@ button {
     color: #fff;
     padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
   }
-  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) .dom-watermark-stage {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    )
+    .dom-watermark-stage {
     height: auto !important;
     max-height: none !important;
     min-height: 0 !important;
@@ -7139,7 +7146,9 @@ button {
     background: #302638;
     color: #fff;
   }
-  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button']:first-of-type {
+  .watermark-mobile-workspace
+    .mobile-preview-actions
+    [data-slot='button']:first-of-type {
     background: #b8ff3d;
     border-color: #b8ff3d;
     color: #17131b;
@@ -7171,7 +7180,9 @@ button {
     touch-action: pan-y;
   }
   .collage-mobile-workspace .board-preview[data-interaction='reorder'],
-  .collage-mobile-workspace .board-preview[data-interaction='reorder'] .real-preview-cell {
+  .collage-mobile-workspace
+    .board-preview[data-interaction='reorder']
+    .real-preview-cell {
     touch-action: none;
   }
   .collage-mobile-workspace .preview-edit-tools {
@@ -7263,6 +7274,14 @@ button {
     background: #17131b;
     box-shadow: 0 14px 34px rgb(28 16 38 / 18%);
   }
+  .watermark-image-workspace:not([hidden]),
+  .watermark-image-workspace .batch-editor {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
   .watermark-mobile-workspace {
     height: auto;
     min-height: 0;
@@ -7275,7 +7294,10 @@ button {
     max-height: none;
     flex: 1 1 0;
   }
-  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen),
+  .watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    ),
   .collage-mobile-workspace .collage-preview-frame {
     position: relative !important;
     top: auto !important;
@@ -7288,7 +7310,10 @@ button {
     border: 0;
     box-shadow: none;
   }
-  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    ) {
     grid-template-rows: 18px minmax(0, 1fr) auto !important;
     padding: 6px 8px !important;
   }
@@ -7308,7 +7333,8 @@ button {
   .collage-mobile-workspace .preview-edit-tools > .mobile-workspace-only {
     display: inline-flex !important;
   }
-  .watermark-mobile-workspace .mobile-workspace-panel[data-mobile-active='true'],
+  .watermark-mobile-workspace
+    .mobile-workspace-panel[data-mobile-active='true'],
   .collage-mobile-workspace .collage-mobile-panel[data-mobile-active='true'] {
     order: 20;
     display: block;
@@ -7422,7 +7448,8 @@ button {
 /* Preview-first mobile editor: the canvas is the workspace, controls are its
    compact transport bar. Keep this override after the stacked-panel rules. */
 @media (max-width: 780px) {
-  .watermark-mobile-workspace .mobile-workspace-preview:not(.is-mobile-fullscreen) {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen) {
     position: sticky;
     top: 66px;
     z-index: 12;
@@ -7436,7 +7463,9 @@ button {
     padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
     box-shadow: 0 12px 30px rgb(34 20 48 / 18%);
   }
-  .watermark-mobile-workspace .mobile-workspace-preview:not(.is-mobile-fullscreen) .dom-watermark-stage {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen)
+    .dom-watermark-stage {
     height: auto;
     max-height: none;
     min-height: 0;
@@ -7445,7 +7474,9 @@ button {
     background: #211b27;
     overscroll-behavior: contain;
   }
-  .watermark-mobile-workspace .mobile-workspace-preview:not(.is-mobile-fullscreen) .watermark-surface {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview:not(.is-mobile-fullscreen)
+    .watermark-surface {
     max-height: 100%;
   }
   .watermark-mobile-workspace .mobile-preview-interaction {
@@ -7478,7 +7509,9 @@ button {
     background: #302638;
     color: #fff;
   }
-  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button']:first-of-type {
+  .watermark-mobile-workspace
+    .mobile-preview-actions
+    [data-slot='button']:first-of-type {
     background: #b8ff3d;
     border-color: #b8ff3d;
     color: #17131b;
@@ -7513,7 +7546,9 @@ button {
     touch-action: pan-y;
   }
   .collage-mobile-workspace .board-preview[data-interaction='reorder'],
-  .collage-mobile-workspace .board-preview[data-interaction='reorder'] .real-preview-cell {
+  .collage-mobile-workspace
+    .board-preview[data-interaction='reorder']
+    .real-preview-cell {
     touch-action: none;
   }
   .collage-mobile-workspace .preview-edit-tools {
@@ -7735,6 +7770,80 @@ button {
 }
 .mobile-workspace-sheet [data-slot='drawer-footer'] button {
   min-height: 44px;
+}
+
+/* Text layers reuse the image-layer pipeline, but keep their authoring controls
+   readable on desktop as well as inside the mobile tool drawer. */
+.watermark-text-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.45fr);
+  gap: 10px;
+  margin-top: 16px;
+  border-top: 1px solid #ded6e7;
+  padding-top: 16px;
+}
+.watermark-text-controls > label,
+.watermark-text-content {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.watermark-text-content,
+.watermark-text-style-buttons,
+.watermark-text-sample,
+.watermark-text-controls > [data-slot='button'] {
+  grid-column: 1 / -1;
+}
+.watermark-text-content textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid #cfc4db;
+  background: #fff;
+  padding: 10px;
+  color: inherit;
+}
+.watermark-text-style-buttons {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.watermark-text-style-buttons > button,
+.watermark-text-color {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #cfc4db;
+  background: #f8f5fb;
+  padding: 7px 10px;
+  color: inherit;
+}
+.watermark-text-style-buttons > button[aria-pressed='true'] {
+  border-color: #7140c6;
+  background: #eee5f8;
+  color: #5b2fa4;
+}
+.watermark-text-style-buttons svg {
+  width: 16px;
+  height: 16px;
+}
+.watermark-text-color input {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+.watermark-text-sample {
+  min-height: 56px;
+  overflow: hidden;
+  margin: 0;
+  border: 1px dashed #cfc4db;
+  background: #fff;
+  padding: 10px;
+  font-size: 22px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 780px) {
@@ -8622,7 +8731,258 @@ button {
 
 /* Preview-first mobile editor: final cascade after legacy workspace rules. */
 @media (max-width: 780px) {
-  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) {
+  .mobile-workspace.watermark-mobile-workspace,
+  .mobile-workspace.collage-mobile-workspace {
+    position: relative;
+    isolation: isolate;
+    overflow: clip;
+  }
+
+  .mobile-workspace.watermark-mobile-workspace {
+    height: 100%;
+    flex: 1 1 0;
+  }
+
+  .mobile-workspace.watermark-mobile-workspace .mobile-workspace-tabs,
+  .mobile-workspace.collage-mobile-workspace .mobile-workspace-tabs {
+    position: absolute !important;
+    z-index: 40;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    min-height: 64px;
+    background: rgb(20 17 24 / 98%);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-workspace.watermark-mobile-workspace
+    > .mobile-workspace-tabs.mobile-workspace-tabs {
+    position: absolute !important;
+    top: auto !important;
+    bottom: 0 !important;
+  }
+
+  .mobile-workspace.watermark-mobile-workspace .mobile-workspace-panel,
+  .mobile-workspace.collage-mobile-workspace .collage-mobile-panel {
+    position: absolute !important;
+    z-index: 30;
+    right: 0;
+    bottom: 64px;
+    left: 0;
+    display: block !important;
+    width: 100%;
+    max-height: min(34dvh, 300px) !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+    visibility: hidden;
+    border: 1px solid #493d53 !important;
+    border-bottom: 0 !important;
+    border-radius: 20px 20px 0 0;
+    background: rgb(24 20 29 / 98%) !important;
+    color: #f8f4fb;
+    padding: 22px 14px 14px !important;
+    opacity: 0;
+    box-shadow: 0 -18px 42px rgb(10 7 13 / 52%);
+    pointer-events: none;
+    transform: translateY(calc(100% + 70px));
+    transition:
+      transform 180ms ease,
+      opacity 150ms ease,
+      visibility 0s linear 180ms;
+    overscroll-behavior: contain;
+  }
+
+  .mobile-workspace.watermark-mobile-workspace .mobile-workspace-panel::before,
+  .mobile-workspace.collage-mobile-workspace .collage-mobile-panel::before,
+  .watermark-mobile-workspace
+    .mobile-preview-interaction[data-mobile-active='true']::before,
+  .collage-mobile-workspace
+    .preview-edit-tools[data-mobile-active='true']::before {
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 42px;
+    height: 4px;
+    border-radius: 999px;
+    background: #75677f;
+    content: '';
+    transform: translateX(-50%);
+  }
+
+  .mobile-workspace.watermark-mobile-workspace
+    .mobile-workspace-panel[data-mobile-active='true'],
+  .mobile-workspace.collage-mobile-workspace
+    .collage-mobile-panel[data-mobile-active='true'] {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+    transition-delay: 0s;
+  }
+
+  .watermark-mobile-workspace .mobile-preview-interaction,
+  .collage-mobile-workspace .preview-edit-tools {
+    position: absolute !important;
+    z-index: 31;
+    right: 0;
+    bottom: 64px;
+    left: 0;
+    display: flex !important;
+    width: 100%;
+    max-height: min(30dvh, 250px);
+    visibility: hidden;
+    border: 1px solid #493d53;
+    border-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    background: rgb(24 20 29 / 98%);
+    padding: 22px 12px 12px;
+    opacity: 0;
+    box-shadow: 0 -18px 42px rgb(10 7 13 / 52%);
+    pointer-events: none;
+    transform: translateY(calc(100% + 70px));
+    transition:
+      transform 180ms ease,
+      opacity 150ms ease,
+      visibility 0s linear 180ms;
+  }
+
+  .watermark-mobile-workspace
+    .mobile-preview-interaction[data-mobile-active='true'],
+  .collage-mobile-workspace .preview-edit-tools[data-mobile-active='true'] {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+    transition-delay: 0s;
+  }
+
+  .watermark-mobile-workspace
+    .mobile-preview-interaction[data-mobile-active='true'] {
+    display: grid !important;
+  }
+
+  .mobile-workspace.watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    ),
+  .mobile-workspace.collage-mobile-workspace .collage-preview-frame {
+    padding-bottom: 68px !important;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-primary-action,
+  .collage-mobile-workspace .mobile-workspace-primary-action {
+    position: absolute !important;
+    z-index: 36;
+    right: 10px;
+    bottom: 72px;
+    left: 10px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    padding: 0;
+  }
+
+  .watermark-mobile-workspace .watermark-output-panel,
+  .collage-mobile-workspace .collage-output-panel {
+    padding-bottom: 76px !important;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-panel-heading h3,
+  .collage-mobile-workspace .control-title h2,
+  .collage-mobile-workspace .spec-list strong {
+    color: #fff;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-panel p,
+  .collage-mobile-workspace .collage-mobile-panel p,
+  .collage-mobile-workspace .collage-mobile-panel small,
+  .collage-mobile-workspace .collage-mobile-panel span {
+    color: #c7bdcd;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-panel input,
+  .watermark-mobile-workspace .mobile-workspace-panel select,
+  .watermark-mobile-workspace .mobile-workspace-panel textarea,
+  .collage-mobile-workspace .collage-mobile-panel input,
+  .collage-mobile-workspace .collage-mobile-panel select {
+    border-color: #5a4b65;
+    background: #2c2532;
+    color: #fff;
+  }
+
+  .watermark-text-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(126px, 0.42fr);
+    gap: 10px;
+  }
+  .watermark-text-controls > label,
+  .watermark-text-content {
+    display: grid;
+    gap: 6px;
+    color: #d6ccdc;
+    font-size: 12px;
+  }
+  .watermark-text-content {
+    grid-column: 1 / -1;
+  }
+  .watermark-text-content textarea {
+    width: 100%;
+    min-height: 66px;
+    resize: vertical;
+    padding: 10px;
+  }
+  .watermark-text-style-buttons {
+    display: flex;
+    min-width: 0;
+    grid-column: 1 / -1;
+    gap: 7px;
+    overflow-x: auto;
+  }
+  .watermark-text-style-buttons > button,
+  .watermark-text-color {
+    display: inline-flex;
+    min-height: 42px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid #5a4b65;
+    background: #2c2532;
+    color: #fff;
+    padding: 7px 10px;
+  }
+  .watermark-text-style-buttons > button[aria-pressed='true'] {
+    border-color: #b8ff3d;
+    color: #b8ff3d;
+  }
+  .watermark-text-style-buttons svg {
+    width: 16px;
+    height: 16px;
+  }
+  .watermark-text-color input {
+    width: 26px !important;
+    height: 26px;
+    padding: 0;
+  }
+  .watermark-text-sample {
+    min-height: 54px;
+    grid-column: 1 / -1;
+    overflow: hidden;
+    margin: 0;
+    border: 1px dashed #5a4b65;
+    background: #0e0c11;
+    padding: 10px;
+    font-size: 22px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+  }
+  .watermark-text-controls > [data-slot='button'] {
+    grid-column: 1 / -1;
+  }
+
+  .watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    ) {
     position: relative !important;
     top: auto !important;
     height: auto !important;
@@ -8633,7 +8993,11 @@ button {
     color: #fff;
     padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
   }
-  .watermark-mobile-workspace .mobile-workspace-preview.mobile-workspace-preview:not(.is-mobile-fullscreen) .dom-watermark-stage {
+  .watermark-mobile-workspace
+    .mobile-workspace-preview.mobile-workspace-preview:not(
+      .is-mobile-fullscreen
+    )
+    .dom-watermark-stage {
     height: auto !important;
     max-height: none !important;
     min-height: 0 !important;
@@ -8672,7 +9036,9 @@ button {
     background: #302638;
     color: #fff;
   }
-  .watermark-mobile-workspace .mobile-preview-actions [data-slot='button']:first-of-type {
+  .watermark-mobile-workspace
+    .mobile-preview-actions
+    [data-slot='button']:first-of-type {
     background: #b8ff3d;
     border-color: #b8ff3d;
     color: #17131b;
@@ -8705,7 +9071,9 @@ button {
     touch-action: pan-y;
   }
   .collage-mobile-workspace .board-preview[data-interaction='reorder'],
-  .collage-mobile-workspace .board-preview[data-interaction='reorder'] .real-preview-cell {
+  .collage-mobile-workspace
+    .board-preview[data-interaction='reorder']
+    .real-preview-cell {
     touch-action: none;
   }
   .collage-mobile-workspace .preview-edit-tools {

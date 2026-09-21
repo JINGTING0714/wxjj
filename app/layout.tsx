@@ -1,5 +1,13 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import '@fontsource/noto-sans-sc/400.css';
+import '@fontsource/noto-sans-sc/700.css';
+import '@fontsource/noto-serif-sc/400.css';
+import '@fontsource/noto-serif-sc/700.css';
+import '@fontsource/ma-shan-zheng/400.css';
+import '@fontsource/bebas-neue/400.css';
+import '@fontsource/caveat/400.css';
+import '@fontsource/caveat/700.css';
 import { PwaRegister } from '@/components/prism/pwa-register';
 import { VaultProvider } from '@/components/prism/vault-provider';
 import './globals.css';

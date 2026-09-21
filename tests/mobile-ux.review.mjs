@@ -63,6 +63,10 @@ fs.mkdirSync('work', { recursive: true });
     const collageUndo = page
       .locator('.collage-mobile-workspace')
       .getByRole('button', { name: '撤销上一步拼图操作', exact: true });
+    await page
+      .locator('.collage-mobile-workspace')
+      .getByRole('tab', { name: '操作', exact: true })
+      .click();
     await collageUndo.click();
     await page
       .locator('.collage-page .real-preview-cell img')
@@ -99,7 +103,12 @@ fs.mkdirSync('work', { recursive: true });
               '.mobile-workspace-primary-action',
             );
             const panels = [...root.querySelectorAll(panelSelector)].filter(
-              (e) => getComputedStyle(e).display !== 'none',
+              (e) => {
+                const style = getComputedStyle(e);
+                return (
+                  style.display !== 'none' && style.visibility !== 'hidden'
+                );
+              },
             );
             return {
               width: innerWidth,
@@ -107,9 +116,30 @@ fs.mkdirSync('work', { recursive: true });
               pageHeight: document.documentElement.scrollHeight,
               pageWidth: document.documentElement.scrollWidth,
               rootDisplay: getComputedStyle(root).display,
+              rootScrollTop: root.scrollTop,
+              root: box(root),
               preview: box(preview),
               tabs: box(tabs),
               panels: panels.map((e) => ({ class: e.className, box: box(e) })),
+              layoutDebug: {
+                tabsPosition: getComputedStyle(tabs).position,
+                tabsBottom: getComputedStyle(tabs).bottom,
+                tabsTop: getComputedStyle(tabs).top,
+                tabsTransform: getComputedStyle(tabs).transform,
+                rootPadding: getComputedStyle(root).padding,
+                rootBoxSizing: getComputedStyle(root).boxSizing,
+                rootClientHeight: root.clientHeight,
+                rootOffsetHeight: root.offsetHeight,
+                tabsOffsetParent: tabs.offsetParent?.className || '',
+                tabsOffsetBox: tabs.offsetParent
+                  ? box(tabs.offsetParent)
+                  : null,
+                panelPositions: panels.map((e) => ({
+                  position: getComputedStyle(e).position,
+                  offsetParent: e.offsetParent?.className || '',
+                  offsetBox: e.offsetParent ? box(e.offsetParent) : null,
+                })),
+              },
               action: box(action),
               actionDisabled: action
                 .querySelector('button')
@@ -119,7 +149,8 @@ fs.mkdirSync('work', { recursive: true });
                   (e) =>
                     e.clientHeight > 0 &&
                     e.scrollHeight > e.clientHeight + 2 &&
-                    /(auto|scroll|hidden)/.test(getComputedStyle(e).overflowY),
+                    getComputedStyle(e).visibility !== 'hidden' &&
+                    /(auto|scroll)/.test(getComputedStyle(e).overflowY),
                 )
                 .map((e) => ({
                   class: e.className,
@@ -135,18 +166,19 @@ fs.mkdirSync('work', { recursive: true });
     }
     for (const width of [360, 375, 390, 414, 430, 768]) {
       await page.setViewportSize({ width, height: 844 });
-      for (const tab of ['图片', '布局', '编号', '输出']) {
+      for (const tab of ['图片', '布局', '编号', '操作', '输出']) {
         await page
           .locator('.collage-page')
           .getByRole('tab', { name: tab, exact: true })
           .click();
+        await page.waitForTimeout(240);
         await page.evaluate(() => window.scrollTo(0, 0));
         report.collage.push({
           tab,
           ...(await measure(
             '.collage-mobile-workspace',
             '.board-preview',
-            '.collage-mobile-panel',
+            '.collage-mobile-panel, .preview-edit-tools',
           )),
         });
       }
@@ -161,12 +193,32 @@ fs.mkdirSync('work', { recursive: true });
       fullPage: true,
     });
     console.log('collage measured');
+    await page
+      .locator('.collage-page')
+      .getByRole('tab', { name: '编号', exact: true })
+      .click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector(
+          ".collage-mobile-workspace [data-mobile-active='true']",
+        ),
+    );
+    assert.equal(
+      await page
+        .locator('.collage-mobile-workspace')
+        .locator(
+          ".collage-mobile-panel[data-mobile-active='true'], .preview-edit-tools[data-mobile-active='true']",
+        )
+        .count(),
+      0,
+      'tapping the active collage tool closes its drawer',
+    );
     report.collageSheets = [];
     for (const [tab, title] of [
       ['图片', '管理原图'],
       ['布局', '精确布局设置'],
       ['编号', '编号样式与输出格式'],
-      ['图片', '调整图片顺序'],
+      ['操作', '调整图片顺序'],
     ]) {
       await page
         .locator('.collage-page')
@@ -235,11 +287,15 @@ fs.mkdirSync('work', { recursive: true });
     await root
       .locator('.watermark-source-panel input[type=file]')
       .setInputFiles('public/og.png');
-    await root.getByRole('tab', { name: '水印', exact: true }).click();
+    await root.getByRole('tab', { name: '图层', exact: true }).click();
     await root
       .locator('.watermark-layers-mobile-panel input[type=file]')
       .setInputFiles('public/og.png');
-    await root.locator('.transform-layer-list article').nth(1).waitFor();
+    await root
+      .locator('.transform-layer-list article')
+      .nth(1)
+      .waitFor({ state: 'attached' });
+    await root.getByRole('tab', { name: '操作', exact: true }).click();
     await root
       .getByRole('button', { name: '撤销上一步水印操作', exact: true })
       .click();
@@ -249,25 +305,50 @@ fs.mkdirSync('work', { recursive: true });
     await root
       .getByRole('button', { name: '重做上一步水印操作', exact: true })
       .click();
-    await root.locator('.transform-layer-list article').nth(1).waitFor();
+    await root
+      .locator('.transform-layer-list article')
+      .nth(1)
+      .waitFor({ state: 'attached' });
     report.watermarkHistory = true;
+    await root.getByRole('tab', { name: '文字', exact: true }).click();
+    const textPanel = root.locator(
+      '.watermark-text-mobile-panel[data-mobile-active=true]',
+    );
+    await textPanel.getByLabel('文字内容').fill('PRISM 商用字体 Text');
+    await textPanel
+      .getByRole('combobox', { name: '字体', exact: true })
+      .selectOption('Noto Serif SC');
+    await textPanel.getByRole('button', { name: '文字加粗' }).click();
+    await textPanel.getByRole('button', { name: '文字斜体' }).click();
+    await textPanel.getByRole('button', { name: '文字下划线' }).click();
+    await textPanel.getByLabel('文字颜色').fill('#b8ff3d');
+    await textPanel
+      .getByRole('button', { name: '添加文字图层', exact: true })
+      .click();
+    await root
+      .locator('.transform-layer-list article')
+      .filter({ hasText: 'PRISM 商用字体 Text' })
+      .waitFor({ state: 'attached' });
+    report.textLayer = true;
     for (const width of [360, 375, 390, 414, 430, 768]) {
       await page.setViewportSize({ width, height: 844 });
-      for (const tab of ['预览', '水印', '调整', '输出']) {
+      for (const tab of ['原图', '图层', '文字', '操作', '调整', '输出']) {
         await root.getByRole('tab', { name: tab, exact: true }).click();
+        await page.waitForTimeout(240);
         await page.evaluate(() => window.scrollTo(0, 0));
         report.watermark.push({
           tab,
           ...(await measure(
             '.watermark-mobile-workspace',
             '.dom-watermark-stage',
-            '.mobile-workspace-panel',
+            '.mobile-workspace-panel, .mobile-preview-interaction',
           )),
         });
       }
     }
     await page.setViewportSize({ width: 390, height: 844 });
-    await root.getByRole('tab', { name: '预览', exact: true }).click();
+    await root.getByRole('tab', { name: '原图', exact: true }).click();
+    await page.waitForTimeout(240);
     report.surfaceRatio = await root
       .locator('.watermark-surface')
       .evaluate((e) => ({
@@ -278,6 +359,7 @@ fs.mkdirSync('work', { recursive: true });
       path: `work/${phase}-watermark.png`,
       fullPage: true,
     });
+    await root.getByRole('tab', { name: '操作', exact: true }).click();
     await root.getByRole('button', { name: '全屏预览', exact: true }).click();
     report.fullscreen = await root
       .locator('.is-mobile-fullscreen')
@@ -320,12 +402,19 @@ fs.mkdirSync('work', { recursive: true });
     report.closedOverflow = await page.evaluate(
       () => getComputedStyle(document.body).overflow,
     );
-    await root.getByRole('tab', { name: '预览', exact: true }).click();
-    const finishDirectEdit = root.getByRole('button', {
-      name: '完成移动',
-      exact: true,
-    });
-    if (await finishDirectEdit.isVisible()) await finishDirectEdit.click();
+    await root.getByRole('tab', { name: '操作', exact: true }).click();
+    await root
+      .getByRole('button', { name: '移动 / 缩放', exact: true })
+      .click();
+    assert.equal(
+      await root
+        .locator('.dom-watermark-stage')
+        .evaluate((element) => getComputedStyle(element).touchAction),
+      'none',
+      'explicit move mode captures canvas touch',
+    );
+    await root.getByRole('button', { name: '完成移动', exact: true }).click();
+    await root.getByRole('tab', { name: '操作', exact: true }).click();
     await root.locator('.dom-watermark-stage').scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollBy(0, -80));
     const touch = await context.newCDPSession(page);
@@ -405,7 +494,7 @@ fs.mkdirSync('work', { recursive: true });
       valueBefore,
       'touch changes slider',
     );
-    await root.getByRole('tab', { name: '预览', exact: true }).click();
+    await root.getByRole('tab', { name: '操作', exact: true }).click();
     await root.getByRole('button', { name: '全屏预览', exact: true }).click();
     await page.keyboard.press('Escape');
     await root.locator('.is-mobile-fullscreen').waitFor({ state: 'hidden' });
@@ -486,15 +575,21 @@ fs.mkdirSync('work', { recursive: true });
         result.width,
         'no horizontal page overflow',
       );
+      assert.equal(
+        result.rootScrollTop,
+        0,
+        'workspace shell must never become a hidden nested scroller',
+      );
       assert.equal(result.panels.length, 1, 'only one active panel');
       assert.ok(
         result.preview.height > 100 &&
-          result.preview.height < result.height * 0.62,
-        'preview-first workspace stays within the viewport',
+          result.preview.height < result.height * 0.86,
+        'preview-first workspace stays visible within the viewport',
       );
       assert.ok(
-        result.tabs.y >= result.preview.bottom - 1,
-        'preview before tabs',
+        result.panels[0].box.bottom <= result.tabs.y + 1 &&
+          result.panels[0].box.y < result.tabs.y,
+        'the active tool opens as a drawer directly above the tool rail',
       );
       assert.ok(
         result.tabs.bottom <= result.height - 67,
@@ -517,8 +612,8 @@ fs.mkdirSync('work', { recursive: true });
     for (const result of report.watermark)
       assert.equal(
         result.touch,
-        result.tab === '预览' ? 'none' : 'pan-y',
-        'watermark only captures touch while direct preview editing is active',
+        'pan-y',
+        'watermark keeps normal page scroll until explicit move mode',
       );
     assert.ok(
       Math.abs(report.surfaceRatio.actual / report.surfaceRatio.expected - 1) <
@@ -529,7 +624,7 @@ fs.mkdirSync('work', { recursive: true });
     assert.equal(report.desktop.tabs, 'none');
     assert.equal(errors.length, 0);
     console.log(
-      'PASS: 48 mobile/tablet tab layouts; contain ratio; fullscreen exit/resize; drawer viewport; desktop navigation; no runtime errors.',
+      'PASS: 66 mobile/tablet drawer layouts; text layer; contain ratio; fullscreen exit/resize; dialog viewport; desktop navigation; no runtime errors.',
     );
   } finally {
     await browser.close();

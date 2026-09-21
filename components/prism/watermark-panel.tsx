@@ -10,8 +10,10 @@ import {
   Plus,
   RefreshCw,
   SlidersHorizontal,
+  Sparkles,
   Settings2,
   Stamp,
+  Type,
   Trash2,
   Upload,
   Video,
@@ -42,11 +44,19 @@ import {
 } from './mobile-workspace';
 
 type Output = { id: string; sourceId: string; file: File; rejected: boolean };
-type WatermarkMobilePanel = 'preview' | 'watermarks' | 'adjust' | 'output';
+export type WatermarkMobilePanel =
+  | 'preview'
+  | 'watermarks'
+  | 'text'
+  | 'actions'
+  | 'adjust'
+  | 'output';
 
 const mobileTabs: MobileWorkspaceTab<WatermarkMobilePanel>[] = [
-  { value: 'preview', label: '预览', icon: <ImageIcon /> },
-  { value: 'watermarks', label: '水印', icon: <Layers3 /> },
+  { value: 'preview', label: '原图', icon: <ImageIcon /> },
+  { value: 'watermarks', label: '图层', icon: <Layers3 /> },
+  { value: 'text', label: '文字', icon: <Type /> },
+  { value: 'actions', label: '操作', icon: <Sparkles /> },
   { value: 'adjust', label: '调整', icon: <SlidersHorizontal /> },
   { value: 'output', label: '输出', icon: <Download /> },
 ];
@@ -257,8 +267,9 @@ export function WatermarkPanel({
   const tasks = useRef(new Map<string, Promise<void>>());
   const [running, setRunning] = useState<Record<string, number>>({});
   const [error, setError] = useState('');
-  const [mobilePanel, setMobilePanel] =
-    useState<WatermarkMobilePanel>('preview');
+  const [mobilePanel, setMobilePanel] = useState<WatermarkMobilePanel | null>(
+    null,
+  );
   const [batchSheetOpen, setBatchSheetOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
@@ -404,7 +415,10 @@ export function WatermarkPanel({
           视频水印
         </Button>
       </div>
-      <div hidden={state.tab !== 'images'}>
+      <div
+        className="watermark-image-workspace"
+        hidden={state.tab !== 'images'}
+      >
         {workspace.saveError && (
           <p className="error-banner">{workspace.saveError}</p>
         )}
@@ -470,7 +484,7 @@ export function WatermarkPanel({
                 key={item.id}
                 onClick={() => {
                   setState((current) => ({ ...current, active: item.id }));
-                  setMobilePanel('preview');
+                  setMobilePanel(null);
                   setBatchSheetOpen(false);
                 }}
                 type="button"
@@ -496,7 +510,7 @@ export function WatermarkPanel({
                   batches: [...current.batches, added],
                   active: added.id,
                 }));
-                setMobilePanel('preview');
+                setMobilePanel(null);
                 setBatchSheetOpen(false);
               }}
               variant="outline"
@@ -672,6 +686,7 @@ export function WatermarkPanel({
               <MobileWorkspaceTabs
                 label="水印工坊功能"
                 onValueChange={setMobilePanel}
+                onClose={() => setMobilePanel(null)}
                 tabs={mobileTabs}
                 value={mobilePanel}
               />
