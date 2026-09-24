@@ -870,7 +870,7 @@ export function WatermarkEditor({
                     {layer.locked && !disabled && (
                       <button
                         aria-label={`解锁${layer.id === SOURCE_LAYER_ID ? '原图' : layer.text ? '文字层' : '水印层'}`}
-                        className="locked-layer-unlock mobile-workspace-only"
+                        className="locked-layer-unlock"
                         onClick={(event) => {
                           event.stopPropagation();
                           setActive(layer.id);

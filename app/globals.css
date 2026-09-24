@@ -7225,6 +7225,10 @@ button {
   pointer-events: auto;
 }
 
+.locked-layer-unlock {
+  display: none;
+}
+
 .mobile-workspace-drawer-handle {
   display: none;
 }
@@ -7398,7 +7402,7 @@ button {
     z-index: 8;
     top: 8px;
     right: 8px;
-    display: grid;
+    display: grid !important;
     width: 34px;
     height: 34px;
     place-items: center;
