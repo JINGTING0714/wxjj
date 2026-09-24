@@ -450,26 +450,6 @@ export function WatermarkPanel({
             新批次（{state.batches.length}/5）
           </Button>
         </div>
-        {batch && (
-          <button
-            className="mobile-batch-selector mobile-workspace-only"
-            onClick={() => setBatchSheetOpen(true)}
-            type="button"
-          >
-            <span>
-              <strong>{batch.title}</strong>
-              <small>
-                {batch.sources.length} 张原图 · {batch.layers.length} 层水印
-                {running[batch.id] !== undefined
-                  ? ` · ${running[batch.id]}%`
-                  : batch.outputs.length
-                    ? ` · ${batch.outputs.length} 张成品`
-                    : ''}
-              </small>
-            </span>
-            <ChevronDown />
-          </button>
-        )}
         <MobileWorkspaceSheet
           description="每个批次保留独立的原图、图层、排版和处理结果。"
           onOpenChange={setBatchSheetOpen}
@@ -521,12 +501,33 @@ export function WatermarkPanel({
         </MobileWorkspaceSheet>
         {batch && (
           <section className="batch-editor">
-            <MobileWorkspace className="watermark-mobile-workspace">
+            <MobileWorkspace
+              className="watermark-mobile-workspace"
+              onPanelClose={() => setMobilePanel(null)}
+            >
               <MobileWorkspacePanel
                 active={mobilePanel === 'preview'}
                 className="watermark-source-panel"
                 label="批次与原图"
               >
+                <button
+                  className="mobile-batch-selector mobile-workspace-only"
+                  onClick={() => setBatchSheetOpen(true)}
+                  type="button"
+                >
+                  <span>
+                    <strong>{batch.title}</strong>
+                    <small>
+                      {batch.sources.length} 张原图 · {batch.layers.length} 层水印
+                      {running[batch.id] !== undefined
+                        ? ` · ${running[batch.id]}%`
+                        : batch.outputs.length
+                          ? ` · ${batch.outputs.length} 张成品`
+                          : ''}
+                    </small>
+                  </span>
+                  <ChevronDown />
+                </button>
                 <div className="batch-source-toolbar">
                   <label htmlFor={`watermark-batch-title-${batch.id}`}>
                     批次名称

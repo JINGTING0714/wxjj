@@ -24,7 +24,11 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MobileWorkspacePanel, MobileWorkspaceSheet } from './mobile-workspace';
+import {
+  MobileWorkspaceDrawerHandle,
+  MobileWorkspacePanel,
+  MobileWorkspaceSheet,
+} from './mobile-workspace';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
 import {
@@ -212,6 +216,8 @@ export function WatermarkEditor({
   mobilePanel?: WatermarkMobilePanel | null;
 }) {
   const vault = useVault();
+  const editorRoot = useRef<HTMLDivElement>(null);
+  const wasVisible = useRef(false);
   const [active, setActive] = useState('');
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
@@ -285,7 +291,9 @@ export function WatermarkEditor({
       refreshHistoryAvailability();
     }
   }, [composition, layers, source]);
-  const mobileDirectEditing = mobilePanel === 'actions' && mobileTouchEditing;
+  // Direct manipulation is a mode, not a drawer. Closing the action tray must
+  // never turn off the canvas gesture the user just enabled.
+  const mobileDirectEditing = mobileTouchEditing;
   useEffect(() => {
     if (!mobilePreviewFullscreen) return;
     const previous = document.body.style.overflow;
@@ -305,6 +313,38 @@ export function WatermarkEditor({
       desktop.removeEventListener('change', closeOnDesktop);
     };
   }, [mobilePreviewFullscreen]);
+  useEffect(() => {
+    const root = editorRoot.current;
+    const frame = root?.closest<HTMLElement>('.content-frame');
+    if (!root || !frame) return;
+    const media = window.matchMedia('(max-width: 780px)');
+    let frameId = 0;
+    const syncVisibility = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const visible =
+          media.matches &&
+          !frame.hidden &&
+          root.parentElement?.getClientRects().length;
+        if (visible && !wasVisible.current) {
+          wasVisible.current = true;
+          setMobilePreviewFullscreen(true);
+        } else if (!visible) {
+          wasVisible.current = false;
+          if (!media.matches) setMobilePreviewFullscreen(false);
+        }
+      });
+    };
+    syncVisibility();
+    const observer = new MutationObserver(syncVisibility);
+    observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
+    media.addEventListener('change', syncVisibility);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frameId);
+      media.removeEventListener('change', syncVisibility);
+    };
+  }, []);
   const surface = useRef<HTMLDivElement>(null);
   const hiddenLayerOpacity = useRef(new Map<string, number>());
   const [sourceUrl] = useFileUrls(source ? [source] : []);
@@ -525,8 +565,13 @@ export function WatermarkEditor({
     }
   };
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
-    if (disabled || layer.locked || !surface.current) return;
+    if (disabled || !surface.current) return;
     if (event.pointerType === 'touch' && !mobileDirectEditing) return;
+    setActive(layer.id);
+    if (layer.text) setTextDraft(layer.text);
+    // Locked layers remain selectable so their lock can be changed from the
+    // canvas or the layer tray, but they never start a drag.
+    if (layer.locked) return;
     if (drag.current && drag.current.pointer !== event.pointerId) return;
     const dim = dimensions.get(layer.file);
     const original = source && dimensions.get(source);
@@ -540,8 +585,6 @@ export function WatermarkEditor({
     }
     event.preventDefault();
     event.stopPropagation();
-    setActive(layer.id);
-    if (layer.text) setTextDraft(layer.text);
     const rect = surface.current.getBoundingClientRect();
     const cx = rect.left + rect.width * layer.x;
     const cy = rect.top + rect.height * layer.y;
@@ -672,13 +715,30 @@ export function WatermarkEditor({
     }
   })();
   return (
-    <div className="watermark-layout watermark-free-editor">
+    <div
+      className="watermark-layout watermark-free-editor"
+      ref={editorRoot}
+    >
       <section
         className={`watermark-input-panel mobile-workspace-preview ${mobilePreviewFullscreen ? 'is-mobile-fullscreen' : ''}`}
         data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
         data-fullscreen={mobilePreviewFullscreen ? 'true' : 'false'}
       >
         <h3>第一张样本 · 自由摆放</h3>
+        <div className="mobile-editor-topbar mobile-workspace-only">
+          <Button
+            aria-label="退出沉浸编辑"
+            onClick={() => setMobilePreviewFullscreen(false)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <Minimize2 />
+            退出沉浸编辑
+          </Button>
+          <strong>水印编辑</strong>
+          <span>{selected?.locked ? '当前图层已锁定' : '预览中'}</span>
+        </div>
         <label className="watermark-snap-control">
           <input
             type="checkbox"
@@ -716,7 +776,7 @@ export function WatermarkEditor({
                 return (
                   <div
                     aria-label={`${layer.id === SOURCE_LAYER_ID ? '原图' : `水印层 ${i + 1}`}，${layer.locked ? '已锁定' : '方向键移动，Shift 加速'}`}
-                    className={`watermark-dom-layer ${layer.id === selectedId && !layer.locked ? 'selected' : ''} ${layer.locked ? 'is-locked' : ''}`}
+                    className={`watermark-dom-layer ${layer.id === selectedId ? 'selected' : ''} ${layer.locked ? 'is-locked' : ''}`}
                     key={layer.id}
                     onKeyDown={(event) => {
                       if (disabled || layer.locked) return;
@@ -745,7 +805,7 @@ export function WatermarkEditor({
                       aspectRatio: `${dim.w * widthFactor * layerStretch(layer.scaleX)}/${dim.h * heightFactor * layerStretch(layer.scaleY)}`,
                       transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
                     }}
-                    tabIndex={disabled || layer.locked ? -1 : 0}
+                    tabIndex={disabled ? -1 : 0}
                   >
                     <div
                       className="watermark-crop-viewport"
@@ -807,6 +867,21 @@ export function WatermarkEditor({
                         />
                       </>
                     )}
+                    {layer.locked && !disabled && (
+                      <button
+                        aria-label={`解锁${layer.id === SOURCE_LAYER_ID ? '原图' : layer.text ? '文字层' : '水印层'}`}
+                        className="locked-layer-unlock mobile-workspace-only"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setActive(layer.id);
+                          change(layer.id, { locked: false });
+                        }}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        type="button"
+                      >
+                        <Lock />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -843,6 +918,7 @@ export function WatermarkEditor({
           className="mobile-preview-interaction mobile-workspace-only"
           data-mobile-active={mobilePanel === 'actions'}
         >
+          {mobilePanel === 'actions' && <MobileWorkspaceDrawerHandle />}
           <div className="mobile-preview-actions" aria-label="预览快捷操作">
             <Button
               aria-label="撤销上一步水印操作"

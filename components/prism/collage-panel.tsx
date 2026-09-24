@@ -6,6 +6,7 @@ import { SourceSelection } from './source-selection';
 import {
   MobileWorkspace,
   MobileWorkspaceDetails,
+  MobileWorkspaceDrawerHandle,
   MobileWorkspacePrimaryAction,
   MobileWorkspaceSheet,
   MobileWorkspaceTabs,
@@ -599,7 +600,13 @@ export function CollagePanel() {
       {workspace.saveError && (
         <p className="error-banner">{workspace.saveError}</p>
       )}
-      <MobileWorkspace className="collage-mobile-workspace">
+      <MobileWorkspace
+        className="collage-mobile-workspace"
+        onPanelClose={() => {
+          setMobilePanel(null);
+          setMobileReordering(false);
+        }}
+      >
         <fieldset
           disabled={!workspace.ready || processing || vault.busy}
           className="workshop-fieldset"
@@ -629,6 +636,7 @@ export function CollagePanel() {
                 className="control-section collage-mobile-panel"
                 data-mobile-active={mobilePanel === 'sources'}
               >
+                {mobilePanel === 'sources' && <MobileWorkspaceDrawerHandle />}
                 <div className="control-title">
                   <span>01</span>
                   <div>
@@ -720,6 +728,7 @@ export function CollagePanel() {
                 className="collage-layout-settings collage-mobile-panel"
                 data-mobile-active={mobilePanel === 'layout'}
               >
+                {mobilePanel === 'layout' && <MobileWorkspaceDrawerHandle />}
                 <MobileWorkspaceDetails
                   disabled={processing || vault.busy || !workspace.ready}
                   title="精确布局设置"
@@ -917,6 +926,9 @@ export function CollagePanel() {
                 className="control-section numbering-section collage-mobile-panel"
                 data-mobile-active={mobilePanel === 'numbering'}
               >
+                {mobilePanel === 'numbering' && (
+                  <MobileWorkspaceDrawerHandle />
+                )}
                 <div className="control-title">
                   <span>04</span>
                   <div>
@@ -1258,6 +1270,9 @@ export function CollagePanel() {
                     className="preview-edit-tools"
                     data-mobile-active={mobilePanel === 'actions'}
                   >
+                    {mobilePanel === 'actions' && (
+                      <MobileWorkspaceDrawerHandle />
+                    )}
                     <p>
                       点击选中，拖到目标格重新排序；可跨板移动。这里只调整待拼队列，不改原图。
                     </p>
@@ -1388,6 +1403,7 @@ export function CollagePanel() {
                   className="collage-output-panel collage-mobile-panel"
                   data-mobile-active={mobilePanel === 'output'}
                 >
+                  {mobilePanel === 'output' && <MobileWorkspaceDrawerHandle />}
                   <div className="spec-list">
                     <div>
                       <span>单板容量</span>

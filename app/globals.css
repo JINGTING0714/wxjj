@@ -7209,6 +7209,320 @@ button {
   }
 }
 
+/* Final mobile editor interaction pass: readable dark trays, large touch
+   targets, independent lock control, and a true immersive watermark shell. */
+.watermark-dom-layer.is-locked {
+  /* Locked artwork must not sit above an unlocked layer and steal its
+     pointer/touch target. The small unlock control below opts back in. */
+  pointer-events: none;
+}
+
+.watermark-dom-layer.is-locked .watermark-crop-viewport {
+  pointer-events: none;
+}
+
+.watermark-dom-layer.is-locked .locked-layer-unlock {
+  pointer-events: auto;
+}
+
+.mobile-workspace-drawer-handle {
+  display: none;
+}
+
+@media (max-width: 780px) {
+  .mobile-workspace-drawer-handle {
+    position: absolute;
+    z-index: 200;
+    top: 0;
+    right: 0;
+    left: 0;
+    display: flex !important;
+    width: 100%;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    pointer-events: auto !important;
+    touch-action: none;
+  }
+
+  .mobile-workspace-drawer-handle i {
+    display: block;
+    width: 46px;
+    height: 5px;
+    border-radius: 999px;
+    background: #aa9bb3;
+  }
+
+  .mobile-workspace-panel,
+  .mobile-preview-interaction,
+  .collage-mobile-workspace .preview-edit-tools {
+    position: relative;
+  }
+
+  .mobile-workspace-panel::before,
+  .mobile-preview-interaction[data-mobile-active='true']::before,
+  .collage-mobile-workspace
+    .preview-edit-tools[data-mobile-active='true']::before {
+    display: none !important;
+    content: none !important;
+  }
+
+  .mobile-workspace-panel[data-mobile-active='true'],
+  .mobile-preview-interaction[data-mobile-active='true'],
+  .collage-mobile-workspace .preview-edit-tools[data-mobile-active='true'] {
+    z-index: 150 !important;
+    transform: translateY(var(--drawer-drag-y, 0px)) !important;
+    padding-top: 32px !important;
+  }
+
+  .mobile-workspace-panel[data-mobile-active='true'],
+  .collage-mobile-workspace .collage-mobile-panel[data-mobile-active='true'] {
+    color: #f8f4fb;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-panel > *,
+  .collage-mobile-workspace .collage-mobile-panel > * {
+    color: inherit;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-panel h3,
+  .watermark-mobile-workspace .mobile-workspace-panel strong,
+  .watermark-mobile-workspace .mobile-workspace-panel label,
+  .collage-mobile-workspace .collage-mobile-panel h2,
+  .collage-mobile-workspace .collage-mobile-panel h3,
+  .collage-mobile-workspace .collage-mobile-panel strong,
+  .collage-mobile-workspace .collage-mobile-panel label,
+  .collage-mobile-workspace .collage-mobile-panel .control-title > span {
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .mobile-workspace-panel p,
+  .watermark-mobile-workspace .mobile-workspace-panel small,
+  .watermark-mobile-workspace .mobile-workspace-panel span,
+  .collage-mobile-workspace .collage-mobile-panel p,
+  .collage-mobile-workspace .collage-mobile-panel small,
+  .collage-mobile-workspace .collage-mobile-panel span {
+    color: #d8cfdf !important;
+  }
+
+  .watermark-mobile-workspace .transform-layer-list > article,
+  .collage-mobile-workspace .collage-drop,
+  .collage-mobile-workspace .source-file-list,
+  .collage-mobile-workspace .workspace-detail-summary,
+  .collage-mobile-workspace .number-style-grid,
+  .collage-mobile-workspace .collage-quick-fields {
+    border-color: #5a4b65 !important;
+    background: #2c2532 !important;
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .layer-select,
+  .watermark-mobile-workspace .layer-select strong {
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .layer-order-actions button,
+  .collage-mobile-workspace .collage-drop,
+  .collage-mobile-workspace .workspace-detail-summary,
+  .collage-mobile-workspace .number-style-grid input,
+  .collage-mobile-workspace .number-style-grid select,
+  .collage-mobile-workspace .collage-quick-fields input,
+  .collage-mobile-workspace .collage-quick-fields select {
+    border-color: #675574 !important;
+    background: #3a3042 !important;
+    color: #fff !important;
+  }
+
+  .collage-mobile-workspace .collage-drop > svg {
+    color: #b8ff3d !important;
+  }
+
+  .watermark-mobile-workspace input[type='range'],
+  .collage-mobile-workspace input[type='range'],
+  .mobile-workspace-sheet input[type='range'] {
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    accent-color: #b8ff3d;
+    background: transparent !important;
+    touch-action: none;
+  }
+
+  .watermark-mobile-workspace input[type='range']::-webkit-slider-runnable-track,
+  .collage-mobile-workspace input[type='range']::-webkit-slider-runnable-track,
+  .mobile-workspace-sheet input[type='range']::-webkit-slider-runnable-track {
+    height: 7px;
+    border-radius: 999px;
+    background: #786681;
+  }
+
+  .watermark-mobile-workspace input[type='range']::-webkit-slider-thumb,
+  .collage-mobile-workspace input[type='range']::-webkit-slider-thumb,
+  .mobile-workspace-sheet input[type='range']::-webkit-slider-thumb {
+    width: 26px;
+    height: 26px;
+    margin-top: -9px;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 2px solid #17131b;
+    border-radius: 50%;
+    background: #b8ff3d;
+    box-shadow: 0 1px 5px rgb(0 0 0 / 38%);
+  }
+
+  .watermark-mobile-workspace input[type='range']::-moz-range-track,
+  .collage-mobile-workspace input[type='range']::-moz-range-track,
+  .mobile-workspace-sheet input[type='range']::-moz-range-track {
+    height: 7px;
+    border-radius: 999px;
+    background: #786681;
+  }
+
+  .watermark-mobile-workspace input[type='range']::-moz-range-thumb,
+  .collage-mobile-workspace input[type='range']::-moz-range-thumb,
+  .mobile-workspace-sheet input[type='range']::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #17131b;
+    border-radius: 50%;
+    background: #b8ff3d;
+  }
+
+  .locked-layer-unlock {
+    position: absolute;
+    z-index: 8;
+    top: 8px;
+    right: 8px;
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border: 1px solid #b8ff3d;
+    border-radius: 999px;
+    background: #2c2532;
+    color: #b8ff3d;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  .locked-layer-unlock svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .mobile-editor-topbar {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    min-height: 42px;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 2px 6px;
+    color: #fff;
+  }
+
+  .mobile-editor-topbar [data-slot='button'] {
+    min-height: 36px;
+    color: #fff;
+  }
+
+  .mobile-editor-topbar strong {
+    overflow: hidden;
+    font-size: 13px;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-editor-topbar span {
+    overflow: hidden;
+    color: #bdb2c5;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .watermark-mobile-workspace:has(.mobile-workspace-preview.is-mobile-fullscreen) {
+    position: fixed !important;
+    z-index: 80;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh !important;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    padding: max(8px, env(safe-area-inset-top)) 8px
+      max(8px, env(safe-area-inset-bottom));
+  }
+
+  .watermark-mobile-workspace
+    .watermark-input-panel.is-mobile-fullscreen {
+    position: relative !important;
+    z-index: auto;
+    inset: auto !important;
+    display: grid !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0;
+    flex: 1 1 0;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    gap: 4px;
+    margin: 0;
+    background: #17131b !important;
+    padding: 6px 8px 72px !important;
+  }
+
+  .watermark-mobile-workspace
+    .watermark-input-panel.is-mobile-fullscreen
+    > .watermark-snap-control,
+  .watermark-mobile-workspace
+    .watermark-input-panel.is-mobile-fullscreen
+    > .watermark-alignment-status {
+    display: none !important;
+  }
+
+  .watermark-mobile-workspace
+    .watermark-input-panel.is-mobile-fullscreen
+    .dom-watermark-stage {
+    width: 100%;
+    height: auto !important;
+    min-height: 0;
+    max-height: none !important;
+    background: #211b27;
+    touch-action: pan-y;
+  }
+
+  .watermark-mobile-workspace:has(.mobile-workspace-preview.is-mobile-fullscreen)
+    .mobile-workspace-tabs {
+    position: absolute !important;
+    right: 0;
+    bottom: 0 !important;
+    left: 0;
+    z-index: 90;
+  }
+
+  .watermark-mobile-workspace:has(.mobile-workspace-preview.is-mobile-fullscreen)
+    .mobile-workspace-panel,
+  .watermark-mobile-workspace:has(.mobile-workspace-preview.is-mobile-fullscreen)
+    .mobile-preview-interaction {
+    z-index: 88;
+  }
+
+  [data-slot='drawer-overlay']:has(
+      + [data-slot='drawer-viewport'] .mobile-workspace-sheet
+    ):not([aria-hidden='true']) {
+    z-index: 119 !important;
+  }
+
+  .mobile-workspace-sheet {
+    z-index: 120 !important;
+  }
+}
+
 /* Full-height mobile workshop viewport. Keep the editor between the physical
    top edge and PRISM's fixed 68px primary navigation, so its own horizontal
    tool rail can never be hidden beneath the app navigation. */
@@ -9097,5 +9411,63 @@ button {
     position: relative !important;
     top: auto !important;
     margin-top: 0;
+  }
+}
+
+/* The immersive trays use a dark surface on mobile. Re-assert the summary
+   cards and source controls here because the older light workshop rules are
+   more specific for strong/small/span descendants and otherwise produce
+   pale text on a pale card. */
+@media (max-width: 780px) {
+  .watermark-mobile-workspace .mobile-batch-selector,
+  .watermark-mobile-workspace .mobile-source-summary,
+  .watermark-mobile-workspace .mobile-result-summary,
+  .watermark-mobile-workspace .mobile-batch-list > button {
+    border-color: #5a4b65 !important;
+    background: #2c2532 !important;
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .mobile-batch-selector strong,
+  .watermark-mobile-workspace .mobile-source-summary strong,
+  .watermark-mobile-workspace .mobile-result-summary strong,
+  .watermark-mobile-workspace .mobile-batch-list strong {
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .mobile-batch-selector small,
+  .watermark-mobile-workspace .mobile-source-summary small,
+  .watermark-mobile-workspace .mobile-result-summary small,
+  .watermark-mobile-workspace .mobile-batch-list small {
+    color: #d8cfdf !important;
+  }
+
+  .watermark-mobile-workspace .watermark-source-panel label:not(.mini-file),
+  .watermark-mobile-workspace .watermark-source-panel
+    .batch-source-toolbar > span {
+    color: #d8cfdf !important;
+  }
+
+  .watermark-mobile-workspace .watermark-source-panel .mini-file {
+    border-color: #b8ff3d !important;
+    background: #7137ee !important;
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .watermark-source-panel
+    .batch-source-toolbar
+    > [data-slot='button'] {
+    border-color: #675574 !important;
+    background: #3a3042 !important;
+    color: #fff !important;
+  }
+
+  .watermark-mobile-workspace .watermark-source-panel .import-warning,
+  .watermark-mobile-workspace .watermark-source-panel .video-mobile-summary {
+    color: #f0b6a8 !important;
+  }
+
+  .watermark-mobile-workspace .mobile-preview-actions {
+    scroll-padding-inline: 12px;
   }
 }

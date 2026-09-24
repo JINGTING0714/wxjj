@@ -287,10 +287,20 @@ fs.mkdirSync('work', { recursive: true });
     await root
       .locator('.watermark-source-panel input[type=file]')
       .setInputFiles('public/og.png');
+    await page.waitForTimeout(400);
+    const defaultImmersive = await root
+      .locator('.is-mobile-fullscreen')
+      .count();
+    assert.equal(
+      defaultImmersive,
+      1,
+      'watermark workshop enters immersive mobile mode by default',
+    );
+    console.log('watermark default immersive ready');
     await root.getByRole('tab', { name: '图层', exact: true }).click();
     await root
       .locator('.watermark-layers-mobile-panel input[type=file]')
-      .setInputFiles('public/og.png');
+      .setInputFiles(['public/og.png', 'public/og.png']);
     await root
       .locator('.transform-layer-list article')
       .nth(1)
@@ -310,6 +320,38 @@ fs.mkdirSync('work', { recursive: true });
       .nth(1)
       .waitFor({ state: 'attached' });
     report.watermarkHistory = true;
+    await root.getByRole('tab', { name: '图层', exact: true }).click();
+    const watermarkLocks = root.locator(
+      '.transform-layer-list button[aria-label="锁定水印层"]',
+    );
+    assert.ok((await watermarkLocks.count()) >= 2, 'multiple watermark locks are available');
+    await watermarkLocks.nth(0).click();
+    await root
+      .locator('.transform-layer-list button[aria-label="锁定水印层"]')
+      .nth(0)
+      .click();
+    assert.ok(
+      (await root.locator(
+        '.transform-layer-list button[aria-label="解锁水印层"]',
+      ).count()) >= 2,
+      'each locked watermark keeps an independent unlock control',
+    );
+    await root
+      .locator('.transform-layer-list button[aria-label="解锁水印层"]')
+      .first()
+      .click();
+    assert.ok(
+      (await root.locator(
+        '.transform-layer-list button[aria-label="解锁水印层"]',
+      ).count()) >= 1,
+      'unlocking one layer does not unlock or remove the other lock',
+    );
+    await root
+      .locator('button[aria-label="锁定水印层"]')
+      .first()
+      .locator('xpath=../..')
+      .locator('.layer-select')
+      .click();
     await root.getByRole('tab', { name: '文字', exact: true }).click();
     const textPanel = root.locator(
       '.watermark-text-mobile-panel[data-mobile-active=true]',
@@ -360,6 +402,9 @@ fs.mkdirSync('work', { recursive: true });
       fullPage: true,
     });
     await root.getByRole('tab', { name: '操作', exact: true }).click();
+    await root
+      .getByRole('button', { name: '退出全屏预览', exact: true })
+      .click();
     await root.getByRole('button', { name: '全屏预览', exact: true }).click();
     report.fullscreen = await root
       .locator('.is-mobile-fullscreen')
@@ -454,6 +499,30 @@ fs.mkdirSync('work', { recursive: true });
         .evaluate((e) => getComputedStyle(e).touchAction),
       'pan-y',
       'leaving direct-edit mode restores vertical page gestures',
+    );
+    await root.getByRole('tab', { name: '调整', exact: true }).click();
+    await page.waitForTimeout(360);
+    const drawerHandle = root.locator(
+      '.mobile-workspace-drawer-handle:visible',
+    );
+    const drawerHandleBox = await drawerHandle.boundingBox();
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: drawerHandleBox.x + drawerHandleBox.width / 2, y: drawerHandleBox.y + 12 }],
+    });
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: drawerHandleBox.x + drawerHandleBox.width / 2, y: drawerHandleBox.y + 96 }],
+    });
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await page.waitForTimeout(260);
+    assert.equal(
+      await root.locator('.watermark-adjust-mobile-panel[data-mobile-active=true]').count(),
+      0,
+      'swiping the drawer handle down closes the active panel',
     );
     await root.getByRole('tab', { name: '调整', exact: true }).click();
     const slider = root
@@ -592,8 +661,9 @@ fs.mkdirSync('work', { recursive: true });
         'the active tool opens as a drawer directly above the tool rail',
       );
       assert.ok(
-        result.tabs.bottom <= result.height - 67,
-        'workshop tool rail stays above the fixed app navigation',
+        result.tabs.bottom <= result.height - 67 ||
+          (result.root.y <= 1 && result.root.bottom >= result.height - 1),
+        'workshop tool rail stays above navigation or owns immersive viewport',
       );
       assert.ok(
         result.scrollContainers.length <= 1 &&
