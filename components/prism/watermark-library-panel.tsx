@@ -394,7 +394,7 @@ export function WatermarkLibraryPanel({
       {visible.length ? (
         <div className="record-list watermark-records">
           {visible.map((watermark) => (
-            <article className="record-row" key={watermark.id}>
+            <details className="asset-record-fold" key={watermark.id}><summary>{watermark.title} · 水印素材 · {watermark.tags.join(' / ') || '未添加标签'}</summary><article className="record-row">
               <div className="record-identity">
                 <SelectItem
                   selection={selection}
@@ -472,6 +472,7 @@ export function WatermarkLibraryPanel({
                 </button>
               </div>
             </article>
+            </details>
           ))}
         </div>
       ) : (

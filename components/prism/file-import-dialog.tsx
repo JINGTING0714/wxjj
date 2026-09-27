@@ -1,4 +1,6 @@
 'use client';
+import { importedPromptLanguages } from '@/lib/prompt-language';
+import { DragSelection } from './drag-selection';
 import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { useEffect, useRef, useState } from 'react';
@@ -197,7 +199,7 @@ function PreviewRow({
     return () => window.removeEventListener('prism:hide-secrets', hide);
   }, []);
   return (
-    <article className="import-row">
+    <article className="import-row" data-selection-id={row.id}>
       <label className="check-line">
         <input
           checked={row.include}
@@ -244,11 +246,14 @@ function PreviewRow({
           {show ? '隐藏内容' : `查看 / 校对内容（${row.secret.length} 字符）`}
         </Button>
         {show && (
+          <>
           <textarea
             aria-label="导入内容"
             onChange={(e) => onChange({ secret: e.target.value })}
             value={row.secret}
           />
+          {row.kind === 'prompt' && <div className="prompt-language-editor"><p>双语独立保存；不确定语言的原文保留待确认。以下内容将在确认导入后写入。</p>{(['promptEnglish', 'promptChinese', 'promptUnconfirmed'] as const).map((key) => <label key={key}>{key === 'promptEnglish' ? '英文 Prompt' : key === 'promptChinese' ? '中文 Prompt' : '待确认原文'}<textarea value={importedPromptLanguages(row)[key === 'promptEnglish' ? 'english' : key === 'promptChinese' ? 'chinese' : 'unconfirmed']} onChange={(event) => { const detected = importedPromptLanguages(row); onChange({ promptEnglish: detected.english, promptChinese: detected.chinese, promptUnconfirmed: detected.unconfirmed, [key]: event.target.value }); }} /></label>)}</div>}
+          </>
         )}
       </div>
       {row.kind === 'profile' && (
@@ -528,6 +533,12 @@ export function FileImportDialog({
             updatedAt: now,
           };
           batch.records!.push({ scope: `assets:${kind}`, value: record });
+          if (kind === 'prompt') {
+            const languages = importedPromptLanguages(row);
+            record.promptEnglish = languages.english;
+            record.promptChinese = languages.chinese;
+            record.promptUnconfirmed = languages.unconfirmed;
+          }
           if (kind === 'profile') {
             record.profileCodes = grouped.map((r) => ({
               id: r.id,
@@ -739,6 +750,7 @@ export function FileImportDialog({
                     全不选
                   </Button>
                 </div>
+                <DragSelection disabled={busy} selection={{ selected: new Set(allRows.filter(({ row }) => row.include).map(({ row }) => row.id)), toggle: (id) => setDocuments((current) => current.map((doc) => ({ ...doc, rows: doc.rows.map((row) => row.id === id ? { ...row, include: !row.include } : row) }))) }}>
                 {filtered
                   .slice(
                     Math.min(page, pageCount - 1) * 20,
@@ -753,6 +765,7 @@ export function FileImportDialog({
                       row={row}
                     />
                   ))}
+                </DragSelection>
                 <div className="preview-pagination">
                   <Button
                     disabled={page === 0}

@@ -3,6 +3,7 @@ import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 import { SourceSelection } from './source-selection';
+import { DragSelection } from './drag-selection';
 import {
   MobileWorkspace,
   MobileWorkspaceDetails,
@@ -40,6 +41,7 @@ import {
   moveSource,
   shuffleSources,
   type PipelineSource,
+  type PipelineTransfer,
 } from '@/lib/pipeline';
 import type { CollageOptions } from '@/lib/image-processing';
 import { useVault } from '@/components/prism/vault-provider';
@@ -310,15 +312,22 @@ export function CollagePanel() {
 
   useEffect(() => {
     const receive = (event: Event) => {
-      const detail =
-        (event as CustomEvent<Array<File | PipelineSource>>).detail || [];
+      const payload = (event as CustomEvent<Array<File | PipelineSource> | PipelineTransfer>).detail || [];
+      const transfer = Array.isArray(payload) ? undefined : payload;
+      if (transfer) event.preventDefault();
+      const detail = transfer ? transfer.sources : payload as Array<File | PipelineSource>;
       const incoming = detail.map((item) =>
         item instanceof File ? { id: crypto.randomUUID(), file: item } : item,
       );
+      if (transfer && (!workspace.ready || new Set([...workspace.current.current.sources, ...incoming].map((source) => source.id)).size > 1000)) {
+        transfer.complete(new Error('拼图工坊尚未就绪或超出 1000 张上限，请腾出空间后重试。'));
+        return;
+      }
       setState((current) => ({
         ...current,
         sources: mergeSources(current.sources, incoming),
       }));
+      if (transfer) void workspace.flush().then(() => transfer.complete(), (error) => transfer.complete(error instanceof Error ? error : new Error('拼图队列保存失败')));
       if (workspace.current.current.sources.length >= 1000)
         setError(
           '拼图队列上限为 1000 张，超出的图片仍留在水印等待区，请腾出空间后再送入。',
@@ -1538,9 +1547,9 @@ export function CollagePanel() {
             disabled={processing}
             noun="张当日拼图"
           />
-          <div className="collage-result-grid">
+          <DragSelection className="collage-result-grid" selection={selection} disabled={processing}>
             {outputs.map((output) => (
-              <article key={output.id}>
+              <article key={output.id} data-selection-id={output.id}>
                 <SelectItem
                   selection={selection}
                   id={output.id}
@@ -1563,7 +1572,7 @@ export function CollagePanel() {
                 </div>
               </article>
             ))}
-          </div>
+          </DragSelection>
         </section>
       )}
       {!outputs.length && !processing && (

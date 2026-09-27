@@ -4,12 +4,14 @@ export function profileNature(
   value = '',
 ): Pick<ProfileShortCode, 'nature' | 'natureOther'> {
   if (/成品|最终|final|finished/i.test(value)) return { nature: 'final' };
+  if (/情绪|emotion/i.test(value)) return { nature: 'emotion' };
   if (/阶段|测试|stage|test/i.test(value)) return { nature: 'stage' };
   return value.trim()
     ? { nature: 'other', natureOther: value.trim() }
     : { nature: 'unconfirmed' };
 }
 export function natureLabel(code: ProfileShortCode) {
+  if (code.nature === 'emotion') return '情绪 P';
   return code.nature === 'final'
     ? '成品 P'
     : code.nature === 'stage'

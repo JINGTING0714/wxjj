@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   ArrowDown,
   ArrowUp,
   Bold,
   Check,
+  Copy,
   Eye,
   EyeOff,
   Italic,
@@ -200,8 +201,8 @@ function CanvasPercent({
 }
 export function WatermarkEditor({
   source,
-  layers,
-  onChange: publishChange,
+  layers: storedLayers,
+  onChange: writeChange,
   composition,
   disabled = false,
   sourceKind = 'image',
@@ -215,6 +216,8 @@ export function WatermarkEditor({
   sourceKind?: 'image' | 'video';
   mobilePanel?: WatermarkMobilePanel | null;
 }) {
+  const layers = useMemo(() => storedLayers.map((layer) => layer.sourceCopy && source ? { ...layer, file: source } : layer), [storedLayers, source]);
+  const publishChange = (next: EditorLayer[], value?: WatermarkComposition) => writeChange(next.map((layer) => layer.sourceCopy ? { ...layer, file: storedLayers.find((old) => old.id === layer.id && old.sourceCopy)?.file || new File([], '原图副本规则.png', { type: 'image/png' }) } : layer), value);
   const vault = useVault();
   const editorRoot = useRef<HTMLDivElement>(null);
   const wasVisible = useRef(false);
@@ -382,6 +385,11 @@ export function WatermarkEditor({
     : layers;
   const selected = stack.find((l) => l.id === active) || layers[0] || stack[0];
   const selectedId = selected?.id;
+  const duplicateLayer = () => {
+    if (!selected || disabled || (selected.id === SOURCE_LAYER_ID && sourceKind === 'video')) return;
+    const copy: EditorLayer = { ...selected, id: crypto.randomUUID(), crop: { ...selected.crop }, locked: false, x: Math.min(1, selected.x + 0.03), y: Math.min(1, selected.y + 0.03), ...(selected.id === SOURCE_LAYER_ID ? { sourceCopy: true, scale: 0.28, file: new File([], '原图副本规则.png', { type: 'image/png' }) } : {}) };
+    onChange([...layers, copy], canvas); setActive(copy.id);
+  };
   const drag = useRef<{
     pointer: number;
     id: string;
@@ -1349,6 +1357,7 @@ export function WatermarkEditor({
           <p className="stage-tip">
             列表从上到下对应从前到后。锁定层不会响应拖动，也不会挡住未锁定图层的操作。
           </p>
+          <Button type="button" variant="outline" disabled={disabled || !selected || (selected.id === SOURCE_LAYER_ID && sourceKind === 'video')} onClick={duplicateLayer}><Copy />{selected?.id === SOURCE_LAYER_ID || selected?.sourceCopy ? '添加动态原图副本' : '复制当前素材图层'}</Button><p className="stage-tip">原图副本按当前输入图片生成，批量输出逐张换图；复制素材只增加项目图层。</p>
           <p className="watermark-library-note">
             新上传的水印会自动存入水印库，可再补充作者、来源和分类。原图和各水印都可以独立锁定，锁定状态也会保存。
           </p>

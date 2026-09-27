@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { copyText } from '@/lib/clipboard';
 import {
   Copy,
   Eye,
@@ -102,7 +103,7 @@ function Secret({ value, long = false }: { value: string; long?: boolean }) {
           title={long ? '复制长码' : '复制 --profile 参数'}
           disabled={!show || !value}
           onClick={() =>
-            navigator.clipboard?.writeText(
+            void copyText(
               long ? value : formatProfileCode(value),
             )
           }
@@ -162,6 +163,7 @@ function CodeEditor({
             <option value="unconfirmed">待确认（不猜测）</option>
             <option value="stage">阶段 P</option>
             <option value="final">成品 P</option>
+            <option value="emotion">情绪 P</option>
             <option value="other">其他 · 自行填写</option>
           </select>
         </label>
@@ -567,7 +569,8 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       />
       <div className="record-list profile-records">
         {visible.map((folder) => (
-          <section className="profile-record-group" key={folder.id}>
+          <details className="profile-record-group" key={folder.id}>
+            <summary className="profile-folder-summary"><span><strong>{folder.title}</strong> · {folder.codes.length} 个短码 · {collections.find((item) => item.id === folder.collection)?.name || '未分类'}</span><span className="profile-folder-tools" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" onClick={() => void copyText(formatProfileCode(folder.codes.map((code) => code.secret.replace(/^--profile\s+/i, '').trim()).join(' ')))}>复制文件夹</Button><Button type="button" variant="outline" onClick={() => open(folder)}>编辑 / 排序</Button></span></summary>
             {folder.codes.map((code, index) => (
               <article className="record-row" key={code.id}>
                 <div className="record-identity">
@@ -645,7 +648,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                 </div>
               </article>
             ))}
-          </section>
+          </details>
         ))}
       </div>
       {!visible.length && (
@@ -775,6 +778,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
             <CustomFieldsEditor fields={fields} onChange={setFields} />
             <div className="wide-field profile-code-editors">
               {codes.map((code, i) => (
+                <div key={code.id}><div className="order-controls"><span>第 {i + 1} 位</span><Button type="button" variant="outline" disabled={i === 0 || busy} onClick={() => setCodes((current) => { const next = [...current]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; return next; })}>上移</Button><Button type="button" variant="outline" disabled={i === codes.length - 1 || busy} onClick={() => setCodes((current) => { const next = [...current]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; return next; })}>下移</Button></div>
                 <CodeEditor
                   code={code}
                   index={i}
@@ -796,6 +800,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                       );
                   }}
                 />
+                </div>
               ))}
               <Button
                 onClick={() => setCodes((items) => [...items, newCode()])}

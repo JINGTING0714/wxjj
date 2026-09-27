@@ -10,7 +10,7 @@ export type ProfileShortCode = {
   id: string;
   label: string;
   secret: string;
-  nature: 'stage' | 'final' | 'other' | 'unconfirmed';
+  nature: 'stage' | 'final' | 'emotion' | 'other' | 'unconfirmed';
   natureOther?: string;
   note: string;
   customFields?: CustomField[];
@@ -24,6 +24,9 @@ export type StoredLibraryAsset = {
   title: string;
   secret: string;
   longCode?: string;
+  promptEnglish?: string;
+  promptChinese?: string;
+  promptUnconfirmed?: string;
   profileCodes?: ProfileShortCode[];
   stageType?: string;
   stageTypeOther?: string;
@@ -68,6 +71,7 @@ export type StoredRecipe = {
   manualEntries?: ManualRecipeEntry[];
   profileIds: string[];
   moodboardIds: string[];
+  selectionOrder?: { kind: 'profile' | 'moodboard'; id: string }[];
   ratio: string;
   note: string;
   tags: string[];

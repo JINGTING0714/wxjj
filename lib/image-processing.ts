@@ -29,6 +29,7 @@ export type WatermarkCrop = {
 
 export type WatermarkLayerInput = LayerTransform & {
   file: File;
+  sourceCopy?: boolean;
 };
 
 export type ProcessedImage = {
@@ -308,9 +309,9 @@ export function drawWatermarkComposition(
     layer: LayerTransform;
   }>(
     layers.map((layer, i) => ({
-      image: decoded[i] as CanvasImageSource,
-      w: decoded[i].naturalWidth,
-      h: decoded[i].naturalHeight,
+      image: layer.sourceCopy ? source : decoded[i] as CanvasImageSource,
+      w: layer.sourceCopy ? sourceWidth : decoded[i].naturalWidth,
+      h: layer.sourceCopy ? sourceHeight : decoded[i].naturalHeight,
       layer,
     })),
     { image: source, w: sourceWidth, h: sourceHeight, layer: c.source },
@@ -336,26 +337,35 @@ export async function applyWatermarks(
   onItem?: (item: ProcessedImage, index: number) => void | Promise<void>,
   signal?: AbortSignal,
   composition?: WatermarkComposition,
+  perFile?: (index: number) => { layers: WatermarkLayerInput[]; composition?: WatermarkComposition },
 ): Promise<ProcessedImage[]> {
   const results: ProcessedImage[] = [];
 
-  const decodedLayers = await Promise.all(
-    layers.map((layer) => loadImage(layer.file)),
-  );
+  const cache = new Map<File, HTMLImageElement>();
   for (let index = 0; index < files.length; index += 1) {
     signal?.throwIfAborted();
     const file = files[index];
     const base = await loadImage(file);
-    const fitted = composition?.fitContent
+    const settings = perFile?.(index) || { layers, composition };
+    const currentLayers = settings.layers;
+    const currentComposition = settings.composition;
+    const decodedLayers = [];
+    for (const layer of currentLayers) {
+      if (layer.sourceCopy) { decodedLayers.push(base); continue; }
+      let decoded = cache.get(layer.file);
+      if (!decoded) { decoded = await loadImage(layer.file); cache.set(layer.file, decoded); }
+      decodedLayers.push(decoded);
+    }
+    const fitted = currentComposition?.fitContent
       ? fitImageComposition(
           base.naturalWidth,
           base.naturalHeight,
-          layers,
+          currentLayers,
           decodedLayers,
-          composition,
+          currentComposition,
           base,
         )
-      : { layers, composition };
+      : { layers: currentLayers, composition: currentComposition };
     const canvas = document.createElement('canvas');
     const size = compositionSize(
       base.naturalWidth,
@@ -380,6 +390,7 @@ export async function applyWatermarks(
     signal?.throwIfAborted();
 
     const blob = await canvasBlob(canvas, 'image/png');
+    canvas.width = canvas.height = 0;
     const result = {
       id: uid('watermarked'),
       name: `${file.name.replace(/\.[^.]+$/, '')}-watermarked.png`,

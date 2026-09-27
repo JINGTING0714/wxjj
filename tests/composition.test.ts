@@ -15,7 +15,7 @@ import {
   alignLayerToSource,
   fitLayerToSource,
 } from '../lib/watermark-interaction';
-import { drawWatermarkComposition } from '../lib/image-processing';
+import { drawWatermarkComposition, applyWatermarks } from '../lib/image-processing';
 import { formatProfileCode, longShortCodes } from '../lib/short-codes';
 
 const near = (actual: number, expected: number) =>
@@ -25,6 +25,27 @@ const near = (actual: number, expected: number) =>
   );
 const scene = { width: 1000, height: 600, referenceWidth: 1000 };
 const sourceDimensions = { width: 1000, height: 600 };
+
+test('batch dynamic copies draw each current source; fixed materials stay fixed and per-file rules override defaults', async () => {
+  const original = { Image: globalThis.Image, document: globalThis.document, window: globalThis.window };
+  class TestImage {
+    naturalWidth = 400; naturalHeight = 300; name = ''; onload?: () => void; onerror?: () => void;
+    set src(url: string) { void fetch(url).then(response => response.text()).then(name => { this.name = name; this.onload?.(); }, () => this.onerror?.()); }
+  }
+  let painted: string[] = [], rotations: number[] = [];
+  const context = { clearRect() { painted=[]; rotations=[]; }, fillRect(){}, save(){}, restore(){}, translate(){}, rotate(value:number){rotations.push(value);}, drawImage(image:TestImage){painted.push(image.name);}, globalAlpha:1 };
+  Object.assign(globalThis, { Image: TestImage, document: { createElement: () => ({width:0,height:0,getContext:()=>context,toBlob:(callback:(blob:Blob)=>void)=>callback(new Blob([JSON.stringify({painted,rotations})],{type:'image/png'}))}) }, window: {setTimeout} });
+  try {
+    const dynamic={...defaultComposition().source, sourceCopy:true, file:new File([],'rule.png'),scale:0.3};
+    const fixed={...defaultComposition().source, file:new File(['LOGO'],'logo.png'),scale:0.2};
+    const outputs=await applyWatermarks([new File(['SOURCE-1'],'first.png'),new File(['SOURCE-2'],'second.png')],[dynamic,fixed],()=>{},undefined,undefined,defaultComposition(),index=>({layers:[{...dynamic,rotation:index?90:0},fixed],composition:defaultComposition()}));
+    const first=JSON.parse(await outputs[0].blob.text()),second=JSON.parse(await outputs[1].blob.text());
+    assert.deepEqual(first.painted,['SOURCE-1','SOURCE-1','LOGO']); assert.deepEqual(second.painted,['SOURCE-2','SOURCE-2','LOGO']);
+    assert.ok(second.rotations.includes(Math.PI/2)); assert.ok(!first.rotations.includes(Math.PI/2));
+    for(const output of outputs) URL.revokeObjectURL(output.url);
+    assert.equal(dynamic.file.size,0);
+  } finally { Object.assign(globalThis,original); }
+});
 
 test('edge stretching changes only that axis and anchors the opposite edge after rotation', () => {
   for (const rotation of [0, 45, 90, -30]) {

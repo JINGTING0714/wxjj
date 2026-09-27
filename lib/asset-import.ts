@@ -6,6 +6,9 @@ export type ImportRow = {
   title: string;
   kind: AssetKind;
   secret: string;
+  promptEnglish?: string;
+  promptChinese?: string;
+  promptUnconfirmed?: string;
   longCode: string;
   nature: string;
   author: string;
@@ -29,6 +32,9 @@ export type ImportDocument = {
 };
 type CellRow = { cells: string[]; row: number; images: File[] };
 const aliases: Record<string, string[]> = {
+  promptEnglish: ['英文提示词', '英文版', 'promptEnglish', 'english prompt', 'prompt en'],
+  promptChinese: ['中文提示词', '中文版', 'promptChinese', 'chinese prompt', 'prompt zh'],
+  promptUnconfirmed: ['promptUnconfirmed', '待确认提示词', '原文待确认'],
   secret: [
     'secret',
     'content',
@@ -40,7 +46,6 @@ const aliases: Record<string, string[]> = {
     '词',
     '词条',
     '咒语',
-    '英文提示词',
     '正向提示词',
     '关键词',
     '短码',
@@ -152,7 +157,7 @@ export function tableRows(
     const cells = source.cells.map((s) => s.trim());
     if (!cells.some(Boolean) && !source.images.length) continue;
     const detected = cells.map((s) => columnKey(s) || '');
-    if (detected.includes('secret')) {
+    if (detected.some((key) => ['secret', 'promptEnglish', 'promptChinese', 'promptUnconfirmed'].includes(key))) {
       headers = detected;
       headerLabels = cells;
       continue;
@@ -174,6 +179,7 @@ export function tableRows(
         const key = headers[index];
         if (
           key === 'secret' ||
+          key === 'promptEnglish' || key === 'promptChinese' || key === 'promptUnconfirmed' ||
           key === 'title' ||
           key === 'author' ||
           key === 'longCode' ||
@@ -224,6 +230,7 @@ export function tableRows(
           );
       }
     }
+    if (kind === 'prompt' && !entry.secret) entry.secret = entry.promptEnglish || entry.promptChinese || entry.promptUnconfirmed || '';
     if (!entry.secret) {
       if (entry.images.length) {
         entry.warnings.push('此行有图片但未识别到提示词，请补充或重新指定。');

@@ -1,4 +1,8 @@
 export type PipelineSource = { id: string; file: File };
+export type PipelineTransfer = {
+  sources: PipelineSource[];
+  complete: (error?: Error) => void;
+};
 export function moveSource<T extends { id: string }>(
   sources: T[],
   id: string,

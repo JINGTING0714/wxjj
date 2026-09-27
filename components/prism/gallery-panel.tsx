@@ -1,5 +1,6 @@
 'use client';
 import { BulkActions } from './bulk-selection';
+import { DragSelection } from './drag-selection';
 
 import {
   Check,
@@ -449,11 +450,12 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
             </div>
           </div>
           {visible.length ? (
-            <div className="masonry-grid">
+            <DragSelection className="masonry-grid" disabled={busy} selection={{ selected, toggle: toggleSelected }}>
               {visible.map((image, index) => (
                 <article
                   className={`gallery-image gallery-size-${(index % 3) + 1} ${selected.has(image.id) ? 'is-selected' : ''}`}
                   key={image.id}
+                  data-selection-id={image.id}
                 >
                   <button
                     aria-label={`选择 ${image.name}`}
@@ -493,7 +495,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
                   </div>
                 </article>
               ))}
-            </div>
+            </DragSelection>
           ) : (
             <label className="gallery-drop gallery-drop-empty">
               <Upload />

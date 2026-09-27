@@ -25,7 +25,7 @@ import { WatermarkEditor, type EditorLayer } from './watermark-editor';
 import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { applyWatermarks } from '@/lib/image-processing';
 import { downloadBlob, downloadZip } from '@/lib/download';
-import type { PipelineSource } from '@/lib/pipeline';
+import type { PipelineSource, PipelineTransfer } from '@/lib/pipeline';
 import { VideoWatermarkPanel } from './video-watermark-panel';
 import {
   defaultComposition,
@@ -34,6 +34,7 @@ import {
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 import { SourceSelection } from './source-selection';
+import { DragSelection } from './drag-selection';
 import {
   MobileWorkspace,
   MobileWorkspacePanel,
@@ -70,11 +71,15 @@ type Batch = {
   retryIds: string[];
   autoSend: boolean;
   composition?: WatermarkComposition;
+  sampleId?: string;
+  editScope?: 'batch' | 'single';
+  overrides?: Record<string, { layers: EditorLayer[]; composition?: WatermarkComposition }>;
   job: {
     todo: PipelineSource[];
     layers: EditorLayer[];
     next: number;
     composition?: WatermarkComposition;
+    overrides?: Record<string, { layers: EditorLayer[]; composition?: WatermarkComposition }>;
   } | null;
 };
 const freshBatch = (number: number): Batch => ({
@@ -140,11 +145,12 @@ function WaitingBatch({
           );
         }}
       />
-      <div className="result-grid">
+      <DragSelection className="result-grid" selection={selection} disabled={processing}>
         {batch.outputs.map((output, i) => (
           <article
             className={output.rejected ? 'is-rejected' : ''}
             key={output.id}
+            data-selection-id={output.id}
           >
             <SelectItem
               selection={selection}
@@ -221,7 +227,7 @@ function WaitingBatch({
             </div>
           </article>
         ))}
-      </div>
+      </DragSelection>
       <div className="result-actions">
         <Button
           disabled={!batch.outputs.length}
@@ -276,6 +282,9 @@ export function WatermarkPanel({
   const [outputSettingsOpen, setOutputSettingsOpen] = useState(false);
   const batch =
     state.batches.find((b) => b.id === state.active) || state.batches[0];
+  const sample = batch && (batch.sources.find((source) => source.id === batch.sampleId) || (batch.retryIds.length ? batch.sources.find((source) => batch.retryIds.includes(source.id)) : undefined) || batch.sources[0]);
+  const sampleSettings = batch?.editScope === 'single' && sample ? batch.overrides?.[sample.id] : undefined;
+  const hasLayers = !!batch && (!!batch.layers.length || batch.sources.some((source) => batch.overrides?.[source.id]?.layers.length));
   const update = (id: string, change: (old: Batch) => Batch) =>
     setState((current) => ({
       ...current,
@@ -308,6 +317,22 @@ export function WatermarkPanel({
       window.removeEventListener('prism:checkpoint', checkpoint);
     };
   }, []);
+  useEffect(() => {
+    const receive = (event: Event) => {
+      event.preventDefault();
+      const { sources, complete } = (event as CustomEvent<PipelineTransfer>).detail;
+      const current = workspace.current.current;
+      if (!workspace.ready || current.batches.length >= 5 || sources.length > 200) {
+        complete(new Error('水印工坊尚未就绪或已达 5 批上限，请腾出批次后重试。'));
+        return;
+      }
+      const next = { ...freshBatch(current.batches.length + 1), title: 'PNG 清洗副本', sources };
+      setState((old) => ({ ...old, batches: [...old.batches, next], active: next.id, tab: 'images' }));
+      void workspace.flush().then(() => complete(), (error) => complete(error instanceof Error ? error : new Error('水印队列保存失败')));
+    };
+    window.addEventListener('prism:send-to-watermark', receive);
+    return () => window.removeEventListener('prism:send-to-watermark', receive);
+  }, [workspace, setState]);
   const run = (target: Batch, resume = false) => {
     if (tasks.current.has(target.id)) return;
     const job =
@@ -319,9 +344,10 @@ export function WatermarkPanel({
               : target.sources,
             layers: target.layers,
             composition: target.composition,
+            overrides: target.overrides,
             next: 0,
           };
-    if (!job.todo.length || !job.layers.length) return;
+    if (!job.todo.length || (!job.layers.length && !job.todo.some((source) => job.overrides?.[source.id]?.layers.length))) return;
     const controller = new AbortController();
     controllers.current.set(target.id, controller);
     const signal = controller.signal;
@@ -373,6 +399,7 @@ export function WatermarkPanel({
           },
           signal,
           job.composition,
+          (index) => job.overrides?.[remaining[index].id] || { layers: job.layers, composition: job.composition },
         );
         update(target.id, (b) => ({ ...b, job: null }));
         await workspace.flush();
@@ -529,6 +556,7 @@ export function WatermarkPanel({
                   <ChevronDown />
                 </button>
                 <div className="batch-source-toolbar">
+                  <div className="source-rule-controls"><label>预览 / 调整图片<select disabled={running[batch.id] !== undefined} value={sample?.id || ''} onChange={(event) => update(batch.id, (current) => ({ ...current, sampleId: event.target.value }))}>{batch.sources.map((source, index) => <option value={source.id} key={source.id}>{index + 1}. {source.file.name}</option>)}</select></label><label>本次调整范围<select disabled={running[batch.id] !== undefined} value={batch.editScope || 'batch'} onChange={(event) => update(batch.id, (current) => ({ ...current, editScope: event.target.value as 'batch' | 'single' }))}><option value="batch">批量默认规则</option><option value="single">仅当前图片</option></select></label>{batch.editScope === 'single' && <><p>当前单图规则优先于批量默认规则。</p><Button type="button" variant="outline" disabled={running[batch.id] !== undefined || !sampleSettings} onClick={() => update(batch.id, (current) => { const overrides = { ...current.overrides }; if (sample) delete overrides[sample.id]; return { ...current, overrides }; })}>恢复使用批量默认</Button></>}</div>
                   <label htmlFor={`watermark-batch-title-${batch.id}`}>
                     批次名称
                     <Input
@@ -634,6 +662,7 @@ export function WatermarkPanel({
                       update(batch.id, (b) => ({
                         ...b,
                         sources: b.sources.filter((s) => !ids.includes(s.id)),
+                        overrides: Object.fromEntries(Object.entries(b.overrides || {}).filter(([id]) => !ids.includes(id))),
                         retryIds: b.retryIds.filter((id) => !ids.includes(id)),
                         job: null,
                       }));
@@ -665,23 +694,18 @@ export function WatermarkPanel({
               </MobileWorkspacePanel>
 
               <WatermarkEditor
+                key={`${batch.id}:${batch.editScope || 'batch'}:${sample?.id || 'empty'}`}
                 disabled={running[batch.id] !== undefined}
-                layers={batch.layers}
+                layers={sampleSettings?.layers || batch.layers}
                 mobilePanel={mobilePanel}
-                composition={batch.composition}
+                composition={sampleSettings?.composition || batch.composition}
                 onChange={(layers, composition) =>
                   update(batch.id, (b) => ({
                     ...b,
-                    layers,
-                    ...(composition ? { composition } : {}),
+                    ...(b.editScope === 'single' && sample ? { overrides: { ...b.overrides, [sample.id]: { layers, composition: composition || b.composition } } } : { layers, ...(composition ? { composition } : {}) }),
                   }))
                 }
-                source={
-                  (batch.retryIds.length
-                    ? batch.sources.find((s) => batch.retryIds.includes(s.id))
-                    : batch.sources[0]
-                  )?.file
-                }
+                source={sample?.file}
               />
 
               <MobileWorkspaceTabs
@@ -733,7 +757,7 @@ export function WatermarkPanel({
                 </button>
                 <div className="result-actions desktop-workspace-only">
                   <Button
-                    disabled={!batch.sources.length || !batch.layers.length}
+                    disabled={!batch.sources.length || !hasLayers}
                     onClick={() => run(batch)}
                   >
                     <Stamp />
@@ -804,7 +828,7 @@ export function WatermarkPanel({
                     disabled={
                       !workspace.ready ||
                       !batch.sources.length ||
-                      !batch.layers.length
+                      !hasLayers
                     }
                     onClick={() => run(batch)}
                   >
@@ -831,6 +855,7 @@ export function WatermarkPanel({
                   update(batch.id, (b) => ({
                     ...b,
                     sources: b.sources.filter((s) => !ids.includes(s.id)),
+                        overrides: Object.fromEntries(Object.entries(b.overrides || {}).filter(([id]) => !ids.includes(id))),
                     retryIds: b.retryIds.filter((id) => !ids.includes(id)),
                     job: null,
                   }));

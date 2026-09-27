@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import JSZip from 'jszip';
 import { legacyFixture } from './legacy-fixture';
 import { defaultComposition } from '../lib/watermark-composition';
+import { pngFixture } from './png-fixtures';
+import { deepCleanPng } from '../lib/png-cleaner';
 import {
   createVault,
   unlockVault,
@@ -25,6 +27,54 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+test('ledger receipts, undo, bilingual prompts, global recipe order and dynamic rules survive encrypted migration', async () => {
+  const key=await createVault('p2-p4-backup-password');
+  const fileRef={__prismFile:true,id:'receipt',name:'凭证.png',type:'image/png',lastModified:1};
+  const transaction={id:'transaction',date:'2026-09-27',amount:12345,receipts:[fileRef]};
+  const records=[
+    {scope:'workspaces',value:{id:'workspace:accounting',data:{accounts:[{id:'a',name:'微信',opening:500}],transactions:[transaction],undo:[{id:transaction.id,previous:transaction,label:'修改交易'}]}}},
+    {scope:'prompts',value:{id:'prompt',secret:'legacy mixed 中英',promptEnglish:'English',promptChinese:'中文',promptUnconfirmed:'legacy mixed 中英',note:'旧备注',customFields:[{id:'field',label:'旧字段',value:'保留'}]}},
+    {scope:'recipes',value:{id:'recipe',profileIds:['p2','p1'],moodboardIds:['m1'],selectionOrder:[{kind:'moodboard',id:'m1'},{kind:'profile',id:'p2'},{kind:'profile',id:'p1'}]}},
+    {scope:'workspaces',value:{id:'workspace:watermark',data:{layers:[{sourceCopy:true,rotation:90,crop:{left:0.1,right:0,top:0,bottom:0},file:{__prismFile:true,id:'rule',name:'rule.png',type:'image/png'}}],overrides:{'source-2':{rotation:45}}}}},
+  ];
+  await writeVaultBatch(key,{records,blobs:[{id:'receipt',scope:'workspace-files:accounting',name:'凭证.png',blob:new Blob(['receipt bytes'],{type:'image/png'})},{id:'rule',scope:'workspace-files:watermark',name:'rule.png',blob:new Blob([],{type:'image/png'})}]});
+  const backup=new File([await exportVaultFile(key)],'p2-p4.prism');await clear(); const restored=await importVaultFile(backup,'p2-p4-backup-password');
+  for(const scope of ['workspaces','prompts','recipes']) assert.deepEqual(await loadEncryptedRecords(restored.key,scope),records.filter(record=>record.scope===scope).map(record=>record.value));
+  assert.equal(await (await loadEncryptedBlobs(restored.key,'workspace-files:accounting'))[0].blob.text(),'receipt bytes');
+  assert.equal((await loadEncryptedBlobs(restored.key,'workspace-files:watermark'))[0].blob.size,0);
+});
+
+void test('PNG source and clean copy survive encrypted full backup with old library data unchanged', async () => {
+  const key = await createVault('png-backup-test-password');
+  const original = pngFixture({ indexed: true });
+  const cleaned = deepCleanPng(original);
+  const cleanBytes = new Uint8Array(await cleaned.blob.arrayBuffer());
+  const oldProfile = { id: 'old-profile', secret: 'CaseSensitiveCODE', note: '原有备注', codes: ['B', 'A'] };
+  const snapshot = {
+    id: 'workspace:png-cleaner',
+    data: {
+      mode: 'deep',
+      sources: [{ id: 'png-source', file: { __prismFile: true, id: 'png-original', name: 'original.png', type: 'image/png', lastModified: 1000 } }],
+      results: [{ id: 'png-source', report: { ...cleaned.report, chunks: [] }, file: { __prismFile: true, id: 'png-cleaned', name: 'original-clean.png', type: 'image/png', lastModified: 2000 } }],
+    },
+  };
+  await writeVaultBatch(key, {
+    records: [{ scope: 'profiles', value: oldProfile }, { scope: 'workspaces', value: snapshot }],
+    blobs: [
+      { id: 'png-original', scope: 'workspace-files:png-cleaner', name: 'original.png', blob: new Blob([original], { type: 'image/png' }) },
+      { id: 'png-cleaned', scope: 'workspace-files:png-cleaner', name: 'original-clean.png', blob: cleaned.blob },
+    ],
+  });
+  const backup = new File([await exportVaultFile(key)], 'png-workspace.prism');
+  await clear();
+  const restored = await importVaultFile(backup, 'png-backup-test-password');
+  assert.deepEqual(await loadEncryptedRecords(restored.key, 'profiles'), [oldProfile]);
+  assert.deepEqual(await loadEncryptedRecords(restored.key, 'workspaces'), [snapshot]);
+  const files = await loadEncryptedBlobs(restored.key, 'workspace-files:png-cleaner');
+  assert.deepEqual(new Uint8Array(await files.find((file) => file.id === 'png-original')!.blob.arrayBuffer()), original);
+  assert.deepEqual(new Uint8Array(await files.find((file) => file.id === 'png-cleaned')!.blob.arrayBuffer()), cleanBytes);
+});
 
 test('recipe categories, library references, manual entries and examples survive cross-device backup exactly', async () => {
   const key = await createVault('recipe-migration-password');

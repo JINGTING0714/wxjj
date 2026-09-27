@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
+import { DragSelection } from './drag-selection';
 import type { PipelineSource } from '@/lib/pipeline';
 
 export function SourceSelection({
@@ -46,14 +47,14 @@ export function SourceSelection({
           `从此队列移除选中的 ${count} 个原文件副本？\n电脑原文件和已完成成品不会删除。被移除原图的成品将不能在本批重打；需要时可重新导入原文件。`
         }
       />
-      <div className="source-selection-list">
+      <DragSelection className="source-selection-list" selection={selection} disabled={disabled}>
         {visible.slice(current * 50, (current + 1) * 50).map((s) => (
-          <div key={s.id}>
+          <div key={s.id} data-selection-id={s.id}>
             <SelectItem selection={selection} id={s.id} name={s.file.name} />
             <span>{s.file.name}</span>
           </div>
         ))}
-      </div>
+      </DragSelection>
       <div className="source-selection-pages">
         <Button
           type="button"

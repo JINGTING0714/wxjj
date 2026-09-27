@@ -58,6 +58,8 @@ import {
   secretPreview,
 } from '@/lib/prism-types';
 import { profileChoices, resolveLegacyProfileIds } from '@/lib/profile-model';
+import { copyText } from '@/lib/clipboard';
+import { recipeOrder, recipeCommand, moveRecipeChoice, type RecipeChoice } from '@/lib/recipe-order';
 
 const demoProfiles: StoredLibraryAsset[] = [
   {
@@ -234,6 +236,8 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
   const [selectedMoodboards, setSelectedMoodboards] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedOrder, setSelectedOrder] = useState<RecipeChoice[]>([]);
+  const [pickerTab, setPickerTab] = useState<'profile' | 'moodboard'>('profile');
   const [profileQuery, setProfileQuery] = useState('');
   const [moodboardQuery, setMoodboardQuery] = useState('');
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
@@ -281,6 +285,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
           ...record,
           profileIds,
           moodboardIds,
+          selectionOrder: record.selectionOrder?.map((item) => ({ ...item, id: item.kind === 'profile' ? resolveLegacyProfileIds([item.id], profileRecords)[0] : item.id })),
           tags: record.tags || [],
           customFields: record.customFields || [],
           images: blobs.map((entry) => ({
@@ -360,6 +365,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
     setManualEntries([]);
     setSelectedProfiles(new Set());
     setSelectedMoodboards(new Set());
+    setSelectedOrder([]);
     setProfileQuery('');
     setMoodboardQuery('');
     setCustomFields([]);
@@ -379,6 +385,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
     setManualEntries(recipe.manualEntries || []);
     setSelectedProfiles(new Set(recipe.profileIds));
     setSelectedMoodboards(new Set(recipe.moodboardIds));
+    setSelectedOrder(recipeOrder(recipe));
     setCustomFields(recipe.customFields || []);
     setExistingImages(recipe.images);
     setNewImages([]);
@@ -427,6 +434,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
     const now = new Date().toISOString();
     const id = editing?.id || prismId('recipe');
     const record: StoredRecipe = {
+      ...(editing ? asStored(editing) : {}),
       id,
       title: String(data.get('title') || '').trim(),
       collection: String(data.get('collection') || 'unfiled'),
@@ -435,6 +443,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
         .filter((e) => e.secret),
       profileIds: [...selectedProfiles],
       moodboardIds: [...selectedMoodboards],
+      selectionOrder: selectedOrder,
       ratio: String(data.get('ratio') || '').trim() || '自由画幅',
       note: String(data.get('note') || '').trim(),
       tags: String(data.get('tags') || '')
@@ -580,8 +589,8 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
       <div className="record-list recipe-records">
         {visible.map((recipe) => {
           const open = revealed.has(recipe.id);
-          const entries = [...recipe.profileIds, ...recipe.moodboardIds]
-            .map((id) => assetById.get(id))
+          const entries = recipeOrder(recipe)
+            .map((item) => assetById.get(item.id))
             .filter(Boolean)
             .map((a) => ({
               id: a!.id,
@@ -591,7 +600,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               secret: a!.secret,
             }));
           return (
-            <article className="record-row" key={recipe.id}>
+            <details className="asset-record-fold" key={recipe.id}><summary><RecordExamples images={recipe.images} title={recipe.title} /><strong>{recipe.title}</strong> · {recipeOrder(recipe).length} 个库中条目 · {(recipe.manualEntries || []).length} 个手填条目</summary><article className="record-row">
               <div className="record-identity">
                 <SelectItem
                   selection={selection}
@@ -619,6 +628,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                   ))}
                 </div>
                 <div className="record-secret-actions">
+                  {(['all', 'profile', 'moodboard'] as const).map((kind) => <button key={kind} type="button" onClick={() => { try { void copyText(recipeCommand(recipe, assetById, kind === 'all' ? undefined : kind)); } catch (error) { setFormError(error instanceof Error ? error.message : '复制失败'); } }}>{kind === 'all' ? '复制完整配方' : kind === 'profile' ? '仅复制 Profile' : '仅复制 Moodboard'}</button>)}
                   <button
                     type="button"
                     aria-label={open ? '隐藏配方短码' : '显示配方短码'}
@@ -675,6 +685,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 </button>
               </div>
             </article>
+            </details>
           );
         })}
         {!visible.length && (
@@ -750,11 +761,12 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 placeholder="3:4、9:16 或任何自定义说明"
               />
             </label>
-            <div className="wide-field picker-columns">
+            <div className="wide-field recipe-selection-tools"><p>选择顺序会影响配方排列和复制顺序。手动录入内容不参与一键复制。</p><details><summary>已选 {selectedOrder.length} 个 · 查看与调整全局顺序</summary>{selectedOrder.map((item, index) => <div className="order-controls" key={`${item.kind}:${item.id}`}><span>{index + 1}. {assetById.get(item.id)?.title || '缺失引用（保留）'}</span><Button type="button" variant="outline" disabled={index === 0} onClick={() => setSelectedOrder((order) => moveRecipeChoice(order, index, index - 1))}>上移</Button><Button type="button" variant="outline" disabled={index === selectedOrder.length - 1} onClick={() => setSelectedOrder((order) => moveRecipeChoice(order, index, index + 1))}>下移</Button><Button type="button" variant="ghost" onClick={() => { toggle(item.kind === 'profile' ? setSelectedProfiles : setSelectedMoodboards, item.id); setSelectedOrder((order) => order.filter((choice) => !(choice.id === item.id && choice.kind === item.kind))); }}>移除</Button></div>)}</details><div className="mobile-workspace-only recipe-picker-tabs"><Button type="button" variant={pickerTab === 'profile' ? 'default' : 'outline'} onClick={() => setPickerTab('profile')}>Profile</Button><Button type="button" variant={pickerTab === 'moodboard' ? 'default' : 'outline'} onClick={() => setPickerTab('moodboard')}>Moodboard</Button></div></div>
+            <div className="wide-field picker-columns" data-picker-tab={pickerTab}>
               <SelectionList
                 items={profiles}
                 onQuery={setProfileQuery}
-                onToggle={(id) => toggle(setSelectedProfiles, id)}
+                onToggle={(id) => { toggle(setSelectedProfiles, id); setSelectedOrder((order) => order.some((choice) => choice.id === id && choice.kind === 'profile') ? order.filter((choice) => !(choice.id === id && choice.kind === 'profile')) : [...order, { id, kind: 'profile' }]); }}
                 query={profileQuery}
                 selected={selectedProfiles}
                 title="选择 Profile"
@@ -762,7 +774,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               <SelectionList
                 items={moodboards}
                 onQuery={setMoodboardQuery}
-                onToggle={(id) => toggle(setSelectedMoodboards, id)}
+                onToggle={(id) => { toggle(setSelectedMoodboards, id); setSelectedOrder((order) => order.some((choice) => choice.id === id && choice.kind === 'moodboard') ? order.filter((choice) => !(choice.id === id && choice.kind === 'moodboard')) : [...order, { id, kind: 'moodboard' }]); }}
                 query={moodboardQuery}
                 selected={selectedMoodboards}
                 title="选择 Moodboard"

@@ -12,8 +12,8 @@ export function useSelection(ids: string[]) {
     selected,
     total: ids.length,
     toggle: (id: string) =>
-      setChosen(() => {
-        const next = new Set(selected);
+      setChosen((current) => {
+        const next = new Set(ids.filter((id) => current.has(id)));
         next.has(id) ? next.delete(id) : next.add(id);
         return next;
       }),

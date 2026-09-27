@@ -1,0 +1,92 @@
+'use client';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { calculatorInitial, calculatorKey } from '@/lib/calculator';
+import { SectionHead } from './studio-shared';
+const keys = [
+  'AC',
+  '±',
+  '⌫',
+  '÷',
+  '7',
+  '8',
+  '9',
+  '×',
+  '4',
+  '5',
+  '6',
+  '−',
+  '1',
+  '2',
+  '3',
+  '+',
+  '0',
+  '.',
+  '=',
+];
+export function CalculatorPanel() {
+  const [state, setState] = useState(calculatorInitial);
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = root.current;
+    if (!element) return;
+    const keyDown = (event: KeyboardEvent) => {
+      const mapping: Record<string, string> = {
+        Enter: '=',
+        Escape: 'AC',
+        Backspace: '⌫',
+        '*': '×',
+        '/': '÷',
+        '-': '−',
+      };
+      const key = mapping[event.key] || event.key;
+      if (keys.includes(key)) {
+        event.preventDefault();
+        setState((current) => calculatorKey(current, key));
+      }
+    };
+    element.addEventListener('keydown', keyDown);
+    return () => element.removeEventListener('keydown', keyDown);
+  }, []);
+  return (
+    <div className="studio-page">
+      <SectionHead
+        eyebrow="QUICK CALCULATOR"
+        number="11"
+        title="计算器"
+        description="简单计算，手动确认。计算结果不会自动创建账目。"
+      />
+      <section ref={root} className="prism-calculator" aria-label="简易计算器">
+        <small>
+          {state.stored !== undefined
+            ? `${state.stored} ${state.operator || ''}`
+            : '点击按钮或使用键盘'}
+        </small>
+        <output aria-live="polite">{state.display}</output>
+        <div>
+          {keys.map((key) => (
+            <Button
+              key={key}
+              className={key === '=' ? 'calculator-equal' : ''}
+              variant={
+                ['+', '−', '×', '÷', '='].includes(key) ? 'default' : 'outline'
+              }
+              aria-label={
+                key === '⌫'
+                  ? '退格'
+                  : key === '±'
+                    ? '正负号'
+                    : key === 'AC'
+                      ? '清除'
+                      : key
+              }
+              onClick={() => setState((current) => calculatorKey(current, key))}
+            >
+              {key}
+            </Button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -1,5 +1,7 @@
 'use client';
 import { formatProfileCode } from '@/lib/short-codes';
+import { copyText } from '@/lib/clipboard';
+import { promptLanguages } from '@/lib/prompt-language';
 import { useConfirmation } from './use-confirmation';
 import { RecordExamples, SecretField, CollectionRail } from './library-shared';
 import { ExampleImage } from './example-image';
@@ -272,6 +274,7 @@ function SimpleLibraryPanel({
         ]);
         const haystack = [
           asset.title,
+          ...Object.values(promptLanguages(asset)),
           asset.author,
           asset.origin,
           asset.acquisition,
@@ -328,7 +331,8 @@ function SimpleLibraryPanel({
       return;
     }
     const form = new FormData(event.currentTarget);
-    const secret = String(form.get('secret') || '').trim();
+    const languages = kind === 'prompt' ? { promptEnglish: String(form.get('promptEnglish') || '').trim(), promptChinese: String(form.get('promptChinese') || '').trim(), promptUnconfirmed: String(form.get('promptUnconfirmed') || '').trim() } : {};
+    const secret = kind === 'prompt' ? editingAsset?.secret || languages.promptEnglish || languages.promptChinese || languages.promptUnconfirmed || '' : String(form.get('secret') || '').trim();
     if (!secret) {
       setFormError(`${copy.noun}内容不能为空。`);
       return;
@@ -339,9 +343,11 @@ function SimpleLibraryPanel({
     const id = editingAsset?.id || prismId(kind);
     const record: StoredLibraryAsset = {
       id,
+      ...(editingAsset ? storedAsset(editingAsset) : {}),
       kind,
       title: String(form.get('title') || '').trim(),
       secret,
+      ...languages,
       longCode:
         kind === 'profile'
           ? String(form.get('longCode') || '').trim()
@@ -591,7 +597,9 @@ function SimpleLibraryPanel({
               ? '••••••••••••••••••••'
               : secretPreview(asset.secret);
           return (
-            <article className="record-row" key={asset.id}>
+            <details className="asset-record-fold" key={asset.id}>
+            <summary>{asset.title} · {copy.noun} · {asset.images.length} 张例图 · {asset.tags.join(' / ') || '未添加标签'}</summary>
+            <article className="record-row">
               <div className="record-identity">
                 <SelectItem
                   selection={selection}
@@ -615,11 +623,12 @@ function SimpleLibraryPanel({
                 </div>
               </div>
               <div className="record-secret">
+                {kind === 'prompt' ? <div className="prompt-languages">{Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 原文保留'}</strong>{isRevealed && <pre>{content}</pre>}</div>)}</div> :
                 <div
                   className={`record-secret-value ${!isRevealed ? 'is-obscured' : ''}`}
                 >
                   <code>{visibleValue}</code>
-                </div>
+                </div>}
                 {kind === 'profile' && (
                   <p className="long-code-line">
                     <span>长码</span>
@@ -634,23 +643,21 @@ function SimpleLibraryPanel({
                     {isRevealed ? '隐藏' : '显示'}
                   </button>
                   <button
-                    disabled={!isRevealed}
-                    onClick={() =>
-                      navigator.clipboard?.writeText(
+                    onClick={() => void copyText(
                         kind === 'profile'
                           ? formatProfileCode(asset.secret)
-                          : asset.secret,
-                      )
-                    }
+                          : kind === 'prompt' ? promptLanguages(asset).english : asset.secret,
+                      )}
                     type="button"
                   >
                     <Copy />{' '}
                     {kind === 'prompt'
-                      ? '复制提示词'
+                      ? '复制英文 Prompt'
                       : kind === 'profile'
                         ? '复制 Profile 参数'
                         : '复制短码'}
                   </button>
+                  {kind === 'prompt' && <><button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>{promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待确认原文</button>}</>}
                 </div>
                 <p>
                   <strong>{asset.author}</strong>
@@ -699,6 +706,7 @@ function SimpleLibraryPanel({
                 </button>
               </div>
             </article>
+            </details>
           );
         })}
         {filtered.length === 0 && (
@@ -764,7 +772,7 @@ function SimpleLibraryPanel({
                 />
               </label>
             )}
-            <label className="wide-field">
+            {kind !== 'prompt' ? <label className="wide-field">
               <span>
                 {kind === 'profile'
                   ? 'Profile 短码'
@@ -773,14 +781,13 @@ function SimpleLibraryPanel({
                     : '完整提示词'}
               </span>
               <SecretField
-                label={kind === 'prompt' ? '完整提示词' : 'Moodboard 短码'}
+                label="短码"
                 name="secret"
                 defaultValue={editingAsset?.secret}
-                multiline={kind === 'prompt'}
-                placeholder={kind === 'prompt' ? '粘贴完整提示词…' : '填写短码'}
+                placeholder="填写短码"
                 required
               />
-            </label>
+            </label> : <div className="wide-field prompt-language-editor"><p>英文和中文独立保存、搜索与复制。旧版混合原文保留在“待确认”中，请自行核对归属；原有补充信息不会改变。</p>{(['english', 'chinese', 'unconfirmed'] as const).map((language) => <label key={language}><span>{language === 'english' ? '英文 Prompt（默认复制）' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 保留原文'}</span><SecretField label={language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '待确认 Prompt'} name={language === 'english' ? 'promptEnglish' : language === 'chinese' ? 'promptChinese' : 'promptUnconfirmed'} defaultValue={promptLanguages(editingAsset || undefined)[language]} multiline /></label>)}</div>}
             {kind === 'profile' && (
               <>
                 <label>

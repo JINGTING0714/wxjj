@@ -43,6 +43,10 @@ import {
 } from '@/components/prism/studio-panels';
 import { useVault } from '@/components/prism/vault-provider';
 import { MobileWorkspaceSheet } from '@/components/prism/mobile-workspace';
+import { PngCleanerPanel } from '@/components/prism/png-cleaner-panel';
+import { AccountingPanel } from '@/components/prism/accounting-panel';
+import { CalculatorPanel } from '@/components/prism/calculator-panel';
+import { SiteTools } from '@/components/prism/site-tools';
 
 type ViewId =
   | 'overview'
@@ -54,6 +58,9 @@ type ViewId =
   | 'gallery'
   | 'watermark'
   | 'collage'
+  | 'png-cleaner'
+  | 'accounting'
+  | 'calculator'
   | 'security';
 type NavEntry = { id: ViewId; label: string; icon: LucideIcon; count?: number };
 
@@ -68,6 +75,8 @@ type GuideEntry = {
 };
 
 const primaryNav: NavEntry[] = [
+  { id: 'accounting', label: '记账本', icon: Library },
+  { id: 'calculator', label: '计算器', icon: Blocks },
   { id: 'overview' as const, label: '开始与总览', icon: Aperture },
   { id: 'prompts' as const, label: '提示词库', icon: Library },
   { id: 'profiles' as const, label: 'Profile 库', icon: KeyRound },
@@ -77,6 +86,7 @@ const primaryNav: NavEntry[] = [
 ];
 
 const pipelineNav: NavEntry[] = [
+  { id: 'png-cleaner', label: 'PNG 隐私清洗', icon: ShieldCheck },
   { id: 'gallery' as const, label: '图片收纳', icon: Folder },
   { id: 'watermark' as const, label: '水印工坊', icon: Stamp },
   { id: 'collage' as const, label: '拼图工坊', icon: Grid3X3 },
@@ -103,7 +113,7 @@ const mobileNavGroups: Array<{
     label: '工坊',
     icon: Stamp,
     items: pipelineNav.filter((item) =>
-      ['watermark', 'collage'].includes(item.id),
+      ['png-cleaner', 'watermark', 'collage'].includes(item.id),
     ),
   },
   {
@@ -119,7 +129,7 @@ const mobileNavGroups: Array<{
     id: 'more',
     label: '更多',
     icon: Menu,
-    items: [{ id: 'security', label: '安全与备份', icon: ShieldCheck }],
+    items: [primaryNav.find((item) => item.id === 'accounting')!, primaryNav.find((item) => item.id === 'calculator')!, { id: 'security', label: '安全与备份', icon: ShieldCheck }],
   },
 ];
 
@@ -174,6 +184,14 @@ const workflowSteps: Array<{
 ];
 
 const moduleGuide: GuideEntry[] = [
+  { id: 'accounting', number: '10', label: '记账本', icon: Library, responsibility: '手动记录收入、支出、转账、退款和余额调整，账目与凭证在本地加密保存。', firstAction: '确认账户与初始余额，选择账本，然后记一笔。', result: '按日期、账户、分类和账本查账，查看收支与余额，导入导出或完整备份。' },
+  { id: 'calculator', number: '11', label: '计算器', icon: Blocks, responsibility: '简单四则运算、小数、退格与正负号。', firstAction: '点击计算按钮或用键盘输入。', result: '只显示计算结果，由你自行确认是否记账。' },
+  {
+    id: 'png-cleaner', number: '09', label: 'PNG 隐私清洗', icon: ShieldCheck,
+    responsibility: '在本机检查 PNG 的文本、EXIF 等附加字段，保留原图并生成清洗副本。',
+    firstAction: '导入最多 200 张静态 PNG，查看检查摘要后选择深度或快速清洗。',
+    result: '下载干净 PNG，或继续进入图片收纳、水印和拼图工坊。',
+  },
   {
     id: 'security',
     number: '00',
@@ -344,6 +362,7 @@ export default function Home() {
 
   return (
     <TooltipProvider>
+      <SiteTools />
       <main className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
         <aside className="sidebar">
           <div className="brand-row">
@@ -626,6 +645,11 @@ export default function Home() {
           </div>
           {vaultReady ? (
             <div key={vault.session} className={vault.busy ? 'vault-busy' : ''}>
+              <div className="content-frame studio-frame" hidden={activeView !== 'accounting'}><AccountingPanel /></div>
+              <div className="content-frame studio-frame" hidden={activeView !== 'calculator'}><CalculatorPanel /></div>
+              <div className="content-frame studio-frame" hidden={activeView !== 'png-cleaner'}>
+                <PngCleanerPanel onOpen={setActiveView} />
+              </div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'prompts'}

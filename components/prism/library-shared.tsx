@@ -43,12 +43,14 @@ export function CollectionRail({
   onDelete: (id: string) => void;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [categoryQuery, setCategoryQuery] = useState('');
   const options = [
     { id: 'all', name: `全部${noun}` },
     { id: 'unfiled', name: '未分类' },
     ...collections,
   ];
   const current = options.find((item) => item.id === active) || options[0];
+  const filteredOptions = options.filter((item) => ['all', 'unfiled'].includes(item.id) || item.name.toLocaleLowerCase().includes(categoryQuery.trim().toLocaleLowerCase()));
   const countFor = (id: string) =>
     id === 'all'
       ? records.length
@@ -67,8 +69,8 @@ export function CollectionRail({
         </span>
         <ChevronDown aria-hidden="true" />
       </button>
-      <div className="collection-tabs desktop-workspace-only">
-        {options.map((c) => (
+      <details className="desktop-workspace-only collection-navigation" open><summary>分类导航 · {current.name} · {countFor(current.id)} 条 · 可折叠</summary><Input aria-label={`搜索${noun}分类`} value={categoryQuery} onChange={(event) => setCategoryQuery(event.target.value)} placeholder="搜索分类名称" /><div className="collection-tabs">
+        {filteredOptions.map((c) => (
           <div className="collection-tab-group" key={c.id}>
             <button
               type="button"
@@ -99,6 +101,7 @@ export function CollectionRail({
           </div>
         ))}
       </div>
+      </details>
       <p>
         <CircleAlert />
         分类可随时重命名或删除；删除分类不会删除资产。
@@ -109,8 +112,9 @@ export function CollectionRail({
         open={mobileOpen}
         title={`选择${noun}库`}
       >
+        <Input aria-label={`搜索${noun}分类`} value={categoryQuery} onChange={(event) => setCategoryQuery(event.target.value)} placeholder="搜索分类名称" />
         <div className="mobile-collection-list">
-          {options.map((collection) => (
+          {filteredOptions.map((collection) => (
             <div className="mobile-collection-row" key={collection.id}>
               <button
                 className={active === collection.id ? 'is-active' : ''}
