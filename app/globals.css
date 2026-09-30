@@ -9671,6 +9671,9 @@ html[data-theme='dark'] .theme-switch option { background: #231d2a; color: #f7f3
 .screenshot-batch-fields input, .screenshot-batch-fields select, .screenshot-draft input:not([type=checkbox]), .screenshot-draft textarea { width: 100%; min-width: 0; border: 1px solid var(--input); background: var(--card); color: var(--foreground); padding: 8px; border-radius: 4px; }
 .screenshot-row-category { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .screenshot-row-category select { width: 100%; min-width: 0; border: 1px solid var(--input); background: var(--card); color: var(--foreground); padding: 8px; border-radius: 4px; }
+.screenshot-row-details { border-top: 1px solid var(--border); padding-top: 8px; }
+.screenshot-row-details summary { cursor: pointer; min-height: 40px; font-size: 13px; }
+.screenshot-row-details > div { margin-top: 8px; }
 .screenshot-draft { display: grid; gap: 10px; border: 1px solid var(--border); background: var(--card); padding: 12px; }
 .screenshot-draft textarea { min-height: 86px; resize: vertical; line-height: 1.5; }
 .screenshot-draft-head, .screenshot-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -9851,6 +9854,21 @@ html[data-theme='dark'] .png-cleaner-summary {
   border-color: var(--border);
 }
 html[data-theme='dark'] .png-cleaner-summary :is(p, small, span) { color: var(--muted-foreground); }
+html[data-theme='dark'] .studio-page .record-list .record-row {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+  box-shadow: 4px 4px 0 #100d14;
+}
+html[data-theme='dark'] .studio-page .record-list .record-row:hover { background: var(--muted); }
+html[data-theme='dark'] .record-list .record-identity h3,
+html[data-theme='dark'] .record-list .prompt-languages pre { color: var(--foreground); }
+html[data-theme='dark'] .record-list .record-identity p,
+html[data-theme='dark'] .record-list .record-secret > p,
+html[data-theme='dark'] .record-list .record-note,
+html[data-theme='dark'] .record-list .prompt-languages strong { color: var(--muted-foreground); }
+html[data-theme='dark'] .record-list .record-secret-actions button,
+html[data-theme='dark'] .record-list .record-identity [data-slot='badge'] { color: #d4bbfa; }
 @media (max-width: 780px) {
   .ledger-overview small { font-size: 12px; }
   .png-cleaner-workspace { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }

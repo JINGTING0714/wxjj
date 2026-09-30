@@ -12,6 +12,10 @@ export type ScreenshotPromptDraft = {
   note: string;
   collectionId?: string;
   newCollection?: string;
+  author?: string;
+  origin?: string;
+  acquisition?: string;
+  tags?: string;
   include: boolean;
   saved: boolean;
 };
