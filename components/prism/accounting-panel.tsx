@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { CalculatorPanel } from './calculator-panel';
 import { BookOpen, Download, Plus, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -103,6 +104,8 @@ export function AccountingPanel() {
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [formCalculatorOpen, setFormCalculatorOpen] = useState(false);
   const [manage, setManage] = useState<
     'accounts' | 'categories' | 'books' | null
   >(null);
@@ -319,6 +322,8 @@ export function AccountingPanel() {
           </>
         }
       />
+      <button className="ledger-calculator-button" type="button" onClick={() => setCalculatorOpen((value) => !value)} aria-expanded={calculatorOpen}>计算器</button>
+      <div className="ledger-floating-calculator" hidden={!calculatorOpen}><button type="button" onClick={() => setCalculatorOpen(false)} aria-label="关闭计算器">关闭</button><CalculatorPanel compact /></div>
       {message && <output className="ledger-message">{message}</output>}
       {workspace.saveError && (
         <p role="alert">
@@ -671,6 +676,7 @@ export function AccountingPanel() {
                 }
               />
             </label>
+            <div className="ledger-form-calculator"><Button type="button" variant="outline" onClick={() => setFormCalculatorOpen((value) => !value)}>{formCalculatorOpen ? '收起计算器' : '打开计算器'}</Button>{formCalculatorOpen && <CalculatorPanel compact canUse onUse={(value) => { const input = document.getElementById('ledger-amount') as HTMLInputElement | null; if (input) { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); } }} />}</div>
             <label htmlFor="ledger-account">
               {kind === 'transfer' ? '转出账户' : '账户'}
               {selection('accounts', 'account', editing?.accountId)}

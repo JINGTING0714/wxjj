@@ -26,6 +26,7 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { FileImportDialog } from './file-import-dialog';
+import { ScreenshotImportDialog } from './screenshot-import-dialog';
 import { ProfileLibraryPanel } from './profile-library-panel';
 import {
   CustomFieldList,
@@ -332,7 +333,7 @@ function SimpleLibraryPanel({
     }
     const form = new FormData(event.currentTarget);
     const languages = kind === 'prompt' ? { promptEnglish: String(form.get('promptEnglish') || '').trim(), promptChinese: String(form.get('promptChinese') || '').trim(), promptUnconfirmed: String(form.get('promptUnconfirmed') || '').trim() } : {};
-    const secret = kind === 'prompt' ? editingAsset?.secret || languages.promptEnglish || languages.promptChinese || languages.promptUnconfirmed || '' : String(form.get('secret') || '').trim();
+    const secret = kind === 'prompt' ? languages.promptEnglish || languages.promptChinese || languages.promptUnconfirmed || '' : String(form.get('secret') || '').trim();
     if (!secret) {
       setFormError(`${copy.noun}内容不能为空。`);
       return;
@@ -508,6 +509,7 @@ function SimpleLibraryPanel({
             void refresh().catch((e) => setFormError(String(e)));
           }}
         />
+        {kind === 'prompt' && <ScreenshotImportDialog collections={collections} onImported={() => { void refresh().catch((e) => setFormError(String(e))); }} />}
       </div>
       <SectionHead
         description={copy.description}
@@ -591,14 +593,15 @@ function SimpleLibraryPanel({
         />
         {filtered.map((asset) => {
           const isRevealed = revealed.has(asset.id);
+          const RecordContainer = kind === 'prompt' ? 'div' : 'details';
           const visibleValue = isRevealed
             ? asset.secret
             : kind === 'prompt'
               ? '••••••••••••••••••••'
               : secretPreview(asset.secret);
           return (
-            <details className="asset-record-fold" key={asset.id}>
-            <summary>{asset.title} · {copy.noun} · {asset.images.length} 张例图 · {asset.tags.join(' / ') || '未添加标签'}</summary>
+            <RecordContainer className={`asset-record-fold ${kind === 'prompt' ? 'prompt-record-open' : ''}`} key={asset.id}>
+            {kind !== 'prompt' && <summary>{asset.title} · {copy.noun} · {asset.images.length} 张例图 · {asset.tags.join(' / ') || '未添加标签'}</summary>}
             <article className="record-row">
               <div className="record-identity">
                 <SelectItem
@@ -623,7 +626,7 @@ function SimpleLibraryPanel({
                 </div>
               </div>
               <div className="record-secret">
-                {kind === 'prompt' ? <div className="prompt-languages">{Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 原文保留'}</strong>{isRevealed && <pre>{content}</pre>}</div>)}</div> :
+                {kind === 'prompt' ? <div className="prompt-languages">{Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 原文保留'}</strong>{(language !== 'unconfirmed' || isRevealed) && <pre>{content}</pre>}</div>)}</div> :
                 <div
                   className={`record-secret-value ${!isRevealed ? 'is-obscured' : ''}`}
                 >
@@ -638,11 +641,11 @@ function SimpleLibraryPanel({
                   </p>
                 )}
                 <div className="record-secret-actions">
-                  <button onClick={() => toggleReveal(asset.id)} type="button">
+                  {(kind !== 'prompt' || Boolean(asset.note || promptLanguages(asset).unconfirmed)) && <button onClick={() => toggleReveal(asset.id)} type="button">
                     {isRevealed ? <EyeOff /> : <Eye />}{' '}
-                    {isRevealed ? '隐藏' : '显示'}
-                  </button>
-                  <button
+                    {isRevealed ? '隐藏私人内容' : '显示私人内容'}
+                  </button>}
+                  {(kind !== 'prompt' || promptLanguages(asset).english) && <button
                     onClick={() => void copyText(
                         kind === 'profile'
                           ? formatProfileCode(asset.secret)
@@ -656,8 +659,8 @@ function SimpleLibraryPanel({
                       : kind === 'profile'
                         ? '复制 Profile 参数'
                         : '复制短码'}
-                  </button>
-                  {kind === 'prompt' && <><button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>{promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待确认原文</button>}</>}
+                  </button>}
+                  {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>}{isRevealed && promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待确认原文</button>}</>}
                 </div>
                 <p>
                   <strong>{asset.author}</strong>
@@ -680,14 +683,14 @@ function SimpleLibraryPanel({
                 )}
               </div>
               <div className="record-note">
-                <p>{asset.note || '暂无私人备注。'}</p>
+                <p>{kind === 'prompt' && !isRevealed ? '私人备注已隐藏。' : asset.note || '暂无私人备注。'}</p>
                 {asset.stageNote && (
                   <p>
                     <strong>阶段说明：</strong>
                     {asset.stageNote}
                   </p>
                 )}
-                <CustomFieldList fields={asset.customFields} />
+                {(kind !== 'prompt' || isRevealed) && <CustomFieldList fields={asset.customFields} />}
               </div>
               <div className="row-actions">
                 <button
@@ -706,7 +709,7 @@ function SimpleLibraryPanel({
                 </button>
               </div>
             </article>
-            </details>
+            </RecordContainer>
           );
         })}
         {filtered.length === 0 && (

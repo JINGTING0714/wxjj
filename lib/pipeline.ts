@@ -43,3 +43,21 @@ export function mergeSources(
   }
   return next;
 }
+
+/** Hash only same-sized files, one at a time, to find exact duplicate images. */
+export async function duplicateSourceIndexes(sources: PipelineSource[]): Promise<number[]> {
+  const bySize = new Map<number, number[]>();
+  sources.forEach((source, index) => bySize.set(source.file.size, [...(bySize.get(source.file.size) || []), index]));
+  const duplicate: number[] = [];
+  for (const indexes of bySize.values()) {
+    if (indexes.length < 2) continue;
+    const known = new Map<string, number>();
+    for (const index of indexes) {
+      const digest = await crypto.subtle.digest('SHA-256', await sources[index].file.arrayBuffer());
+      const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+      if (known.has(hash)) duplicate.push(index);
+      else known.set(hash, index);
+    }
+  }
+  return duplicate;
+}

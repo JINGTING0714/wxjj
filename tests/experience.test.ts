@@ -210,6 +210,20 @@ void test('bilingual CSV imports languages separately and keeps unrelated custom
     unconfirmed: '',
   });
 });
+void test('unlabeled bilingual cells stay in language fields and suspect notes require review', async () => {
+  const plain = await parseAssetFile(new File([
+    '1,cinematic portrait with violet light and detailed composition --ar 2:3,电影感紫色光影肖像，细节丰富的画面构图',
+  ], 'plain.csv'), 'prompt');
+  assert.match(plain.rows[0].promptEnglish || '', /cinematic portrait/);
+  assert.match(plain.rows[0].promptChinese || '', /电影感/);
+  assert.equal(plain.rows[0].customFields.some((field) => /电影感/.test(field.value)), false);
+  const suspect = await parseAssetFile(new File([
+    '名称,提示词,备注\n一,cinematic portrait --ar 2:3,电影感紫色光影肖像与柔和的自然光线，画面构图富有层次和景深效果，请完整保留这段中文译文',
+  ], 'suspect.csv'), 'prompt');
+  assert.equal(suspect.rows[0].note, '');
+  assert.equal(suspect.rows[0].include, false);
+  assert.match(suspect.rows[0].promptUnconfirmed || '', /电影感/);
+});
 const calculate = (keys: string[]) =>
   keys.reduce(calculatorKey, calculatorInitial());
 void test('calculator handles all operations, decimals, repeat equals, sign, clear and backspace', () => {

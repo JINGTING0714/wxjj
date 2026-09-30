@@ -24,7 +24,7 @@ const keys = [
   '.',
   '=',
 ];
-export function CalculatorPanel() {
+export function CalculatorPanel({ compact = false, onUse, canUse = false }: { compact?: boolean; onUse?: (value: string) => void; canUse?: boolean }) {
   const [state, setState] = useState(calculatorInitial);
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -49,13 +49,13 @@ export function CalculatorPanel() {
     return () => element.removeEventListener('keydown', keyDown);
   }, []);
   return (
-    <div className="studio-page">
-      <SectionHead
+    <div className={compact ? 'calculator-compact' : 'studio-page'}>
+      {!compact && <SectionHead
         eyebrow="QUICK CALCULATOR"
         number="11"
         title="计算器"
         description="简单计算，手动确认。计算结果不会自动创建账目。"
-      />
+      />}
       <section ref={root} className="prism-calculator" aria-label="简易计算器">
         <small>
           {state.stored !== undefined
@@ -67,6 +67,7 @@ export function CalculatorPanel() {
           {keys.map((key) => (
             <Button
               key={key}
+              type="button"
               className={key === '=' ? 'calculator-equal' : ''}
               variant={
                 ['+', '−', '×', '÷', '='].includes(key) ? 'default' : 'outline'
@@ -86,6 +87,7 @@ export function CalculatorPanel() {
             </Button>
           ))}
         </div>
+        {onUse && <Button type="button" className="calculator-use" disabled={!canUse || !Number.isFinite(Number(state.display))} onClick={() => onUse(state.display)} variant="outline">将结果填入当前金额草稿</Button>}
       </section>
     </div>
   );

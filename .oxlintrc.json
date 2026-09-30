@@ -29,6 +29,7 @@
     "build/**",
     "dist/**",
     "coverage/**",
+    "public/ocr/**",
     "next-env.d.ts"
   ],
   "rules": {

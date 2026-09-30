@@ -118,6 +118,22 @@ export function PngCleanerPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const purge = (event: Event) => {
+      const detail = (event as CustomEvent<{ originalIds: string[]; promises: Promise<unknown>[] }>).detail;
+      const originals = new Set(detail.originalIds.map((id) => id.replace(/^png-clean-/, '')));
+      if (!originals.size) return;
+      setState((current) => ({
+        ...current,
+        sources: current.sources.filter((source) => !originals.has(source.id)),
+        results: current.results.filter((result) => !originals.has(result.id)),
+      }));
+      detail.promises.push(workspace.flush());
+    };
+    window.addEventListener('prism:purge-png-images', purge);
+    return () => window.removeEventListener('prism:purge-png-images', purge);
+  }, [workspace.ready]);
+
   const run = async (sources: PipelineSource[], mode?: CleanMode) => {
     if (controller.current || !sources.length) return;
     const control = new AbortController();

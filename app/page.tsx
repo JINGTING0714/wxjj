@@ -19,6 +19,7 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  SunMoon,
   Stamp,
   type LucideIcon,
 } from 'lucide-react';
@@ -45,7 +46,7 @@ import { useVault } from '@/components/prism/vault-provider';
 import { MobileWorkspaceSheet } from '@/components/prism/mobile-workspace';
 import { PngCleanerPanel } from '@/components/prism/png-cleaner-panel';
 import { AccountingPanel } from '@/components/prism/accounting-panel';
-import { CalculatorPanel } from '@/components/prism/calculator-panel';
+import { SalesPanel } from '@/components/prism/sales-panel';
 import { SiteTools } from '@/components/prism/site-tools';
 
 type ViewId =
@@ -60,7 +61,7 @@ type ViewId =
   | 'collage'
   | 'png-cleaner'
   | 'accounting'
-  | 'calculator'
+  | 'sales'
   | 'security';
 type NavEntry = { id: ViewId; label: string; icon: LucideIcon; count?: number };
 
@@ -75,8 +76,6 @@ type GuideEntry = {
 };
 
 const primaryNav: NavEntry[] = [
-  { id: 'accounting', label: '记账本', icon: Library },
-  { id: 'calculator', label: '计算器', icon: Blocks },
   { id: 'overview' as const, label: '开始与总览', icon: Aperture },
   { id: 'prompts' as const, label: '提示词库', icon: Library },
   { id: 'profiles' as const, label: 'Profile 库', icon: KeyRound },
@@ -86,10 +85,12 @@ const primaryNav: NavEntry[] = [
 ];
 
 const pipelineNav: NavEntry[] = [
-  { id: 'png-cleaner', label: 'PNG 隐私清洗', icon: ShieldCheck },
   { id: 'gallery' as const, label: '图片收纳', icon: Folder },
+  { id: 'png-cleaner', label: 'PNG 隐私清洗', icon: ShieldCheck },
   { id: 'watermark' as const, label: '水印工坊', icon: Stamp },
   { id: 'collage' as const, label: '拼图工坊', icon: Grid3X3 },
+  { id: 'sales', label: '售图核对', icon: Grid3X3 },
+  { id: 'accounting', label: '记账本', icon: Library },
 ];
 
 type MobileNavGroupId = 'assets' | 'workshop' | 'library' | 'more';
@@ -113,23 +114,20 @@ const mobileNavGroups: Array<{
     label: '工坊',
     icon: Stamp,
     items: pipelineNav.filter((item) =>
-      ['png-cleaner', 'watermark', 'collage'].includes(item.id),
+      ['gallery', 'png-cleaner', 'watermark', 'collage', 'sales'].includes(item.id),
     ),
   },
   {
     id: 'library',
-    label: '库',
+    label: '记账',
     icon: Library,
-    items: [
-      primaryNav.find((item) => item.id === 'watermarks')!,
-      pipelineNav.find((item) => item.id === 'gallery')!,
-    ],
+    items: [pipelineNav.find((item) => item.id === 'accounting')!],
   },
   {
     id: 'more',
     label: '更多',
     icon: Menu,
-    items: [primaryNav.find((item) => item.id === 'accounting')!, primaryNav.find((item) => item.id === 'calculator')!, { id: 'security', label: '安全与备份', icon: ShieldCheck }],
+    items: [primaryNav.find((item) => item.id === 'watermarks')!, { id: 'security', label: '安全与备份', icon: ShieldCheck }],
   },
 ];
 
@@ -185,7 +183,6 @@ const workflowSteps: Array<{
 
 const moduleGuide: GuideEntry[] = [
   { id: 'accounting', number: '10', label: '记账本', icon: Library, responsibility: '手动记录收入、支出、转账、退款和余额调整，账目与凭证在本地加密保存。', firstAction: '确认账户与初始余额，选择账本，然后记一笔。', result: '按日期、账户、分类和账本查账，查看收支与余额，导入导出或完整备份。' },
-  { id: 'calculator', number: '11', label: '计算器', icon: Blocks, responsibility: '简单四则运算、小数、退格与正负号。', firstAction: '点击计算按钮或用键盘输入。', result: '只显示计算结果，由你自行确认是否记账。' },
   {
     id: 'png-cleaner', number: '09', label: 'PNG 隐私清洗', icon: ShieldCheck,
     responsibility: '在本机检查 PNG 的文本、EXIF 等附加字段，保留原图并生成清洗副本。',
@@ -317,10 +314,27 @@ export default function Home() {
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
   const [globalQuery, setGlobalQuery] = useState('');
+  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
   const [mobileNavOpen, setMobileNavOpen] = useState<MobileNavGroupId | null>(
     null,
   );
   const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('prism-theme');
+    if (saved === 'light' || saved === 'dark') setTheme(saved);
+  }, []);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      document.documentElement.dataset.theme = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+      document.documentElement.style.colorScheme = document.documentElement.dataset.theme;
+    };
+    apply();
+    media.addEventListener('change', apply);
+    localStorage.setItem('prism-theme', theme);
+    return () => media.removeEventListener('change', apply);
+  }, [theme]);
 
   useEffect(() => {
     if (vault.status !== 'unlocked') setGlobalQuery('');
@@ -363,7 +377,7 @@ export default function Home() {
   return (
     <TooltipProvider>
       <SiteTools />
-      <main className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
+      <main className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' ? 'editor-active' : ''}`}>
         <aside className="sidebar">
           <div className="brand-row">
             <div className="brand-mark">
@@ -423,6 +437,7 @@ export default function Home() {
           </nav>
 
           <div className="sidebar-footer">
+            <label className="theme-switch"><SunMoon aria-hidden="true" /><span className="sr-only">外观模式</span><select aria-label="外观模式" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}><option value="system">跟随系统</option><option value="light">日间</option><option value="dark">夜间</option></select></label>
             <div className="vault-status">
               <ShieldCheck />
               {!collapsed && (
@@ -465,6 +480,7 @@ export default function Home() {
               <kbd>⌘ K</kbd>
             </div>
             <div className="topbar-actions">
+              <label className="theme-switch topbar-theme"><SunMoon aria-hidden="true" /><select aria-label="外观模式" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}><option value="system">跟随系统</option><option value="light">日间</option><option value="dark">夜间</option></select></label>
               <span className="privacy-pill">
                 <LockKeyhole /> 数据从不离开此设备
               </span>
@@ -480,6 +496,7 @@ export default function Home() {
               </Button>
             </div>
           </header>
+          {(activeView === 'watermark' || activeView === 'collage') && <div className="mobile-editor-header mobile-workspace-only"><button type="button" onClick={() => setActiveView('overview')}><ChevronLeft /> 返回</button><strong>{activeView === 'watermark' ? '水印工坊' : '拼图工坊'}</strong><span>本机编辑</span></div>}
 
           <div className="content-frame" hidden={activeView !== 'overview'}>
             <section className="editorial-head">
@@ -646,7 +663,6 @@ export default function Home() {
           {vaultReady ? (
             <div key={vault.session} className={vault.busy ? 'vault-busy' : ''}>
               <div className="content-frame studio-frame" hidden={activeView !== 'accounting'}><AccountingPanel /></div>
-              <div className="content-frame studio-frame" hidden={activeView !== 'calculator'}><CalculatorPanel /></div>
               <div className="content-frame studio-frame" hidden={activeView !== 'png-cleaner'}>
                 <PngCleanerPanel onOpen={setActiveView} />
               </div>
@@ -698,8 +714,9 @@ export default function Home() {
                 className="content-frame studio-frame"
                 hidden={activeView !== 'collage'}
               >
-                <CollagePanel />
+                <CollagePanel onOpenSales={() => setActiveView('sales')} />
               </div>
+              <div className="content-frame studio-frame" hidden={activeView !== 'sales'}><SalesPanel onOpenCollage={() => setActiveView('collage')} /></div>
             </div>
           ) : (
             activeView !== 'overview' &&
@@ -744,7 +761,7 @@ export default function Home() {
                 aria-current={active ? 'page' : undefined}
                 className={active ? 'is-active' : ''}
                 key={group.id}
-                onClick={() => setMobileNavOpen(group.id)}
+                onClick={() => group.id === 'library' ? setActiveView('accounting') : setMobileNavOpen(group.id)}
                 type="button"
               >
                 <Icon aria-hidden="true" />

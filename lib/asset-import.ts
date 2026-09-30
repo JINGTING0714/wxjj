@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { AssetKind, CustomField } from './prism-types';
+import { classifyImportedPromptText } from './prompt-language';
 
 export type ImportRow = {
   id: string;
@@ -139,6 +140,7 @@ function looksLikePrompt(text: string) {
     text.length >= 18 &&
     !/^https?:\/\/\S+$/.test(text) &&
     (/--(?:ar|sref|p|v|stylize|s)\b/i.test(text) ||
+      [...text.matchAll(/\p{Script=Han}/gu)].length >= 10 ||
       text.split(/[\s,，]+/).length >= 6 ||
       text.length >= 36)
   );
@@ -212,14 +214,24 @@ export function tableRows(
               (/[a-z]/i.test(value) || cells.length === 1)),
       );
       if (candidates.length) {
-        entry.secret = [...candidates].sort((a, b) => b.length - a.length)[0];
+        if (kind === 'prompt') {
+          const mapped = candidates.map((value) => ({ value, ...classifyImportedPromptText(value) }));
+          entry.promptEnglish = mapped.map((item) => item.english).filter(Boolean).join('\n');
+          entry.promptChinese = mapped.map((item) => item.chinese).filter(Boolean).join('\n');
+          entry.promptUnconfirmed = mapped.map((item) => item.unconfirmed).filter(Boolean).join('\n');
+          entry.secret = entry.promptEnglish || entry.promptChinese || entry.promptUnconfirmed || '';
+          if (mapped.filter((item) => item.english).length > 1 || mapped.filter((item) => item.chinese).length > 1) {
+            entry.include = false;
+            entry.warnings.push('同一行有多个同语言候选，请确认是否属于同一条提示词。');
+          }
+        } else entry.secret = [...candidates].sort((a, b) => b.length - a.length)[0];
         entry.title = cells.find((value) => /^\d{1,8}$/.test(value)) || '';
         entry.warnings.push(
           '没有标准表头，已按内容识别，请核对内容列；不会按固定长度截断。',
         );
         cells
           .filter(
-            (value) => value && value !== entry.secret && value !== entry.title,
+            (value) => value && value !== entry.secret && value !== entry.title && !(kind === 'prompt' && candidates.includes(value)),
           )
           .forEach((value, i) =>
             entry.customFields.push({
@@ -228,6 +240,20 @@ export function tableRows(
               value,
             }),
           );
+      }
+    }
+    if (kind === 'prompt') {
+      if (entry.secret && entry.promptEnglish === undefined && entry.promptChinese === undefined && entry.promptUnconfirmed === undefined) {
+        const mapped = classifyImportedPromptText(entry.secret);
+        entry.promptEnglish = mapped.english;
+        entry.promptChinese = mapped.chinese;
+        entry.promptUnconfirmed = mapped.unconfirmed;
+      }
+      if (entry.note && looksLikePrompt(entry.note) && (entry.note.length >= 36 || [...entry.note.matchAll(/\p{Script=Han}/gu)].length >= 12 || /--(?:ar|sref|p|v)\b/i.test(entry.note))) {
+        entry.promptUnconfirmed = [entry.promptUnconfirmed, entry.note].filter(Boolean).join('\n');
+        entry.note = '';
+        entry.include = false;
+        entry.warnings.push('备注中疑似包含 Prompt 或译文，已移到待确认；请校对后再勾选。');
       }
     }
     if (kind === 'prompt' && !entry.secret) entry.secret = entry.promptEnglish || entry.promptChinese || entry.promptUnconfirmed || '';
@@ -510,6 +536,28 @@ export function parseTextBlocks(
     const secret = lines.join('\n').trim();
     if (secret) {
       entry.secret = secret;
+      if (kind === 'prompt') {
+        const mapped = classifyImportedPromptText(secret);
+        entry.promptEnglish = mapped.english;
+        entry.promptChinese = mapped.chinese;
+        entry.promptUnconfirmed = mapped.unconfirmed;
+        if (entry.note && looksLikePrompt(entry.note) && (entry.note.length >= 36 || [...entry.note.matchAll(/\p{Script=Han}/gu)].length >= 12)) {
+          entry.promptUnconfirmed = [entry.promptUnconfirmed, entry.note].filter(Boolean).join('\n');
+          entry.note = '';
+          entry.include = false;
+          entry.warnings.push('备注疑似译文，已移至待确认，请校对。');
+        }
+        const previous = result[result.length - 1];
+        if (!entry.title && mapped.chinese && !mapped.english && previous?.promptEnglish && !previous.promptChinese && !entry.images.length) {
+          previous.promptChinese = mapped.chinese;
+          previous.promptUnconfirmed = [previous.promptUnconfirmed, mapped.unconfirmed].filter(Boolean).join('\n');
+          previous.include = false;
+          previous.warnings.push('相邻中文段落可能是上条译文，已列为待校对配对。');
+          entry = newImportRow(kind, origin, sheet);
+          lines = [];
+          return;
+        }
+      }
       entry.author ||= author;
       entry.title ||= String(result.length + 1);
       if (!entry.author) entry.warnings.push('未识别作者');

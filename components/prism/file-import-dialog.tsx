@@ -241,17 +241,17 @@ function PreviewRow({
         </label>
       </div>
       <div className="import-secret">
-        <Button onClick={() => setShow(!show)} size="sm" variant="outline">
+        {row.kind !== 'prompt' && <Button onClick={() => setShow(!show)} size="sm" variant="outline">
           {show ? <EyeOff /> : <Eye />}
           {show ? '隐藏内容' : `查看 / 校对内容（${row.secret.length} 字符）`}
-        </Button>
-        {show && (
+        </Button>}
+        {(show || row.kind === 'prompt') && (
           <>
-          <textarea
+          {row.kind !== 'prompt' && <textarea
             aria-label="导入内容"
             onChange={(e) => onChange({ secret: e.target.value })}
             value={row.secret}
-          />
+          />}
           {row.kind === 'prompt' && <div className="prompt-language-editor"><p>双语独立保存；不确定语言的原文保留待确认。以下内容将在确认导入后写入。</p>{(['promptEnglish', 'promptChinese', 'promptUnconfirmed'] as const).map((key) => <label key={key}>{key === 'promptEnglish' ? '英文 Prompt' : key === 'promptChinese' ? '中文 Prompt' : '待确认原文'}<textarea value={importedPromptLanguages(row)[key === 'promptEnglish' ? 'english' : key === 'promptChinese' ? 'chinese' : 'unconfirmed']} onChange={(event) => { const detected = importedPromptLanguages(row); onChange({ promptEnglish: detected.english, promptChinese: detected.chinese, promptUnconfirmed: detected.unconfirmed, [key]: event.target.value }); }} /></label>)}</div>}
           </>
         )}
@@ -454,7 +454,7 @@ export function FileImportDialog({
     setBusy(true);
     setError('');
     try {
-      if (selected.some(({ row }) => !row.title.trim() || !row.secret.trim()))
+      if (selected.some(({ row }) => !row.title.trim() || (row.kind === 'prompt' ? !Object.values(importedPromptLanguages(row)).some((value) => value.trim()) : !row.secret.trim())))
         throw new Error('有选中条目没有名称或内容，请补齐或取消选中。');
       if (
         !(await confirmation.confirmShortCodes(
@@ -538,6 +538,7 @@ export function FileImportDialog({
             record.promptEnglish = languages.english;
             record.promptChinese = languages.chinese;
             record.promptUnconfirmed = languages.unconfirmed;
+            record.secret = languages.english || languages.chinese || languages.unconfirmed;
           }
           if (kind === 'profile') {
             record.profileCodes = grouped.map((r) => ({

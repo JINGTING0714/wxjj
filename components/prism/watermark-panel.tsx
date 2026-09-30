@@ -333,6 +333,28 @@ export function WatermarkPanel({
     window.addEventListener('prism:send-to-watermark', receive);
     return () => window.removeEventListener('prism:send-to-watermark', receive);
   }, [workspace, setState]);
+  useEffect(() => {
+    const purge = (event: Event) => {
+      const detail = (event as CustomEvent<{ sourceIds: string[]; originalIds: string[]; promises: Promise<unknown>[] }>).detail;
+      const sold = new Set(detail.sourceIds);
+      const originals = new Set<string>();
+      for (const current of workspace.current.current.batches)
+        for (const output of current.outputs)
+          if (sold.has(output.id)) originals.add(output.sourceId);
+      detail.originalIds.push(...originals);
+      setState((current) => ({ ...current, batches: current.batches.map((item) => ({
+        ...item,
+        sources: item.sources.filter((source) => !originals.has(source.id)),
+        outputs: item.outputs.filter((output) => !sold.has(output.id)),
+        retryIds: item.retryIds.filter((id) => !originals.has(id)),
+        job: null,
+      })) }));
+      detail.promises.push(workspace.flush());
+      window.dispatchEvent(new CustomEvent('prism:purge-png-images', { detail }));
+    };
+    window.addEventListener('prism:purge-sold-images', purge);
+    return () => window.removeEventListener('prism:purge-sold-images', purge);
+  }, [workspace.ready]);
   const run = (target: Batch, resume = false) => {
     if (tasks.current.has(target.id)) return;
     const job =

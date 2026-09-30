@@ -37,6 +37,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SectionHead } from '@/components/prism/studio-shared';
 import { useWorkspaceState, useFileUrls } from './use-workspace-state';
 import {
+  duplicateSourceIndexes,
   mergeSources,
   moveSource,
   shuffleSources,
@@ -85,7 +86,7 @@ const numberPositions: Array<{ value: NumberPosition; label: string }> = [
   { value: 'bottom-right', label: '右下' },
 ];
 
-export function CollagePanel() {
+export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
   const vault = useVault();
   const confirmation = useConfirmation();
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
@@ -116,10 +117,13 @@ export function CollagePanel() {
     numberShape: 'square' as 'none' | 'square' | 'pill',
     numberWeight: 600 as 400 | 600 | 800,
     numberDigits: 3,
+    lastJobId: '',
+    lastGenerated: null as { jobId: string; startNumber: number; sources: PipelineSource[]; boardIds: string[] } | null,
     format: 'image/jpeg' as 'image/png' | 'image/jpeg',
     job: null as {
       id: string;
       files: File[];
+      sources?: PipelineSource[];
       options: CollageOptions;
       nextBoard: number;
     } | null,
@@ -399,14 +403,27 @@ export function CollagePanel() {
     ? Math.ceil(files.length / (activeGrid.columns * activeGrid.rows))
     : 0;
 
-  const generate = (resume = false) => {
+  const generate = async (resume = false) => {
     if (processing || !workspace.ready) return;
+    if (!resume) {
+      try {
+        const duplicate = await duplicateSourceIndexes(state.sources);
+        if (duplicate.length) {
+          setError(`发现 ${duplicate.length} 张内容完全相同的重复图片（队列位置 ${duplicate.slice(0, 10).map((index) => index + 1).join('、')}）。请先移除重复项；一个号码只对应一张有效图片。`);
+          return;
+        }
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : '重复图片检查失败，请重试。');
+        return;
+      }
+    }
     const job =
       resume && state.job
         ? state.job
         : {
             id: crypto.randomUUID(),
             files,
+            sources: state.sources,
             nextBoard: 0,
             options: {
               ratioWidth: activeRatio.w,
@@ -488,7 +505,10 @@ export function CollagePanel() {
           job.nextBoard,
           job.id,
         );
-        setState((current) => ({ ...current, job: null }));
+        setState((current) => ({ ...current, job: null, lastJobId: job.id, lastGenerated: {
+          jobId: job.id, startNumber: job.options.startNumber, sources: job.sources || current.sources,
+          boardIds: Array.from({ length: Math.ceil(job.files.length / (job.options.columns * job.options.rows)) }, (_, index) => `${job.id}-${index}`),
+        } }));
         await workspace.flush();
       } catch (reason) {
         if (!signal.aborted)
@@ -520,6 +540,44 @@ export function CollagePanel() {
       .forEach((o) => URL.revokeObjectURL(o.url));
     setOutputs((current) => current.filter((o) => !ids.includes(o.id)));
     window.dispatchEvent(new CustomEvent('prism:gallery-refresh'));
+  };
+
+  useEffect(() => {
+    const purge = (event: Event) => {
+      const detail = (event as CustomEvent<{ sourceIds: string[]; boardIds: string[]; promises: Promise<unknown>[] }>).detail;
+      const sourceIds = new Set(detail.sourceIds);
+      const boardIds = new Set(detail.boardIds);
+      setState((current) => ({
+        ...current,
+        sources: current.sources.filter((item) => !sourceIds.has(item.id)),
+        job: null,
+        lastGenerated: null,
+      }));
+      setOutputs((current) => current.filter((item) => !boardIds.has(item.id)));
+      detail.promises.push(workspace.flush());
+    };
+    window.addEventListener('prism:purge-sold-images', purge);
+    return () => window.removeEventListener('prism:purge-sold-images', purge);
+  }, [workspace.ready]);
+
+  const createSaleRound = async () => {
+    if (!state.lastGenerated || processing || !workspace.ready) return;
+    try {
+      const frozen = state.lastGenerated;
+      const sources = frozen.sources;
+      const duplicate = await duplicateSourceIndexes(sources);
+      if (duplicate.length) throw new Error(`队列第 ${duplicate.slice(0, 10).map((index) => index + 1).join('、')} 张与前面图片重复，请先移除后再固定编号。`);
+      await workspace.flush();
+      await new Promise<void>((resolve, reject) => window.dispatchEvent(new CustomEvent('prism:create-sale-round', { detail: {
+        sources,
+        startNumber: frozen.startNumber,
+        boardIds: frozen.boardIds,
+        complete: (error?: Error) => error ? reject(error) : resolve(),
+      } })));
+      onOpenSales();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '保存编号对应关系失败');
+    }
   };
 
   const downloadAll = async () => {
@@ -609,6 +667,7 @@ export function CollagePanel() {
       {workspace.saveError && (
         <p className="error-banner">{workspace.saveError}</p>
       )}
+      <div className="sale-round-entry"><Button disabled={!state.lastGenerated || processing || !workspace.ready} onClick={() => void createSaleRound()} variant="outline">用最近生成的拼图创建售图场次</Button></div>
       <MobileWorkspace
         className="collage-mobile-workspace"
         onPanelClose={() => {
