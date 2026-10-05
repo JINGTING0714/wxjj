@@ -114,7 +114,7 @@ function WaitingBatch({
   const send = () => {
     window.dispatchEvent(
       new CustomEvent('prism:send-to-collage', {
-        detail: qualified.map((o) => ({ id: o.id, file: o.file })),
+        detail: qualified.map((o) => ({ id: o.id, file: o.file, batchId: batch.id, batchTitle: batch.title })),
       }),
     );
     onOpenCollage();
@@ -180,7 +180,7 @@ function WaitingBatch({
                   else if (batch.autoSend)
                     window.dispatchEvent(
                       new CustomEvent('prism:send-to-collage', {
-                        detail: [{ id: output.id, file: output.file }],
+                        detail: [{ id: output.id, file: output.file, batchId: batch.id, batchTitle: batch.title }],
                       }),
                     );
                   onChange((b) => ({
@@ -415,7 +415,7 @@ export function WatermarkPanel({
             )
               window.dispatchEvent(
                 new CustomEvent('prism:send-to-collage', {
-                  detail: [{ id: output.id, file }],
+                  detail: [{ id: output.id, file, batchId: target.id, batchTitle: target.title }],
                 }),
               );
           },
@@ -444,7 +444,7 @@ export function WatermarkPanel({
     <div className="studio-page watermark-page">
       <SectionHead
         eyebrow="WATERMARK PIPELINE"
-        number="07"
+        number="08"
         title="水印工坊"
         description="最多 5 批图片各用一套水印，等待区按批次分开。视频另有独立工区，最多 10 个。"
       />

@@ -15,18 +15,15 @@ import {
   Library,
   LockKeyhole,
   Menu,
-  Plus,
-  Search,
   Settings2,
   ShieldCheck,
   SunMoon,
   Stamp,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Tooltip,
   TooltipContent,
@@ -114,7 +111,9 @@ const mobileNavGroups: Array<{
     label: '工坊',
     icon: Stamp,
     items: pipelineNav.filter((item) =>
-      ['gallery', 'png-cleaner', 'watermark', 'collage', 'sales'].includes(item.id),
+      ['gallery', 'png-cleaner', 'watermark', 'collage', 'sales'].includes(
+        item.id,
+      ),
     ),
   },
   {
@@ -127,7 +126,10 @@ const mobileNavGroups: Array<{
     id: 'more',
     label: '更多',
     icon: Menu,
-    items: [primaryNav.find((item) => item.id === 'watermarks')!, { id: 'security', label: '安全与备份', icon: ShieldCheck }],
+    items: [
+      primaryNav.find((item) => item.id === 'watermarks')!,
+      { id: 'security', label: '安全与备份', icon: ShieldCheck },
+    ],
   },
 ];
 
@@ -141,51 +143,77 @@ const workflowSteps: Array<{
     id: 'security',
     number: '01',
     title: '建立保险库',
-    detail: '创建密码，让所有文字与图片在本机加密保存。',
+    detail: '设置密码和恢复密钥，定期完整备份。',
   },
   {
-    id: 'profiles',
+    id: 'prompts',
     number: '02',
     title: '整理资产',
-    detail: '建立提示词、Profile、Moodboard 与水印分类。',
+    detail: '导入提示词、Profile、Moodboard 和水印；看例图、复制使用。',
   },
   {
     id: 'recipes',
     number: '03',
-    title: '组合配方',
-    detail: '从库中多选或手填短码，分类记录化学反应。',
+    title: '组合与创作',
+    detail: '搭配 Profile / Moodboard，复制参数到 Midjourney 刷图。',
   },
   {
     id: 'gallery',
     number: '04',
-    title: '收纳成片',
-    detail: '把每日刷图按自己的图库与标签归档。',
+    title: '收纳原图',
+    detail: '按项目或日期整理成片。',
+  },
+  {
+    id: 'png-cleaner',
+    number: '05',
+    title: '隐私清洗 · 可选',
+    detail: '检查 PNG 附加信息，清洗副本继续送往水印。',
   },
   {
     id: 'watermark',
-    number: '05',
-    title: '批量打水印',
-    detail: '最多 5 批各自排版；视频另有首帧样本工区。',
+    number: '06',
+    title: '按批打水印',
+    detail: '每批独立调整图层，检查成品后送往拼图。',
   },
   {
     id: 'collage',
-    number: '06',
-    title: '批量拼图',
-    detail: '设定画布、行列与序号，一次生成多板。',
+    number: '07',
+    title: '按批拼图',
+    detail: '设置单图比例和行列数，生成编号拼图并创建售图场次。',
   },
   {
-    id: 'gallery',
-    number: '07',
-    title: '自动归档',
-    detail: '成品进入当天拼图图库，再统一下载。',
+    id: 'sales',
+    number: '08',
+    title: '核对与交付',
+    detail: '按聊天顺序分配号码，交付后清理已售图，重拼剩图。',
+  },
+  {
+    id: 'accounting',
+    number: '09',
+    title: '记账与备份',
+    detail: '核对收入支出，保存账目并导出完整备份。',
   },
 ];
 
 const moduleGuide: GuideEntry[] = [
-  { id: 'accounting', number: '10', label: '记账本', icon: Library, responsibility: '手动记录收入、支出、转账、退款和余额调整，账目与凭证在本地加密保存。', firstAction: '确认账户与初始余额，选择账本，然后记一笔。', result: '按日期、账户、分类和账本查账，查看收支与余额，导入导出或完整备份。' },
   {
-    id: 'png-cleaner', number: '09', label: 'PNG 隐私清洗', icon: ShieldCheck,
-    responsibility: '在本机检查 PNG 的文本、EXIF 等附加字段，保留原图并生成清洗副本。',
+    id: 'accounting',
+    number: '10',
+    label: '记账本',
+    icon: Library,
+    responsibility:
+      '手动记录收入、支出、转账、退款和余额调整，账目与凭证在本地加密保存。',
+    firstAction: '确认账户与初始余额，选择账本，然后记一笔。',
+    result:
+      '按日期、账户、分类和账本查账，查看收支与余额，导入导出或完整备份。',
+  },
+  {
+    id: 'png-cleaner',
+    number: '09',
+    label: 'PNG 隐私清洗',
+    icon: ShieldCheck,
+    responsibility:
+      '在本机检查 PNG 的文本、EXIF 等附加字段，保留原图并生成清洗副本。',
     firstAction: '导入最多 200 张静态 PNG，查看检查摘要后选择深度或快速清洗。',
     result: '下载干净 PNG，或继续进入图片收纳、水印和拼图工坊。',
   },
@@ -277,11 +305,36 @@ const moduleGuide: GuideEntry[] = [
     label: '拼图工坊',
     icon: Grid3X3,
     responsibility:
-      '自由设置实际画布宽高、行列、格式与序号样式，最多处理 1000 张图片。',
-    firstAction: '导入图片后选择比例或精确像素，再设行列与编号。',
+      '设置单张图片的比例或尺寸、行列、格式与序号样式，最多处理 1000 张图片。',
+    firstAction: '选择批次，设置单图尺寸与行列，生成后创建售图场次。',
     result: '未占满的末板自动忽略空格，成品自动按日期归档。',
   },
 ];
+
+const orderedModuleGuide: GuideEntry[] = [
+  'security',
+  'prompts',
+  'profiles',
+  'moodboards',
+  'watermarks',
+  'recipes',
+  'gallery',
+  'png-cleaner',
+  'watermark',
+  'collage',
+  'sales',
+  'accounting',
+].map((id, index) => ({
+  ...(moduleGuide.find((entry) => entry.id === id) || {
+    id: 'sales' as const,
+    label: '售图核对',
+    icon: Grid3X3,
+    responsibility: '按截图真实顺序核对号码，每个号码只售给一个人。',
+    firstAction: '从生成的编号拼图创建场次，上传完整聊天截图。',
+    result: '确认交付、清理已售图片和旧拼图，把剩图送回拼图。',
+  }),
+  number: String(index).padStart(2, '0'),
+}));
 
 function NavItem({
   item,
@@ -313,22 +366,23 @@ export default function Home() {
   const vault = useVault();
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
-  const [globalQuery, setGlobalQuery] = useState('');
-  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
+  const globalQuery = '';
+  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'system';
+    const saved = localStorage.getItem('prism-theme');
+    return saved === 'light' || saved === 'dark' ? saved : 'system';
+  });
   const [mobileNavOpen, setMobileNavOpen] = useState<MobileNavGroupId | null>(
     null,
   );
-  const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('prism-theme');
-    if (saved === 'light' || saved === 'dark') setTheme(saved);
-  }, []);
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
-      document.documentElement.dataset.theme = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
-      document.documentElement.style.colorScheme = document.documentElement.dataset.theme;
+      document.documentElement.dataset.theme =
+        theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+      document.documentElement.style.colorScheme =
+        document.documentElement.dataset.theme;
     };
     apply();
     media.addEventListener('change', apply);
@@ -337,33 +391,13 @@ export default function Home() {
   }, [theme]);
 
   useEffect(() => {
-    if (vault.status !== 'unlocked') setGlobalQuery('');
-  }, [vault.status]);
-
-  useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     window.dispatchEvent(new CustomEvent('prism:hide-secrets'));
   }, [activeView]);
 
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLocaleLowerCase() === 'k'
-      ) {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, []);
-
   const vaultReady = vault.status === 'unlocked';
   const firstActionLabel = vaultReady
-    ? '保险库已解锁 · 开始整理 Profile'
+    ? '保险库已解锁 · 整理提示词'
     : vault.status === 'uninitialized'
       ? '第一步 · 创建本地保险库'
       : '第一步 · 解锁本地保险库';
@@ -377,7 +411,9 @@ export default function Home() {
   return (
     <TooltipProvider>
       <SiteTools />
-      <main className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' ? 'editor-active' : ''}`}>
+      <main
+        className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' ? 'editor-active' : ''}`}
+      >
         <aside className="sidebar">
           <div className="brand-row">
             <div className="brand-mark">
@@ -437,7 +473,21 @@ export default function Home() {
           </nav>
 
           <div className="sidebar-footer">
-            <label className="theme-switch"><SunMoon aria-hidden="true" /><span className="sr-only">外观模式</span><select aria-label="外观模式" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}><option value="system">跟随系统</option><option value="light">日间</option><option value="dark">夜间</option></select></label>
+            <label className="theme-switch">
+              <SunMoon aria-hidden="true" />
+              <span className="sr-only">外观模式</span>
+              <select
+                aria-label="外观模式"
+                value={theme}
+                onChange={(event) =>
+                  setTheme(event.target.value as typeof theme)
+                }
+              >
+                <option value="system">跟随系统</option>
+                <option value="light">日间</option>
+                <option value="dark">夜间</option>
+              </select>
+            </label>
             <div className="vault-status">
               <ShieldCheck />
               {!collapsed && (
@@ -466,37 +516,17 @@ export default function Home() {
         </aside>
 
         <section className="workspace">
-          <header className="topbar">
-            <div className="search-wrap">
-              <Search aria-hidden="true" />
-              <Input
-                aria-label="全局搜索"
-                disabled={vault.status !== 'unlocked'}
-                onChange={(event) => setGlobalQuery(event.target.value)}
-                placeholder="搜索名称、标签、作者或备注…"
-                ref={searchRef}
-                value={globalQuery}
-              />
-              <kbd>⌘ K</kbd>
+          {(activeView === 'watermark' || activeView === 'collage') && (
+            <div className="mobile-editor-header mobile-workspace-only">
+              <button type="button" onClick={() => setActiveView('overview')}>
+                <ChevronLeft /> 返回
+              </button>
+              <strong>
+                {activeView === 'watermark' ? '水印工坊' : '拼图工坊'}
+              </strong>
+              <span>本机编辑</span>
             </div>
-            <div className="topbar-actions">
-              <label className="theme-switch topbar-theme"><SunMoon aria-hidden="true" /><select aria-label="外观模式" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}><option value="system">跟随系统</option><option value="light">日间</option><option value="dark">夜间</option></select></label>
-              <span className="privacy-pill">
-                <LockKeyhole /> 数据从不离开此设备
-              </span>
-              <Button
-                className="add-button"
-                onClick={() =>
-                  setActiveView(
-                    vault.status === 'unlocked' ? 'prompts' : 'security',
-                  )
-                }
-              >
-                <Plus /> 新建资产
-              </Button>
-            </div>
-          </header>
-          {(activeView === 'watermark' || activeView === 'collage') && <div className="mobile-editor-header mobile-workspace-only"><button type="button" onClick={() => setActiveView('overview')}><ChevronLeft /> 返回</button><strong>{activeView === 'watermark' ? '水印工坊' : '拼图工坊'}</strong><span>本机编辑</span></div>}
+          )}
 
           <div className="content-frame" hidden={activeView !== 'overview'}>
             <section className="editorial-head">
@@ -524,9 +554,9 @@ export default function Home() {
                   <small>{vaultReady ? 'VAULT READY' : 'FIRST VISIT'}</small>
                 </div>
                 <h2 id="start-here-title">
-                  先建立本地保险库，
+                  从资产整理到售图交付，
                   <br />
-                  再让资产进入流水线。
+                  每一步都有明确入口。
                 </h2>
                 <p>
                   PRISM 没有 GPT
@@ -535,7 +565,7 @@ export default function Home() {
                 <div className="start-actions">
                   <Button
                     onClick={() =>
-                      setActiveView(vaultReady ? 'profiles' : 'security')
+                      setActiveView(vaultReady ? 'prompts' : 'security')
                     }
                   >
                     <ShieldCheck /> {firstActionLabel}
@@ -581,7 +611,7 @@ export default function Home() {
                   <span>03</span>
                   <p>
                     <strong>PRODUCTION</strong>
-                    <small>图片收纳 · 水印 · 拼图 · 归档</small>
+                    <small>收纳 · 清洗 · 水印 · 拼图 · 核对 · 记账</small>
                   </p>
                 </div>
               </div>
@@ -590,7 +620,7 @@ export default function Home() {
             <section className="workflow-guide" id="workflow-guide">
               <div className="guide-heading">
                 <div>
-                  <p className="eyebrow">THE COMPLETE FLOW / 01—07</p>
+                  <p className="eyebrow">THE COMPLETE FLOW / 01—09</p>
                   <h2>从第一次打开，到交付一批成片</h2>
                 </div>
                 <p>
@@ -618,7 +648,7 @@ export default function Home() {
             <section className="module-guide" id="module-guide">
               <div className="guide-heading">
                 <div>
-                  <p className="eyebrow">MODULE DIRECTORY / 00—08</p>
+                  <p className="eyebrow">MODULE DIRECTORY / 00—11</p>
                   <h2>每一个板块负责什么</h2>
                 </div>
                 <p>
@@ -626,7 +656,7 @@ export default function Home() {
                 </p>
               </div>
               <div className="module-guide-grid">
-                {moduleGuide.map((module) => {
+                {orderedModuleGuide.map((module) => {
                   const Icon = module.icon;
                   return (
                     <button
@@ -662,8 +692,16 @@ export default function Home() {
           </div>
           {vaultReady ? (
             <div key={vault.session} className={vault.busy ? 'vault-busy' : ''}>
-              <div className="content-frame studio-frame" hidden={activeView !== 'accounting'}><AccountingPanel /></div>
-              <div className="content-frame studio-frame" hidden={activeView !== 'png-cleaner'}>
+              <div
+                className="content-frame studio-frame"
+                hidden={activeView !== 'accounting'}
+              >
+                <AccountingPanel />
+              </div>
+              <div
+                className="content-frame studio-frame"
+                hidden={activeView !== 'png-cleaner'}
+              >
                 <PngCleanerPanel onOpen={setActiveView} />
               </div>
               <div
@@ -716,7 +754,12 @@ export default function Home() {
               >
                 <CollagePanel onOpenSales={() => setActiveView('sales')} />
               </div>
-              <div className="content-frame studio-frame" hidden={activeView !== 'sales'}><SalesPanel onOpenCollage={() => setActiveView('collage')} /></div>
+              <div
+                className="content-frame studio-frame"
+                hidden={activeView !== 'sales'}
+              >
+                <SalesPanel onOpenCollage={() => setActiveView('collage')} />
+              </div>
             </div>
           ) : (
             activeView !== 'overview' &&
@@ -761,7 +804,11 @@ export default function Home() {
                 aria-current={active ? 'page' : undefined}
                 className={active ? 'is-active' : ''}
                 key={group.id}
-                onClick={() => group.id === 'library' ? setActiveView('accounting') : setMobileNavOpen(group.id)}
+                onClick={() =>
+                  group.id === 'library'
+                    ? setActiveView('accounting')
+                    : setMobileNavOpen(group.id)
+                }
                 type="button"
               >
                 <Icon aria-hidden="true" />
@@ -778,6 +825,18 @@ export default function Home() {
           open={mobileNavOpen !== null}
           title={openedMobileGroup?.label || '选择模块'}
         >
+          <label className="theme-switch mobile-theme-switch">
+            <SunMoon />
+            <select
+              aria-label="外观模式"
+              value={theme}
+              onChange={(event) => setTheme(event.target.value as typeof theme)}
+            >
+              <option value="system">跟随系统</option>
+              <option value="light">日间</option>
+              <option value="dark">夜间</option>
+            </select>
+          </label>
           <div className="mobile-module-list">
             {openedMobileGroup?.items.map((item) => {
               const Icon = item.icon;

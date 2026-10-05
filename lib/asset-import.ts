@@ -33,8 +33,8 @@ export type ImportDocument = {
 };
 type CellRow = { cells: string[]; row: number; images: File[] };
 const aliases: Record<string, string[]> = {
-  promptEnglish: ['英文提示词', '英文版', 'promptEnglish', 'english prompt', 'prompt en'],
-  promptChinese: ['中文提示词', '中文版', 'promptChinese', 'chinese prompt', 'prompt zh'],
+  promptEnglish: ['英文', 'English', 'EN', '原文', '英文提示词', '英文版', 'promptEnglish', 'english prompt', 'prompt en'],
+  promptChinese: ['中文', 'Chinese', 'ZH', '译文', '翻译', '中文提示词', '中文版', 'promptChinese', 'chinese prompt', 'prompt zh'],
   promptUnconfirmed: ['promptUnconfirmed', '待确认提示词', '原文待确认'],
   secret: [
     'secret',
@@ -136,6 +136,7 @@ function genericSheet(name: string) {
   return /^(?:sheet|工作表|表格|table|第?\d+页)[\s\d]*$/i.test(name);
 }
 function looksLikePrompt(text: string) {
+  if (/^=?(?:_?xlfn\.)?(?:DISPIMG|IMAGE)\s*\(/i.test(text)) return false;
   return (
     text.length >= 18 &&
     !/^https?:\/\/\S+$/.test(text) &&
@@ -197,12 +198,18 @@ export function tableRows(
             .filter(Boolean);
         else if (key === 'source')
           entry.customFields.push({ id: id(), label: '文件内来源', value });
-        else if (value && !/^=?_?xlfn\.(?:DISPIMG|IMAGE)/i.test(value))
-          entry.customFields.push({
+        else if (value && !/^=?(?:_?xlfn\.)?(?:DISPIMG|IMAGE)\s*\(/i.test(value)) {
+          const mapped = kind === 'prompt' && looksLikePrompt(value) ? classifyImportedPromptText(value) : null;
+          if (mapped && (mapped.english || mapped.chinese)) {
+            entry.promptEnglish = [entry.promptEnglish, mapped.english].filter(Boolean).join('\n');
+            entry.promptChinese = [entry.promptChinese, mapped.chinese].filter(Boolean).join('\n');
+            entry.promptUnconfirmed = [entry.promptUnconfirmed, mapped.unconfirmed].filter(Boolean).join('\n');
+          } else entry.customFields.push({
             id: id(),
             label: headerLabels[index] || `原文件第 ${index + 1} 列`,
             value,
           });
+        }
       });
       if (entry.author) author = entry.author;
     } else {
@@ -243,11 +250,11 @@ export function tableRows(
       }
     }
     if (kind === 'prompt') {
-      if (entry.secret && entry.promptEnglish === undefined && entry.promptChinese === undefined && entry.promptUnconfirmed === undefined) {
+      if (entry.secret) {
         const mapped = classifyImportedPromptText(entry.secret);
-        entry.promptEnglish = mapped.english;
-        entry.promptChinese = mapped.chinese;
-        entry.promptUnconfirmed = mapped.unconfirmed;
+        for (const [key, value] of [['promptEnglish', mapped.english], ['promptChinese', mapped.chinese], ['promptUnconfirmed', mapped.unconfirmed]] as const) {
+          if (value && !entry[key]?.includes(value)) entry[key] = [value, entry[key]].filter(Boolean).join('\n');
+        }
       }
       if (entry.note && looksLikePrompt(entry.note) && (entry.note.length >= 36 || [...entry.note.matchAll(/\p{Script=Han}/gu)].length >= 12 || /--(?:ar|sref|p|v)\b/i.test(entry.note))) {
         entry.promptUnconfirmed = [entry.promptUnconfirmed, entry.note].filter(Boolean).join('\n');

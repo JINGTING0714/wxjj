@@ -4,7 +4,7 @@ import { copyText } from '@/lib/clipboard';
 import { promptLanguages } from '@/lib/prompt-language';
 import { useConfirmation } from './use-confirmation';
 import { RecordExamples, SecretField, CollectionRail } from './library-shared';
-import { ExampleImage } from './example-image';
+import { ExampleImage, type Picture } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
 
 import {
@@ -27,6 +27,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { FileImportDialog } from './file-import-dialog';
 import { ScreenshotImportDialog } from './screenshot-import-dialog';
+import { PromptRepairDialog } from './prompt-repair-dialog';
 import { ProfileLibraryPanel } from './profile-library-panel';
 import {
   CustomFieldList,
@@ -62,7 +63,7 @@ import {
 
 const kindCopy = {
   prompt: {
-    number: '02',
+    number: '01',
     eyebrow: 'PROMPT ARCHIVE',
     title: '提示词库',
     noun: '提示词',
@@ -70,14 +71,14 @@ const kindCopy = {
       '例图、完整来源与补充信息都可以随时增删改，提示词默认整段隐藏。',
   },
   profile: {
-    number: '03',
+    number: '02',
     eyebrow: 'PROFILE INDEX',
     title: 'Profile 库',
     noun: 'Profile',
     description: '用长码归纳同一 Profile 文件夹，再分别记录阶段 P 和成品 P。',
   },
   moodboard: {
-    number: '04',
+    number: '03',
     eyebrow: 'MOODBOARD INDEX',
     title: 'Moodboard 库',
     noun: 'Moodboard',
@@ -151,8 +152,8 @@ const stageOptions = [
   '其他',
 ];
 
-function VisualTile({ asset }: { asset: LibraryAsset }) {
-  return <RecordExamples images={asset.images} title={asset.title} />;
+function VisualTile({ asset, pictures, offset = 0 }: { asset: LibraryAsset; pictures?: Picture[]; offset?: number }) {
+  return <RecordExamples images={asset.images} title={asset.title} browseImages={pictures} browseOffset={offset} />;
 }
 
 function storedAsset(asset: LibraryAsset): StoredLibraryAsset {
@@ -202,6 +203,7 @@ function SimpleLibraryPanel({
   const [acquisition, setAcquisition] = useState('自创');
   const [stageType, setStageType] = useState('测试阶段 P');
   const [formError, setFormError] = useState('');
+  useEffect(() => { setRevealed(new Set()); }, [kind, activeCollection]);
 
   const allCollections = useMemo(
     () => [
@@ -294,6 +296,8 @@ function SimpleLibraryPanel({
     [activeCollection, assets, query],
   );
 
+  const browsePictures = useMemo(() => kind === 'prompt' ? filtered.flatMap((asset) => asset.images.map((image) => ({ ...image, assetId: asset.id, title: asset.title, ...promptLanguages(asset) }))) : undefined, [kind, filtered]);
+  const browseOffsets = useMemo(() => { const offsets = new Map<string, number>(); browsePictures?.forEach((picture, index) => { if (!offsets.has(picture.assetId)) offsets.set(picture.assetId, index); }); return offsets; }, [browsePictures]);
   const openCreate = () => {
     setEditingAsset(null);
     setExistingImages([]);
@@ -500,7 +504,7 @@ function SimpleLibraryPanel({
     filtered.filter((a) => !a.id.startsWith('demo-')).map((a) => a.id),
   );
   return (
-    <div className="studio-page">
+    <div className={`studio-page ${kind === 'moodboard' ? 'visual-library-page' : ''}`}>
       {confirmation.dialog}
       <div className="library-import-entry">
         <FileImportDialog
@@ -509,7 +513,7 @@ function SimpleLibraryPanel({
             void refresh().catch((e) => setFormError(String(e)));
           }}
         />
-        {kind === 'prompt' && <ScreenshotImportDialog collections={collections} onImported={() => { void refresh().catch((e) => setFormError(String(e))); }} />}
+        {kind === 'prompt' && <><ScreenshotImportDialog collections={collections} onImported={() => { void refresh().catch((e) => setFormError(String(e))); }} /><PromptRepairDialog assets={assets} onRepaired={() => { void refresh().catch((e) => setFormError(String(e))); }} /></>}
       </div>
       <SectionHead
         description={copy.description}
@@ -593,7 +597,7 @@ function SimpleLibraryPanel({
         />
         {filtered.map((asset) => {
           const isRevealed = revealed.has(asset.id);
-          const RecordContainer = kind === 'prompt' ? 'div' : 'details';
+          const RecordContainer = 'div';
           const visibleValue = isRevealed
             ? asset.secret
             : kind === 'prompt'
@@ -601,7 +605,6 @@ function SimpleLibraryPanel({
               : secretPreview(asset.secret);
           return (
             <RecordContainer className={`asset-record-fold ${kind === 'prompt' ? 'prompt-record-open' : ''}`} key={asset.id}>
-            {kind !== 'prompt' && <summary>{asset.title} · {copy.noun} · {asset.images.length} 张例图 · {asset.tags.join(' / ') || '未添加标签'}</summary>}
             <article className="record-row">
               <div className="record-identity">
                 <SelectItem
@@ -609,7 +612,7 @@ function SimpleLibraryPanel({
                   id={asset.id}
                   name={asset.title}
                 />
-                <VisualTile asset={asset} />
+                <VisualTile asset={asset} pictures={browsePictures} offset={browseOffsets.get(asset.id)} />
                 <div>
                   <Badge variant="outline">{copy.noun}</Badge>
                   <h3>{asset.title}</h3>
@@ -626,7 +629,7 @@ function SimpleLibraryPanel({
                 </div>
               </div>
               <div className="record-secret">
-                {kind === 'prompt' ? <div className="prompt-languages">{Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 原文保留'}</strong>{(language !== 'unconfirmed' || isRevealed) && <pre>{content}</pre>}</div>)}</div> :
+                {kind === 'prompt' ? <div className="prompt-languages">{isRevealed ? Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 原文保留'}</strong><pre>{content}</pre></div>) : <p className="prompt-hidden-label">提示词已隐藏 · 可直接复制</p>}</div> :
                 <div
                   className={`record-secret-value ${!isRevealed ? 'is-obscured' : ''}`}
                 >
@@ -641,9 +644,9 @@ function SimpleLibraryPanel({
                   </p>
                 )}
                 <div className="record-secret-actions">
-                  {(kind !== 'prompt' || Boolean(asset.note || promptLanguages(asset).unconfirmed)) && <button onClick={() => toggleReveal(asset.id)} type="button">
+                  {<button onClick={() => toggleReveal(asset.id)} type="button">
                     {isRevealed ? <EyeOff /> : <Eye />}{' '}
-                    {isRevealed ? '隐藏私人内容' : '显示私人内容'}
+                    {isRevealed ? '隐藏内容' : kind === 'prompt' ? '显示提示词' : '显示详情'}
                   </button>}
                   {(kind !== 'prompt' || promptLanguages(asset).english) && <button
                     onClick={() => void copyText(
@@ -662,7 +665,7 @@ function SimpleLibraryPanel({
                   </button>}
                   {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>}{isRevealed && promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待确认原文</button>}</>}
                 </div>
-                <p>
+                {(kind === 'prompt' || isRevealed) && <p>
                   <strong>{asset.author}</strong>
                   <span>·</span>
                   {asset.origin}
@@ -670,8 +673,8 @@ function SimpleLibraryPanel({
                   {asset.acquisition === '其他'
                     ? asset.acquisitionOther || '其他'
                     : asset.acquisition}
-                </p>
-                {safeSourceUrl(asset.sourceUrl) && (
+                </p>}
+                {(kind === 'prompt' || isRevealed) && safeSourceUrl(asset.sourceUrl) && (
                   <a
                     className="source-link"
                     href={safeSourceUrl(asset.sourceUrl)}
@@ -683,14 +686,14 @@ function SimpleLibraryPanel({
                 )}
               </div>
               <div className="record-note">
-                <p>{kind === 'prompt' && !isRevealed ? '私人备注已隐藏。' : asset.note || '暂无私人备注。'}</p>
+                {(kind === 'prompt' || isRevealed) && <p>{asset.note || '暂无私人备注。'}</p>}
                 {asset.stageNote && (
                   <p>
                     <strong>阶段说明：</strong>
                     {asset.stageNote}
                   </p>
                 )}
-                {(kind !== 'prompt' || isRevealed) && <CustomFieldList fields={asset.customFields} />}
+                {(kind === 'prompt' || isRevealed) && <CustomFieldList fields={asset.customFields} />}
               </div>
               <div className="row-actions">
                 <button

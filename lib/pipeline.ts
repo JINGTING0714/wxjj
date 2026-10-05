@@ -1,7 +1,9 @@
-export type PipelineSource = { id: string; file: File };
+export type PipelineSource = { id: string; file: File; batchId?: string; batchTitle?: string };
 export type PipelineTransfer = {
   sources: PipelineSource[];
   complete: (error?: Error) => void;
+  batchId?: string;
+  batchTitle?: string;
 };
 export function moveSource<T extends { id: string }>(
   sources: T[],

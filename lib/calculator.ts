@@ -1,5 +1,7 @@
 export type CalculatorState = {
   display: string;
+  tokens?: Array<string | number>;
+  expression?: string;
   stored?: number;
   operator?: string;
   fresh: boolean;
@@ -10,6 +12,7 @@ export const calculatorInitial = (): CalculatorState => ({
   display: '0',
   fresh: true,
 });
+const operators = ['+', '−', '×', '÷'];
 function result(a: number, operator: string, b: number) {
   if (operator === '÷' && b === 0) throw new Error('不能除以零');
   const value =
@@ -24,35 +27,58 @@ function result(a: number, operator: string, b: number) {
     throw new Error('结果超出范围');
   return Number(value.toPrecision(12));
 }
+/** Evaluate multiplication and division before addition and subtraction; never eval user input. */
+export function evaluateCalculation(tokens: Array<string | number>): number {
+  const terms: number[] = [Number(tokens[0])];
+  const sums: string[] = [];
+  for (let i = 1; i < tokens.length; i += 2) {
+    const operator = String(tokens[i]),
+      value = Number(tokens[i + 1]);
+    if (!operators.includes(operator) || !Number.isFinite(value))
+      throw new Error('算式不完整');
+    if (operator === '×' || operator === '÷')
+      terms[terms.length - 1] = result(terms.at(-1)!, operator, value);
+    else {
+      sums.push(operator);
+      terms.push(value);
+    }
+  }
+  return terms
+    .slice(1)
+    .reduce(
+      (total, value, index) => result(total, sums[index], value),
+      terms[0],
+    );
+}
 export function calculatorKey(
   state: CalculatorState,
   key: string,
 ): CalculatorState {
   if (key === 'AC') return calculatorInitial();
   if (state.error) state = calculatorInitial();
-  if (/^\d$/.test(key))
-    return {
-      ...state,
-      last: state.fresh && !state.operator ? undefined : state.last,
-      display:
-        state.fresh || state.display === '0'
-          ? key
-          : state.display.replace('-', '').length >= 16
-            ? state.display
-            : state.display + key,
-      fresh: false,
-    };
-  if (key === '.')
-    return {
-      ...state,
-      last: state.fresh && !state.operator ? undefined : state.last,
-      display: state.fresh
+  const tokens = state.tokens || [];
+  if (/^\d$/.test(key) || key === '.') {
+    const display = state.fresh
+      ? key === '.'
         ? '0.'
-        : state.display.includes('.')
+        : key
+      : key === '.'
+        ? state.display.includes('.')
           ? state.display
-          : state.display + '.',
+          : state.display + '.'
+        : state.display === '0'
+          ? key
+          : state.display.replace('-', '').length < 16
+            ? state.display + key
+            : state.display;
+    return {
+      ...state,
+      display,
       fresh: false,
+      expression: tokens.length ? tokens.join(' ') : '',
+      last: undefined,
     };
+  }
   if (key === '±')
     return {
       ...state,
@@ -67,42 +93,46 @@ export function calculatorKey(
   if (key === '⌫')
     return {
       ...state,
-      display: state.fresh
-        ? '0'
-        : state.display.length <= 1 ||
-            (state.display.startsWith('-') && state.display.length === 2)
+      display:
+        state.fresh || state.display.length <= 1 || /^-\d$/.test(state.display)
           ? '0'
           : state.display.slice(0, -1),
       fresh: false,
     };
   try {
-    if (['+', '−', '×', '÷'].includes(key)) {
-      const value =
-        state.operator && state.stored !== undefined && !state.fresh
-          ? result(state.stored, state.operator, Number(state.display))
-          : Number(state.display);
+    if (operators.includes(key)) {
+      const next =
+        state.fresh && tokens.length
+          ? [...tokens.slice(0, -1), key]
+          : [...tokens, Number(state.display), key];
       return {
-        display: String(value),
-        stored: value,
+        display: state.display,
+        tokens: next,
+        expression: next.join(' '),
         operator: key,
         fresh: true,
       };
     }
     if (key === '=') {
-      const operator = state.operator || state.last?.operator;
-      const value = state.operator ? Number(state.display) : state.last?.value;
-      if (!operator || value === undefined) return state;
-      const computed = result(
-        state.operator
-          ? (state.stored ?? Number(state.display))
-          : Number(state.display),
-        operator,
-        value,
-      );
+      if (!tokens.length && state.last)
+        return {
+          ...state,
+          display: String(
+            result(
+              Number(state.display),
+              state.last.operator,
+              state.last.value,
+            ),
+          ),
+          fresh: true,
+        };
+      if (!tokens.length) return state;
+      const next = [...tokens, Number(state.display)];
       return {
-        display: String(computed),
-        last: { operator, value },
+        display: String(evaluateCalculation(next)),
+        expression: next.join(' ') + ' =',
         fresh: true,
+        last: { operator: String(tokens.at(-1)), value: Number(state.display) },
       };
     }
     return state;

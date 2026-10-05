@@ -227,6 +227,9 @@ void test('unlabeled bilingual cells stay in language fields and suspect notes r
 const calculate = (keys: string[]) =>
   keys.reduce(calculatorKey, calculatorInitial());
 void test('calculator handles all operations, decimals, repeat equals, sign, clear and backspace', () => {
+  assert.equal(calculate(['3','×','1','3','+','1','0','×','3','=']).display, '69');
+  assert.equal(calculate(['2','+','3','×','4','−','8','÷','2','=']).display, '10');
+  assert.equal(calculate(['2','+','×','3','=']).display, '6');
   assert.equal(
     calculate(['0', '.', '1', '+', '0', '.', '2', '=']).display,
     '0.3',

@@ -85,6 +85,7 @@ const numberPositions: Array<{ value: NumberPosition; label: string }> = [
   { value: 'bottom', label: '下方居中' },
   { value: 'bottom-right', label: '右下' },
 ];
+type CollageBatch = { id: string; title: string; sources: PipelineSource[]; settings?: Record<string, unknown> };
 
 export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
   const vault = useVault();
@@ -99,6 +100,8 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
   const drag = useRef<{ id: string; x: number; y: number } | null>(null);
   const workspace = useWorkspaceState('collage', {
     sources: [] as PipelineSource[],
+    activeBatchId: 'manual',
+    batches: [] as CollageBatch[],
     ratio: ratioPresets[0],
     grid: gridPresets[1],
     customRatio: false,
@@ -129,6 +132,18 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
     } | null,
   });
   const { state, setState } = workspace;
+  const rememberBatch = (current: typeof state): CollageBatch[] => {
+    const { batches, activeBatchId, sources: _sources, ...settings } = current;
+    return [...batches.filter((batch) => batch.id !== activeBatchId), { id: activeBatchId, title: batches.find((batch) => batch.id === activeBatchId)?.title || '手动导入', sources: current.sources, settings }];
+  };
+  const switchBatch = (id: string) => {
+    if (processing) return;
+    setState((current) => {
+      const batches = rememberBatch(current), target = batches.find((batch) => batch.id === id);
+      return { ...current, ...(target?.settings as Partial<typeof state>), sources: target?.sources || [], batches, activeBatchId: id, job: (target?.settings?.job as typeof current.job) || null };
+    });
+    setPreviewBoard(0); setSelectedSource(null);
+  };
   type CollageEditableState = Omit<typeof state, 'job'>;
   const editableState = (value: typeof state): CollageEditableState => {
     const { job: _job, ...editable } = value;
@@ -313,6 +328,11 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
         rows: Math.max(1, Math.min(20, Math.round(gridRows))),
       }
     : grid;
+  const cellWidth = customRatio ? activeRatio.w : Math.round(640 * activeRatio.w / Math.max(activeRatio.w, activeRatio.h));
+  const cellHeight = customRatio ? activeRatio.h : Math.round(640 * activeRatio.h / Math.max(activeRatio.w, activeRatio.h));
+  const boardGap = Math.max(2, Math.round(Math.min(cellWidth, cellHeight) * .01));
+  const boardWidth = cellWidth * activeGrid.columns + boardGap * (activeGrid.columns - 1);
+  const boardHeight = cellHeight * activeGrid.rows + boardGap * (activeGrid.rows - 1);
 
   useEffect(() => {
     const receive = (event: Event) => {
@@ -323,14 +343,22 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
       const incoming = detail.map((item) =>
         item instanceof File ? { id: crypto.randomUUID(), file: item } : item,
       );
-      if (transfer && (!workspace.ready || new Set([...workspace.current.current.sources, ...incoming].map((source) => source.id)).size > 1000)) {
+      const current = workspace.current.current;
+      const batchId = transfer?.batchId || incoming[0]?.batchId;
+      const existing = batchId === current.activeBatchId ? current.sources : current.batches.find((batch) => batch.id === batchId)?.sources || [];
+      if (transfer && (!workspace.ready || new Set([...existing, ...incoming].map((source) => source.id)).size > 1000)) {
         transfer.complete(new Error('拼图工坊尚未就绪或超出 1000 张上限，请腾出空间后重试。'));
         return;
       }
-      setState((current) => ({
-        ...current,
-        sources: mergeSources(current.sources, incoming),
-      }));
+      setState((current) => {
+        const id = transfer?.batchId || incoming[0]?.batchId || `incoming-${crypto.randomUUID()}`;
+        const title = transfer?.batchTitle || incoming[0]?.batchTitle || `导入批次 ${new Date().toLocaleTimeString()}`;
+        const batches = rememberBatch(current), target = batches.find((batch) => batch.id === id);
+        const sources = mergeSources(target?.sources || [], incoming);
+        const nextBatches = [...batches.filter((batch) => batch.id !== id), { ...target, id, title, sources }];
+        if (current.job && current.activeBatchId !== id) return { ...current, batches: nextBatches };
+        return { ...current, ...(target?.settings as Partial<typeof state>), sources, batches: nextBatches, activeBatchId: id, lastGenerated: id === current.activeBatchId ? current.lastGenerated : (target?.settings?.lastGenerated as typeof current.lastGenerated) || null, job: (target?.settings?.job as typeof current.job) || null };
+      });
       if (transfer) void workspace.flush().then(() => transfer.complete(), (error) => transfer.complete(error instanceof Error ? error : new Error('拼图队列保存失败')));
       if (workspace.current.current.sources.length >= 1000)
         setError(
@@ -342,6 +370,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
       setState((current) => ({
         ...current,
         sources: current.sources.filter((s) => !ids.has(s.id)),
+        batches: current.batches.map((batch) => ({ ...batch, sources: batch.sources.filter((source) => !ids.has(source.id)) })),
       }));
     };
     const stop = () => controller.current?.abort();
@@ -405,6 +434,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
 
   const generate = async (resume = false) => {
     if (processing || !workspace.ready) return;
+    if (boardWidth > 8000 || boardHeight > 8000 || boardWidth * boardHeight > 40_000_000) { setError('整板尺寸过大。请减小单张图片尺寸或行列数（单边最多 8000 px，总像素最多 4000 万）。'); return; }
     if (!resume) {
       try {
         const duplicate = await duplicateSourceIndexes(state.sources);
@@ -440,8 +470,9 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
               numberShape,
               numberWeight,
               numberDigits,
-              canvasWidth: customRatio ? activeRatio.w : undefined,
-              canvasHeight: customRatio ? activeRatio.h : undefined,
+              canvasWidth: boardWidth,
+              canvasHeight: boardHeight,
+              gap: boardGap,
               format,
             },
           };
@@ -547,9 +578,14 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
       const detail = (event as CustomEvent<{ sourceIds: string[]; boardIds: string[]; promises: Promise<unknown>[] }>).detail;
       const sourceIds = new Set(detail.sourceIds);
       const boardIds = new Set(detail.boardIds);
+      collageHistory.current.past = [];
+      collageHistory.current.future = [];
+      collageHistory.current.applying = true;
+      refreshHistoryAvailability();
       setState((current) => ({
         ...current,
         sources: current.sources.filter((item) => !sourceIds.has(item.id)),
+        batches: current.batches.map((batch) => ({ ...batch, sources: batch.sources.filter((source) => !sourceIds.has(source.id)), settings: { ...batch.settings, lastGenerated: null, job: null } })),
         job: null,
         lastGenerated: null,
       }));
@@ -642,7 +678,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
       {confirmation.dialog}
       <SectionHead
         eyebrow="COLLAGE ENGINE"
-        number="08"
+        number="09"
         title="拼图工坊"
         description="最多 1000 张批量分板；尺寸、宫格、编号位置与视觉样式全部开放给你。"
       />
@@ -667,7 +703,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
       {workspace.saveError && (
         <p className="error-banner">{workspace.saveError}</p>
       )}
-      <div className="sale-round-entry"><Button disabled={!state.lastGenerated || processing || !workspace.ready} onClick={() => void createSaleRound()} variant="outline">用最近生成的拼图创建售图场次</Button></div>
+      <div className="collage-batch-toolbar"><label>当前批次<select aria-label="拼图批次" value={state.activeBatchId} disabled={processing} onChange={(event) => switchBatch(event.target.value)}>{rememberBatch(state).map((batch) => <option key={batch.id} value={batch.id}>{batch.title} · {batch.sources.length} 张</option>)}</select></label><Button variant="outline" disabled={processing} onClick={() => { const id = crypto.randomUUID(); setState((current) => ({ ...current, batches: [...rememberBatch(current), { id, title: `手动批次 ${current.batches.length + 1}`, sources: [] }], activeBatchId: id, sources: [], lastGenerated: null, job: null })); }}>新建批次</Button><div className="sale-round-entry"><strong>拼图完成后 → 售图核对</strong><Button disabled={!state.lastGenerated || processing || !workspace.ready} onClick={() => void createSaleRound()}>创建售图场次</Button></div></div>
       <MobileWorkspace
         className="collage-mobile-workspace"
         onPanelClose={() => {
@@ -803,9 +839,9 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                   summary={
                     <div className="collage-quick-fields">
                       <label>
-                        画布比例
+                        单图比例
                         <select
-                          aria-label="画布比例"
+                          aria-label="单图比例"
                           value={customRatio ? 'custom' : ratio.label}
                           onChange={(e) => {
                             const preset = ratioPresets.find(
@@ -860,7 +896,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                       <span>02</span>
                       <div>
                         <p className="eyebrow">CANVAS SIZE</p>
-                        <h2>拼图尺寸</h2>
+                        <h2>单张图片尺寸</h2>
                       </div>
                     </div>
                     <div className="preset-grid ratio-grid">
@@ -894,7 +930,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                     {customRatio && (
                       <div className="custom-fields custom-pixel-fields">
                         <label>
-                          <span>画布宽 px</span>
+                          <span>单图宽 px</span>
                           <Input
                             max="8000"
                             min="320"
@@ -907,7 +943,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                         </label>
                         <b>×</b>
                         <label>
-                          <span>画布高 px</span>
+                          <span>单图高 px</span>
                           <Input
                             max="8000"
                             min="320"
@@ -918,7 +954,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                             value={ratioHeight}
                           />
                         </label>
-                        <small>生成文件会严格使用这个像素尺寸。</small>
+                        <small>这是每张图片的尺寸；整板由行列数和间隙计算。</small>
                       </div>
                     )}
                   </div>
@@ -1178,16 +1214,16 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                 <div className="collage-preview-frame">
                   <div className="preview-heading">
                     <p className="eyebrow">LIVE SPEC</p>
-                    <span>{activeRatio.label}</span>
+                    <span>单图 {activeRatio.label} · 整板 {boardWidth} × {boardHeight} px</span>
                   </div>
                   <div
                     className="board-preview"
                     data-interaction={mobileReordering ? 'reorder' : 'scroll'}
                     style={
                       {
-                        aspectRatio: `${activeRatio.w}/${activeRatio.h}`,
-                        maxWidth: `${(480 * activeRatio.w) / activeRatio.h}px`,
-                        '--collage-ratio': activeRatio.w / activeRatio.h,
+                        aspectRatio: `${boardWidth}/${boardHeight}`,
+                        maxWidth: `${(480 * boardWidth) / boardHeight}px`,
+                        '--collage-ratio': boardWidth / boardHeight,
                         gridTemplateColumns: `repeat(${activeGrid.columns}, minmax(0, 1fr))`,
                         gridTemplateRows: `repeat(${activeGrid.rows}, minmax(0, 1fr))`,
                       } as React.CSSProperties

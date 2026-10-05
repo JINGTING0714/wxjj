@@ -28,6 +28,7 @@ import {
   SectionHead,
 } from './studio-shared';
 import { FileImportDialog } from './file-import-dialog';
+import { ProfileCopyDialog } from './profile-copy-dialog';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
 import {
@@ -160,10 +161,10 @@ function CodeEditor({
             }
             value={code.nature}
           >
-            <option value="unconfirmed">待确认（不猜测）</option>
-            <option value="stage">阶段 P</option>
             <option value="final">成品 P</option>
             <option value="emotion">情绪 P</option>
+            <option value="stage">阶段 P</option>
+            <option value="unconfirmed">待确认（不猜测）</option>
             <option value="other">其他 · 自行填写</option>
           </select>
         </label>
@@ -500,7 +501,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       </div>
       <SectionHead
         eyebrow="PROFILE FOLDERS"
-        number="03"
+        number="02"
         title="Profile 库"
         description="一个文件夹保存长码，阶段与成品短码分别记录例图、性质和备注。"
         actions={
@@ -570,7 +571,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       <div className="record-list profile-records">
         {visible.map((folder) => (
           <details className="profile-record-group" key={folder.id}>
-            <summary className="profile-folder-summary"><span><strong>{folder.title}</strong> · {folder.codes.length} 个短码 · {collections.find((item) => item.id === folder.collection)?.name || '未分类'}</span><span className="profile-folder-tools" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" onClick={() => void copyText(formatProfileCode(folder.codes.map((code) => code.secret.replace(/^--profile\s+/i, '').trim()).join(' ')))}>复制文件夹</Button><Button type="button" variant="outline" onClick={() => open(folder)}>编辑 / 排序</Button></span></summary>
+            <summary className="profile-folder-summary"><span><strong>{folder.title}</strong> · {folder.codes.length} 个短码 · {collections.find((item) => item.id === folder.collection)?.name || '未分类'}</span><span className="profile-folder-tools" onClick={(event) => event.stopPropagation()}><ProfileCopyDialog title={folder.title} codes={folder.codes} /><Button type="button" variant="outline" onClick={() => open(folder)}>编辑 / 排序</Button></span></summary>
             {folder.codes.map((code, index) => (
               <article className="record-row" key={code.id}>
                 <div className="record-identity">

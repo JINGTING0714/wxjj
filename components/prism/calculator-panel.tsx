@@ -58,9 +58,7 @@ export function CalculatorPanel({ compact = false, onUse, canUse = false }: { co
       />}
       <section ref={root} className="prism-calculator" aria-label="简易计算器">
         <small>
-          {state.stored !== undefined
-            ? `${state.stored} ${state.operator || ''}`
-            : '点击按钮或使用键盘'}
+          {state.expression || '先乘除，后加减 · 支持键盘输入'}
         </small>
         <output aria-live="polite">{state.display}</output>
         <div>
@@ -87,7 +85,7 @@ export function CalculatorPanel({ compact = false, onUse, canUse = false }: { co
             </Button>
           ))}
         </div>
-        {onUse && <Button type="button" className="calculator-use" disabled={!canUse || !Number.isFinite(Number(state.display))} onClick={() => onUse(state.display)} variant="outline">将结果填入当前金额草稿</Button>}
+        {onUse && <Button type="button" className="calculator-use" disabled={!canUse || !Number.isFinite(Number(state.display))} onClick={() => { const calculated = state.tokens?.length ? calculatorKey(state, '=') : state; setState(calculated); if (!calculated.error) onUse(calculated.display); }} variant="outline">将结果填入当前金额草稿</Button>}
       </section>
     </div>
   );

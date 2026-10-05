@@ -14,8 +14,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { copyText } from '@/lib/clipboard';
 
-type Picture = { url: string; name?: string };
+export type Picture = { url: string; name?: string; assetId?: string; title?: string; english?: string; chinese?: string };
 
 /** Local Blob URLs stay inside the vault page, including while zooming. */
 export function ExampleImage({
@@ -79,7 +80,7 @@ export function ExampleImage({
             if (e.key === 'ArrowRight') step(1);
           }}
         >
-          <DialogTitle>{picture.name || alt}</DialogTitle>
+          <DialogTitle>{picture.title || picture.name || alt}</DialogTitle>
           <DialogDescription>
             本地原图预览 · 放大后可滚动查看细节，按 Esc 关闭。
           </DialogDescription>
@@ -129,6 +130,11 @@ export function ExampleImage({
               适应窗口
             </Button>
           </div>
+          {picture.assetId && <div className="example-prompt-actions">
+            <Button variant="outline" onClick={() => { let next = current; for (let i = 0; i < pictures.length; i++) { next = (next + 1) % pictures.length; if (pictures[next].assetId !== picture.assetId) break; } setCurrent(next); setZoom(1); }} disabled={!pictures.some((item) => item.assetId !== picture.assetId)}>下一个提示词</Button>
+            {picture.english && <Button onClick={() => void copyText(picture.english!)}>复制英文提示词</Button>}
+            {picture.chinese && <Button onClick={() => void copyText(picture.chinese!)}>复制中文提示词</Button>}
+          </div>}
           <div className="example-lightbox-scroll" ref={viewport}>
             <div
               className="example-lightbox-canvas"

@@ -1680,6 +1680,7 @@ export function WatermarkEditor({
                         ? `${Math.round(selected.rotation)}°`
                         : `${Math.round((selected[control.key] ?? 1) * 100)}%`}
                     </span>
+                    <input type="number" aria-label={`${control.label}精确数值`} min={control.key === 'rotation' ? control.min : control.min * 100} max={control.key === 'rotation' ? control.max : control.max * 100} step={control.key === 'rotation' ? 1 : .5} value={Number(((selected[control.key] ?? 1) * (control.key === 'rotation' ? 1 : 100)).toFixed(2))} onChange={(event) => { if (!event.target.value) return; const value = Number(event.target.value) / (control.key === 'rotation' ? 1 : 100); if (Number.isFinite(value)) change(selected.id, { [control.key]: Math.max(control.min, Math.min(control.max, value)) }); }} />
                     <input
                       aria-label={control.label}
                       max={control.max}
@@ -1707,6 +1708,7 @@ export function WatermarkEditor({
                         }{' '}
                         · {Math.round(selected.crop[edge] * 100)}%
                       </span>
+                      <input type="number" aria-label={`${edge}裁切百分比`} min="0" max="49" step=".5" value={Number((selected.crop[edge] * 100).toFixed(2))} onChange={(event) => { if (event.target.value) change(selected.id, { crop: { ...selected.crop, [edge]: Math.max(0, Math.min(.49, Number(event.target.value) / 100)) } }); }} />
                       <input
                         max="0.49"
                         min="0"
@@ -1909,6 +1911,7 @@ export function WatermarkEditor({
                       {control.label} ·{' '}
                       {Math.round((selected[control.key] ?? 1) * 100)}%
                     </span>
+                    <input type="number" aria-label={`${control.label}精确数值`} min={control.min * 100} max={control.max * 100} step=".5" value={Number(((selected[control.key] ?? 1) * 100).toFixed(2))} onChange={(event) => { if (event.target.value) change(selected.id, { [control.key]: Math.max(control.min, Math.min(control.max, Number(event.target.value) / 100)) }); }} />
                     <input
                       aria-label={control.label}
                       max={control.max}
@@ -1937,6 +1940,7 @@ export function WatermarkEditor({
                       }{' '}
                       · {Math.round(selected.crop[edge] * 100)}%
                     </span>
+                    <input type="number" aria-label={`${edge}裁切百分比`} min="0" max="49" step=".5" value={Number((selected.crop[edge] * 100).toFixed(2))} onChange={(event) => { if (event.target.value) change(selected.id, { crop: { ...selected.crop, [edge]: Math.max(0, Math.min(.49, Number(event.target.value) / 100)) } }); }} />
                     <input
                       max="0.49"
                       min="0"

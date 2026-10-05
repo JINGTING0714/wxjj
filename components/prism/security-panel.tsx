@@ -38,6 +38,7 @@ export function SecurityPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [lastBackup, setLastBackup] = useState('');
   const [backup, setBackup] = useState<File>();
   const [info, setInfo] = useState<BackupInfo>();
   const [backupPassword, setBackupPassword] = useState('');
@@ -52,6 +53,9 @@ export function SecurityPanel() {
     'vault' | 'backup' | 'recovery'
   >('vault');
   const [boundaryOpen, setBoundaryOpen] = useState(false);
+  useEffect(() => {
+    setLastBackup(localStorage.getItem('prism-last-backup') || '');
+  }, []);
   useEffect(() => {
     if (vault.status !== 'unlocked') {
       setRecoveryKey('');
@@ -89,25 +93,28 @@ export function SecurityPanel() {
         await vault.exportBackup(),
         `wxjj-complete-${new Date().toISOString().slice(0, 10)}.prism`,
       );
+      const generated = new Date().toLocaleString('zh-CN');
+      localStorage.setItem('prism-last-backup', generated);
+      setLastBackup(generated);
       setNotice(
-        '完整备份已通过解密与完整性检查并生成。请确认浏览器下载已完成；备份含所有已保存库、文字、原图、例图、水印、成品和已保存的工坊设置与队列。编辑表单请先点击保存。',
+        '加密完整备份已生成，请确认下载完成，并与恢复密钥分开保管。',
       );
     });
   return (
     <div className="studio-page security-page">
       <SectionHead
         eyebrow="LOCAL SECURITY"
-        number="09"
+        number="00"
         title="安全与备份"
-        description="不需要 GPT 登录。密码、恢复密钥、文件解析与图像处理都只在你的浏览器内进行。"
+        description="资料保存在当前浏览器。换设备请使用完整备份迁移。"
       />
       <section className="security-hero">
         <ShieldCheck size={42} />
         <div>
           <Badge className="success-badge">LOCAL ONLY</Badge>
-          <h2>数据属于你，也只由你保管</h2>
+          <h2>本机保存 · 定期备份</h2>
           <p>
-            朋友打开同一个网址，不会看到你的资料。不同设备、浏览器和网址有独立的本地保险库；迁移请使用完整备份，不要清理原设备数据。
+            同一网址在不同设备上有独立保险库。迁移后先核对资料，再清理旧设备。
           </p>
         </div>
       </section>
@@ -152,7 +159,7 @@ export function SecurityPanel() {
                 </Badge>
               </div>
               <p>
-                锁定后工作区、例图、记录和编辑入口全部关闭；后台处理也会停止，避免锁定后仍然产生可见数据。
+                锁定后隐藏资料并暂停处理。再次使用时输入密码解锁。
               </p>
               {vault.status === 'unlocked' ? (
                 <Button disabled={busy || vault.busy} onClick={vault.lock}>
@@ -216,9 +223,9 @@ export function SecurityPanel() {
                 <h3>02 · 完整导出与恢复</h3>
               </div>
               <p>
-                .prism 是本产品的加密完整备份，不是普通图片。导入使用
+                .prism 包含全部已保存的资料与工坊队列。恢复使用
                 <strong>原设备导出时的密码</strong>
-                。新版会逐个检查文件，全部验证成功后才恢复；不会把两个保险库的数据混在一起。
+                。验证成功后替换当前保险库。
               </p>
               <div className="backup-actions">
                 <Button
@@ -252,6 +259,7 @@ export function SecurityPanel() {
                   />
                 </label>
               </div>
+              <div className="backup-checklist"><strong>{lastBackup ? `本设备最近生成备份：${lastBackup}` : '尚无本设备备份生成记录'}</strong><ol><li>先保存编辑内容，再点“完整导出”。</li><li>确认 .prism 文件已下载到设备。</li><li>牢记导出时密码，恢复密钥另外保管。</li></ol></div>
               {backup && info && (
                 <form
                   className="vault-password-form restore-form"
@@ -337,7 +345,7 @@ export function SecurityPanel() {
                 <h3>03 · 恢复密钥与重设密码</h3>
               </div>
               <p>
-                没有服务器后门或邮箱找回。请在还能解锁时生成恢复密钥，并存到其他安全位置。它能重设密码且保留全部资料；重新生成会使当前保险库旧密钥失效（旧备份仍使用导出时的密钥）。
+                忘记密码时，用恢复密钥重设并保留资料。请与备份分开保管；重新生成后当前库的旧密钥失效，随后需重新备份。
               </p>
               {vault.status === 'unlocked' ? (
                 <form
@@ -453,7 +461,7 @@ export function SecurityPanel() {
                 </form>
               )}
               <p>
-                密码与恢复密钥同时遗失时，加密数据无法恢复；不会通过清空数据来假装“找回”。旧版没有设置过恢复密钥的保险库，请使用原密码。
+                密码和恢复密钥同时丢失，资料无法恢复。没有恢复密钥的旧库仍需原密码。
               </p>
             </article>
           </MobileWorkspacePanel>
@@ -464,7 +472,7 @@ export function SecurityPanel() {
         <div>
           <h3>完整备份与后台处理边界</h3>
           <p>
-            先保存正在编辑的表单，再导出。导出会暂停运算并保存工坊快照；换设备后可查看所有已保存内容并继续未完成队列。同一页切换板块不影响处理；锁定、刷新、关窗或系统冻结标签页会暂停运算。浏览器无法承诺关窗后继续计算。网站不上传你的资产；静态网站托管服务仍可能保留普通访问日志。
+            切换板块可继续处理；锁定、刷新、关窗会暂停。备份包含已保存的队列，导入后可继续处理。资产在本机处理，网站托管服务可能保留普通访问日志。
           </p>
         </div>
       </section>

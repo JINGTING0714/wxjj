@@ -309,7 +309,7 @@ export function PngCleanerPanel({
     <>
       <SectionHead
         eyebrow="PNG PRIVACY"
-        number="09"
+        number="07"
         title="PNG 隐私清洗"
         description="检查并移除图片内的附加信息，生成新的 PNG。原文件始终保留，所有处理都在本机完成。"
       />

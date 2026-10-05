@@ -57,6 +57,7 @@ export type CollageOptions = {
   numberDigits: number;
   canvasWidth?: number;
   canvasHeight?: number;
+  gap?: number;
   format: 'image/png' | 'image/jpeg';
 };
 
@@ -449,7 +450,7 @@ export async function createCollages(
     context.fillStyle = '#17131c';
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    const gap = Math.max(
+    const gap = options.gap ?? Math.max(
       2,
       Math.round(Math.min(canvas.width, canvas.height) * 0.003),
     );

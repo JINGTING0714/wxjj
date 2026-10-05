@@ -302,7 +302,7 @@ export function AccountingPanel() {
       {confirmation.dialog}
       <SectionHead
         eyebrow="LOCAL LEDGER"
-        number="10"
+        number="11"
         title="记账本"
         description="你录入，你确认。收入、支出和资金变化在本机保险库保存。"
         actions={

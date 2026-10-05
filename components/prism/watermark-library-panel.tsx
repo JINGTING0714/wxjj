@@ -317,7 +317,7 @@ export function WatermarkLibraryPanel({
     <div className="studio-page watermark-library-page">
       <SectionHead
         eyebrow="WATERMARK ARCHIVE"
-        number="06B"
+        number="04"
         title="水印库"
         description="上传到工坊的新水印会自动进入这里；每张水印都能分类、补充信息、替换、下载或删除。"
         actions={
@@ -394,7 +394,7 @@ export function WatermarkLibraryPanel({
       {visible.length ? (
         <div className="record-list watermark-records">
           {visible.map((watermark) => (
-            <details className="asset-record-fold" key={watermark.id}><summary>{watermark.title} · 水印素材 · {watermark.tags.join(' / ') || '未添加标签'}</summary><article className="record-row">
+            <div className="asset-record-fold watermark-visual-record" key={watermark.id}><article className="record-row">
               <div className="record-identity">
                 <SelectItem
                   selection={selection}
@@ -417,7 +417,7 @@ export function WatermarkLibraryPanel({
                   <p>{watermark.tags.join(' / ') || '未添加标签'}</p>
                 </div>
               </div>
-              <div className="record-secret">
+              <details className="visual-record-details"><summary>查看来源与备注</summary><div className="record-secret">
                 <p>
                   <strong>{watermark.author}</strong> · {watermark.origin}
                 </p>
@@ -443,6 +443,7 @@ export function WatermarkLibraryPanel({
                 <p>{watermark.note || '暂无私人备注。'}</p>
                 <CustomFieldList fields={watermark.customFields} />
               </div>
+              </details>
               <div className="row-actions">
                 <button
                   type="button"
@@ -472,7 +473,7 @@ export function WatermarkLibraryPanel({
                 </button>
               </div>
             </article>
-            </details>
+            </div>
           ))}
         </div>
       ) : (

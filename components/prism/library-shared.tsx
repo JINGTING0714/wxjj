@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { AssetImage, CollectionRecord } from '@/lib/prism-types';
-import { ExampleImage } from './example-image';
+import { ExampleImage, type Picture } from './example-image';
 import { MobileWorkspaceSheet } from './mobile-workspace';
 
 export function CollectionRail({
@@ -204,9 +204,13 @@ export function RecordHead({ middle }: { middle: string }) {
 export function RecordExamples({
   images,
   title,
+  browseImages,
+  browseOffset = 0,
 }: {
   images: AssetImage[];
   title: string;
+  browseImages?: Picture[];
+  browseOffset?: number;
 }) {
   return (
     <div className="record-examples">
@@ -215,8 +219,8 @@ export function RecordExamples({
           key={image.id}
           src={image.url}
           alt={`${title} 例图 ${index + 1}`}
-          images={images}
-          index={index}
+          images={browseImages || images}
+          index={browseOffset + index}
         />
       ))}
       {!images.length && (

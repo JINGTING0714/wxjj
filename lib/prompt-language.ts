@@ -16,27 +16,43 @@ export function classifyPrompt(text: string) {
 
 /** Conservative import mapping. Existing vault records never pass through this function. */
 export function classifyImportedPromptText(text: string) {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n').map((line) => line.trim()).filter(Boolean);
+  const lines = text
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
   const english: string[] = [];
   const chinese: string[] = [];
   const unconfirmed: string[] = [];
   let explicit: 'english' | 'chinese' | null = null;
   for (const raw of lines) {
-    const englishLabel = raw.match(/^(?:英文(?:提示词|原文)?|english(?:\s+prompt)?|prompt\s*en)\s*[:：]\s*(.*)$/i);
-    const chineseLabel = raw.match(/^(?:中文(?:提示词|译文)?|译文|翻译|chinese(?:\s+prompt)?|prompt\s*zh)\s*[:：]\s*(.*)$/i);
+    const englishLabel = raw.match(
+      /^(?:英文(?:提示词|原文|版)?|english(?:\s+prompt)?|prompt\s*en)(?:\s*[:：]\s*(.*)|\s*)$/i,
+    );
+    const chineseLabel = raw.match(
+      /^(?:中文(?:提示词|译文|版)?|译文|翻译|chinese(?:\s+prompt)?|prompt\s*zh)(?:\s*[:：]\s*(.*)|\s*)$/i,
+    );
     if (englishLabel) explicit = 'english';
     if (chineseLabel) explicit = 'chinese';
-    const line = englishLabel?.[1] ?? chineseLabel?.[1] ?? raw;
+    const line =
+      englishLabel || chineseLabel
+        ? englishLabel?.[1] || chineseLabel?.[1] || ''
+        : raw;
     if (!line) continue;
-    if (explicit === 'english') { english.push(line); continue; }
-    if (explicit === 'chinese') { chinese.push(line); continue; }
     if (/^(?:使用|用法|说明|注意|建议|刷\s*n\d)/i.test(line)) {
-      unconfirmed.push(line); continue;
+      unconfirmed.push(line);
+      continue;
     }
     const han = [...line.matchAll(/\p{Script=Han}/gu)].length;
     const latin = [...line.matchAll(/[A-Za-z]/g)].length;
-    if (!han && latin >= 4) english.push(line);
-    else if (han >= 2 && han >= latin * 0.35) chinese.push(line);
+    if (!han && latin >= 4) {
+      english.push(line);
+      explicit = 'english';
+    } else if (han >= 2 && han >= latin * 0.35) {
+      chinese.push(line);
+      explicit = 'chinese';
+    } else if (explicit && /^--[a-z]+\b/i.test(line))
+      (explicit === 'english' ? english : chinese).push(line);
     else unconfirmed.push(line);
   }
   return {

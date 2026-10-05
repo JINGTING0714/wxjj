@@ -15,7 +15,24 @@ import {
   resolveLegacyProfileIds,
 } from '../lib/profile-model';
 import type { StoredLibraryAsset } from '../lib/prism-types';
+import { proposePromptRepair } from '../lib/prompt-repair';
 (globalThis as any).DOMParser = DOMParser;
+test('unlabeled translation beside a recognized prompt header maps to Chinese, and image formulas are excluded', async () => {
+  const csv = '编号,提示词,例图,其他\n44,"8K resolution, cinematic portrait, soft morning light","=DISPIMG(abc1234567890123456789012345)","8K分辨率，最高画质标准，写实插画，微俯视镜头，电影光线与柔和阴影 --ar 3:4"';
+  const parsed = await parseAssetFile(new File([csv], '双语.csv'), 'prompt');
+  assert.match(parsed.rows[0].promptChinese!, /最高画质标准/);
+  assert.match(parsed.rows[0].promptEnglish!, /cinematic portrait/);
+  assert.ok(!parsed.rows[0].promptEnglish!.includes('DISPIMG'));
+  assert.ok(!parsed.rows[0].customFields.some(field => field.value.includes('最高画质标准')));
+});
+test('legacy repair is a proposal and preserves unrelated fields and notes', () => {
+  const asset = { id: 'legacy', kind: 'prompt', title: '44', secret: 'cinematic portrait, soft morning light', note: '自己的私人备注', collection: 'unfiled', author: '', origin: '', acquisition: '', tags: [], customFields: [{ id: 'cn', label: '原文件补充 2', value: '最高画质标准，写实插画，微俯视镜头，电影光线与柔和阴影 --ar 3:4' }, { id: 'position', label: '导入定位', value: 'Sheet1 第44行' }] } satisfies StoredLibraryAsset;
+  const repaired = proposePromptRepair(asset)!;
+  assert.match(repaired.promptChinese!, /最高画质/);
+  assert.equal(repaired.note, asset.note);
+  assert.deepEqual(repaired.customFields!.map(field => field.id), ['position']);
+  assert.equal(asset.customFields.length, 2);
+});
 test('variable-length short codes keep exact contents in headered and plain imports', async () => {
   const headered = await parseAssetFile(
     new File(
