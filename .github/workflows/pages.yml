@@ -7,10 +7,10 @@ permissions:
   contents: read
 concurrency:
   group: wxjj-pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -26,7 +26,7 @@ jobs:
           path: dist/pages
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     permissions:
       pages: write
       id-token: write
