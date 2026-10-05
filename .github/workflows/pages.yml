@@ -9,10 +9,20 @@ concurrency:
   group: wxjj-pages
   cancel-in-progress: true
 jobs:
-  build:
+  publish:
+    name: Test, build and deploy
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -24,15 +34,5 @@ jobs:
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist/pages
-  deploy:
-    needs: build
-    runs-on: ubuntu-24.04-arm
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - uses: actions/deploy-pages@v4
         id: deployment
