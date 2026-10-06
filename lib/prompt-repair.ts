@@ -1,48 +1,79 @@
-import { classifyImportedPromptText, promptLanguages } from './prompt-language';
+import { classifyImportedPromptText } from './prompt-language';
 import type { StoredLibraryAsset } from './prism-types';
 
-/** Return a proposed repair only. The caller must show it before writing to the vault. */
+const promptShape = (text: string) =>
+  !/^(?:my\s|personal\b|notes?\s*[:：]|usage\b|use\s|instructions?\b|copyright\b|purchase\b)/i.test(
+    text.trim(),
+  ) &&
+  !/^(?:我|个人|自己|备注|笔记|使用|用法|说明|注意|建议|版权|授权|购买)/.test(
+    text.trim(),
+  ) &&
+  !/^https?:\/\/\S+$/.test(text) &&
+  !/^=?(?:_?xlfn\.)?(?:DISPIMG|IMAGE)\s*\(/i.test(text) &&
+  (/^(?:中文|英文|译文|翻译|English|Chinese|Prompt)\s*[:：]/i.test(text) ||
+    (text.length >= 24 &&
+      /分辨率|画质|插画|镜头|肖像|景深|光影|cinematic|portrait|illustration|photoreal|--(?:ar|sref|stylize)\b/i.test(
+        text,
+      )) ||
+    (text.length >= 100 && (text.match(/[,，;；]/g)?.length || 0) >= 3));
+
+/** Reclassify language fields and move recognizable imported prose. Original records are archived by the caller. */
 export function proposePromptRepair(
   asset: StoredLibraryAsset,
 ): StoredLibraryAsset | null {
   if (asset.kind !== 'prompt') return null;
-  const languages = promptLanguages(asset);
-  const extracted = (asset.customFields || [])
-    .filter(
-      (field) =>
-        /原文件|中文|英文|翻译|译文/i.test(field.label) &&
-        !/^=?_?xlfn\.|^=DISPIMG\(/i.test(field.value) &&
-        field.value.length >= 24,
-    )
-    .map((field) => ({
-      field,
-      mapped: classifyImportedPromptText(field.value),
-    }))
-    .filter(({ mapped }) => mapped.english || mapped.chinese);
-  if (!extracted.length) return null;
-  const merge = (existing: string, additions: string[]) =>
-    [...new Set([existing, ...additions].filter(Boolean))].join('\n');
-  const promptEnglish = merge(
-    languages.english,
-    extracted.map(({ mapped }) => mapped.english),
+  const originalTexts = [
+    ...new Set(
+      [
+        asset.promptEnglish,
+        asset.promptChinese,
+        asset.promptUnconfirmed,
+        asset.secret,
+      ].filter((value): value is string => !!value),
+    ),
+  ];
+  const mapped = originalTexts.map(classifyImportedPromptText);
+  const fields = (asset.customFields || []).filter(
+    (field) =>
+      /原文件|中文|英文|翻译|译文|旧补充/i.test(field.label) &&
+      promptShape(field.value),
   );
-  const promptChinese = merge(
-    languages.chinese,
-    extracted.map(({ mapped }) => mapped.chinese),
+  mapped.push(
+    ...fields.map((field) => classifyImportedPromptText(field.value)),
   );
-  const promptUnconfirmed = merge(
-    languages.unconfirmed,
-    extracted.map(({ mapped }) => mapped.unconfirmed),
+  const noteBlocks = (asset.note || '').split(/\n\s*\n/);
+  const movedNotes = noteBlocks.filter(promptShape);
+  const noteMapped = movedNotes.map(classifyImportedPromptText);
+  mapped.push(...noteMapped.map((value) => ({ ...value, unconfirmed: '' })));
+  const unique = (values: string[]) =>
+    [...new Set(values.filter(Boolean))].join('\n');
+  const promptEnglish = unique(mapped.map((value) => value.english));
+  const promptChinese = unique(mapped.map((value) => value.chinese));
+  const promptUnconfirmed = unique(mapped.map((value) => value.unconfirmed));
+  const note = movedNotes.length
+    ? [
+        ...noteBlocks.filter((block) => !movedNotes.includes(block)),
+        ...noteMapped.map((value) => value.unconfirmed).filter(Boolean),
+      ].join('\n\n')
+    : asset.note;
+  const customFields = (asset.customFields || []).filter(
+    (field) => !fields.some((value) => value.id === field.id),
   );
-  return {
+  const repair = {
     ...asset,
     promptEnglish,
     promptChinese,
     promptUnconfirmed,
     secret: promptEnglish || promptChinese || promptUnconfirmed,
-    customFields: (asset.customFields || []).filter(
-      (field) => !extracted.some((entry) => entry.field.id === field.id),
-    ),
-    updatedAt: new Date().toISOString(),
+    note,
+    customFields,
   };
+  const current = {
+    ...asset,
+    promptEnglish: asset.promptEnglish || '',
+    promptChinese: asset.promptChinese || '',
+    promptUnconfirmed: asset.promptUnconfirmed || '',
+    customFields: asset.customFields || [],
+  };
+  return JSON.stringify(repair) === JSON.stringify(current) ? null : repair;
 }

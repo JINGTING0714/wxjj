@@ -24,9 +24,13 @@ export type StoredLibraryAsset = {
   title: string;
   secret: string;
   longCode?: string;
+  profileVersion?: 'N6P' | 'N7P' | 'unconfirmed';
+  derivedFromProfile?: { folderId: string; codeId: string };
+  emotionSyncFingerprint?: string;
   promptEnglish?: string;
   promptChinese?: string;
   promptUnconfirmed?: string;
+  promptAutoRepairDisabled?: boolean;
   profileCodes?: ProfileShortCode[];
   stageType?: string;
   stageTypeOther?: string;

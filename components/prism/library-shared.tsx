@@ -206,11 +206,13 @@ export function RecordExamples({
   title,
   browseImages,
   browseOffset = 0,
+  onEditAsset,
 }: {
   images: AssetImage[];
   title: string;
   browseImages?: Picture[];
   browseOffset?: number;
+  onEditAsset?: (id: string) => void;
 }) {
   return (
     <div className="record-examples">
@@ -221,6 +223,7 @@ export function RecordExamples({
           alt={`${title} 例图 ${index + 1}`}
           images={browseImages || images}
           index={browseOffset + index}
+          onEditAsset={onEditAsset}
         />
       ))}
       {!images.length && (

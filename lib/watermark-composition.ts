@@ -221,6 +221,13 @@ export function fitCompositionToContent<T extends LayerTransform>(
   return { layers: layers.map(translate), composition };
 }
 
+/** Keep the visible source at its original pixel density when a small editing layer is exported. */
+export function preserveSourceResolution<T extends LayerTransform>(layers: T[], composition: WatermarkComposition) {
+  const source = composition.source;
+  const density = source.opacity > 0 ? Math.max(1, 1 / (Math.max(.01, source.scale) * Math.min(layerStretch(source.scaleX), layerStretch(source.scaleY)))) : 1;
+  return { layers: layers.map(layer => ({ ...layer, scale: layer.scale * density })), composition: { ...composition, canvasWidth: composition.canvasWidth * density, canvasHeight: composition.canvasHeight * density, source: { ...source, scale: source.scale * density } } };
+}
+
 /** Only opaque source pixels can make the canvas background irrelevant. */
 export function sourceCoversCanvas(
   width: number,

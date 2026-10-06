@@ -38,7 +38,6 @@ import {
   imageContentBounds,
   type WatermarkLayerInput,
 } from '@/lib/image-processing';
-import type { StoredWatermark } from '@/lib/prism-types';
 import {
   compositionStack,
   fitCompositionToContent,
@@ -62,6 +61,7 @@ import {
 } from '@/lib/watermark-interaction';
 import type { LayerDimensions } from '@/lib/watermark-composition';
 import type { WatermarkMobilePanel } from './watermark-panel';
+import { WatermarkPicker } from './watermark-picker';
 
 export type TextLayerStyle = {
   content: string;
@@ -226,6 +226,7 @@ export function WatermarkEditor({
   const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
   const [mobilePreviewFullscreen, setMobilePreviewFullscreen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [desktopTab, setDesktopTab] = useState('watermarks');
   const [textDraft, setTextDraft] = useState<TextLayerStyle>(defaultTextStyle);
   const [textBusy, setTextBusy] = useState(false);
   const [guides, setGuides] = useState<AlignmentGuides | null>(null);
@@ -261,9 +262,6 @@ export function WatermarkEditor({
       undo: history.current.past.length > 0,
       redo: history.current.future.length > 0,
     });
-  const [library, setLibrary] = useState<
-    Array<{ record: StoredWatermark; file: File }>
-  >([]);
   useEffect(() => {
     const next = { layers, composition };
     if (history.current.source !== source) {
@@ -504,74 +502,7 @@ export function WatermarkEditor({
       cancelled = true;
     };
   }, [source, layers]);
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      const records = await vault.loadRecords<StoredWatermark>('watermarks');
-      const items = [];
-      for (const record of records) {
-        const [blob] = await vault.loadBlobs(`watermark-file:${record.id}`);
-        if (blob)
-          items.push({
-            record,
-            file: new File([blob.blob], blob.name, { type: blob.blob.type }),
-          });
-      }
-      if (!cancelled) setLibrary(items);
-    };
-    void refresh().catch((e) => {
-      if (!cancelled) setError(String(e));
-    });
-    const update = () => {
-      void refresh().catch(() => {});
-    };
-    window.addEventListener('prism:watermarks-changed', update);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('prism:watermarks-changed', update);
-    };
-  }, [vault.session]);
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
-  const add = async (files: File[]) => {
-    try {
-      setError('');
-      const added: EditorLayer[] = [];
-      for (const file of files) {
-        await loadImage(file);
-        const id = crypto.randomUUID();
-        const record: StoredWatermark = {
-          id,
-          title: file.name.replace(/\.[^.]+$/, ''),
-          collection: 'unfiled',
-          author: '未记录',
-          origin: '本地上传',
-          acquisition: '其他',
-          note: '',
-          tags: [],
-          fileName: file.name,
-          blobId: `${id}-file`,
-          createdAt: new Date().toISOString(),
-        };
-        await vault.writeBatch({
-          records: [{ scope: 'watermarks', value: record }],
-          blobs: [
-            {
-              id: record.blobId!,
-              scope: `watermark-file:${id}`,
-              blob: file,
-              name: file.name,
-            },
-          ],
-        });
-        added.push(defaultLayer(file));
-      }
-      onChange([...currentLayers.current, ...added]);
-      if (added[0]) setActive(added[0].id);
-      window.dispatchEvent(new CustomEvent('prism:watermarks-changed'));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '水印导入失败');
-    }
-  };
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
     if (disabled || !surface.current) return;
     if (event.pointerType === 'touch' && !mobileDirectEditing) return;
@@ -726,6 +657,7 @@ export function WatermarkEditor({
     <div
       className="watermark-layout watermark-free-editor"
       ref={editorRoot}
+      data-desktop-tab={desktopTab}
     >
       <section
         className={`watermark-input-panel mobile-workspace-preview ${mobilePreviewFullscreen ? 'is-mobile-fullscreen' : ''}`}
@@ -950,19 +882,12 @@ export function WatermarkEditor({
               <Redo2 />
               重做
             </Button>
-            <label className="mini-file mobile-preview-action">
-              <Plus />
-              导入水印
-              <input
-                accept="image/*"
-                multiple
-                onChange={(e) => {
-                  void add(Array.from(e.target.files || []));
-                  e.target.value = '';
-                }}
-                type="file"
-              />
-            </label>
+            <WatermarkPicker disabled={disabled} onUse={file => {
+              const layer = defaultLayer(file);
+              onChange([...currentLayers.current, layer]);
+              currentLayers.current = [...currentLayers.current, layer];
+              setActive(layer.id);
+            }} />
             <Button
               disabled={
                 disabled ||
@@ -1079,6 +1004,9 @@ export function WatermarkEditor({
         className="watermark-layer-panel workshop-fieldset mobile-editor-controls"
       >
         <h3 className="desktop-workspace-only">画布、图层与变换</h3>
+        <nav className="watermark-desktop-tabs desktop-workspace-only" aria-label="水印操作区">
+          {[['watermarks', '水印与图层'], ['adjust', '调整参数'], ['text', '文字'], ['canvas', '画布']].map(([id, label]) => <Button key={id} size="sm" variant={desktopTab === id ? 'default' : 'outline'} onClick={() => setDesktopTab(id)}>{label}</Button>)}
+        </nav>
         <div className="editor-history-actions desktop-workspace-only">
           <Button
             disabled={disabled || !canUndo}
@@ -1239,42 +1167,12 @@ export function WatermarkEditor({
             <h3>水印与图层</h3>
             <p>添加、选择、排序或锁定图层。</p>
           </div>
-          <div className="layer-source-actions">
-            <label className="mini-file">
-              <Plus />
-              上传水印
-              <input
-                accept="image/*"
-                multiple
-                onChange={(e) => {
-                  void add(Array.from(e.target.files || []));
-                  e.target.value = '';
-                }}
-                type="file"
-              />
-            </label>
-            <select
-              aria-label="从水印库选择"
-              onChange={(e) => {
-                const item = library.find(
-                  (s) => s.record.id === e.target.value,
-                );
-                if (item) {
-                  const layer = defaultLayer(item.file);
-                  onChange([...layers, layer]);
-                  setActive(layer.id);
-                }
-              }}
-              value=""
-            >
-              <option value="">从水印库选择…</option>
-              {library.map((item) => (
-                <option key={item.record.id} value={item.record.id}>
-                  {item.record.title} · {item.record.author}
-                </option>
-              ))}
-            </select>
-          </div>
+          <WatermarkPicker disabled={disabled} onUse={file => {
+            const layer = defaultLayer(file);
+            onChange([...currentLayers.current, layer]);
+            currentLayers.current = [...currentLayers.current, layer];
+            setActive(layer.id);
+          }} />
           <div className="transform-layer-list">
             {[...stack].reverse().map((layer) => (
               <article
@@ -1320,7 +1218,7 @@ export function WatermarkEditor({
                   <button
                     type="button"
                     aria-label={`${layer.locked ? '解锁' : '锁定'}${layer.id === SOURCE_LAYER_ID ? '原图' : layer.text ? '文字层' : '水印层'}`}
-                    onClick={() => change(layer.id, { locked: !layer.locked })}
+                  onClick={() => { if (layer.locked) setActive(layer.id); change(layer.id, { locked: !layer.locked }); }}
                   >
                     {layer.locked ? <Lock /> : <Unlock />}
                   </button>

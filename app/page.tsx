@@ -21,7 +21,7 @@ import {
   Stamp,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -366,6 +366,7 @@ export default function Home() {
   const vault = useVault();
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
+  const flowDrag = useRef({ startX: 0, left: 0, down: false, moved: false });
   const globalQuery = '';
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'system';
@@ -396,6 +397,8 @@ export default function Home() {
   }, [activeView]);
 
   const vaultReady = vault.status === 'unlocked';
+  const navigationOrder = [{ id: 'overview' as const, label: '开始与总览' }, ...orderedModuleGuide];
+  const navigationIndex = navigationOrder.findIndex(entry => entry.id === activeView);
   const firstActionLabel = vaultReady
     ? '保险库已解锁 · 整理提示词'
     : vault.status === 'uninitialized'
@@ -410,7 +413,7 @@ export default function Home() {
 
   return (
     <TooltipProvider>
-      <SiteTools />
+      <SiteTools previous={navigationOrder[navigationIndex - 1]?.label} next={navigationOrder[navigationIndex + 1]?.label} onPrevious={() => { const entry = navigationOrder[navigationIndex - 1]; if (entry) setActiveView(entry.id); }} onNext={() => { const entry = navigationOrder[navigationIndex + 1]; if (entry) setActiveView(entry.id); }} />
       <main
         className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' ? 'editor-active' : ''}`}
       >
@@ -627,7 +630,7 @@ export default function Home() {
                   下面每一步都可以直接点击进入对应板块。初次使用建议按编号走一遍；熟悉之后可以从任意节点开始。
                 </p>
               </div>
-              <div className="workflow-track">
+              <div className="workflow-track" onPointerDown={event => { if (event.pointerType === 'mouse') flowDrag.current = { startX: event.clientX, left: event.currentTarget.scrollLeft, down: true, moved: false }; }} onPointerMove={event => { const drag = flowDrag.current; if (!drag.down || event.pointerType !== 'mouse') return; const distance = event.clientX - drag.startX; if (Math.abs(distance) > 6) drag.moved = true; if (drag.moved) { event.currentTarget.scrollLeft = drag.left - distance; event.preventDefault(); } }} onPointerUp={() => { flowDrag.current.down = false; }} onPointerLeave={() => { flowDrag.current.down = false; }} onClickCapture={event => { if (flowDrag.current.moved) { event.preventDefault(); event.stopPropagation(); flowDrag.current.moved = false; } }}>
                 {workflowSteps.map((step) => (
                   <button
                     key={step.number}

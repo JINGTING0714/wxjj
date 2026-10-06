@@ -16,6 +16,7 @@ import {
 } from '../lib/profile-model';
 import type { StoredLibraryAsset } from '../lib/prism-types';
 import { proposePromptRepair } from '../lib/prompt-repair';
+import { classifyPrompt } from '../lib/prompt-language';
 (globalThis as any).DOMParser = DOMParser;
 test('unlabeled translation beside a recognized prompt header maps to Chinese, and image formulas are excluded', async () => {
   const csv = '编号,提示词,例图,其他\n44,"8K resolution, cinematic portrait, soft morning light","=DISPIMG(abc1234567890123456789012345)","8K分辨率，最高画质标准，写实插画，微俯视镜头，电影光线与柔和阴影 --ar 3:4"';
@@ -32,6 +33,16 @@ test('legacy repair is a proposal and preserves unrelated fields and notes', () 
   assert.equal(repaired.note, asset.note);
   assert.deepEqual(repaired.customFields!.map(field => field.id), ['position']);
   assert.equal(asset.customFields.length, 2);
+});
+test('repair moves obvious translations from notes, resolves language fields and is idempotent', () => {
+  const record: StoredLibraryAsset = { id: 'fix', kind: 'prompt', title: 'fix', secret: '', promptUnconfirmed: 'café cinematic portrait --ar 3:4', note: '中文：最高画质标准，写实插画，微俯视镜头，电影光影 --sref 1234\n\n自己的使用记录', author: '', origin: '', acquisition: '', collection: 'unfiled', tags: [] };
+  const fixed = proposePromptRepair(record)!;
+  assert.match(fixed.promptEnglish!, /café/);
+  assert.match(fixed.promptChinese!, /最高画质/);
+  assert.equal(fixed.note, '自己的使用记录');
+  assert.equal(fixed.promptUnconfirmed, '');
+  assert.equal(proposePromptRepair(fixed), null);
+  assert.equal(classifyPrompt('写实肖像，柔和光影 --sref https://example.com/a --p abc123 --ar 3:4').unconfirmed, '');
 });
 test('variable-length short codes keep exact contents in headered and plain imports', async () => {
   const headered = await parseAssetFile(

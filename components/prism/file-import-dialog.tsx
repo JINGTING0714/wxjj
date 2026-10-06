@@ -384,6 +384,10 @@ export function FileImportDialog({
   const [open, setOpen] = useState(false);
   const [documents, setDocuments] = useState<ImportDocument[]>([]);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [batchProfileVersion, setBatchProfileVersion] = useState<'N6P' | 'N7P' | ''>('');
+  const parseGeneration = useRef(0);
+  const cancelImport = () => { parseGeneration.current++; setOpen(false); setDocuments([]); setBusy(false); setStatus('已取消导入，未写入的内容已清除。'); };
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [checked, setChecked] = useState(false);
@@ -397,27 +401,30 @@ export function FileImportDialog({
     };
   }, []);
   const select = async (files: File[]) => {
+    const generation = ++parseGeneration.current;
     setBusy(true);
     setError('');
     setChecked(false);
     setPage(0);
     try {
       const parsed: ImportDocument[] = [];
-      for (const file of files)
+      for (const file of files) {
+        if (generation !== parseGeneration.current) return;
         parsed.push(
           await parseAssetFile(file, kind, (message) => {
-            if (mounted.current) setStatus(message);
+            if (mounted.current && generation === parseGeneration.current) setStatus(message);
           }),
         );
-      if (mounted.current) {
+      }
+      if (mounted.current && generation === parseGeneration.current) {
         setDocuments((current) => [...current, ...parsed]);
         setStatus('本地解析完成，请核对后一次性导入。');
       }
     } catch (e) {
-      if (mounted.current)
+      if (mounted.current && generation === parseGeneration.current)
         setError(e instanceof Error ? e.message : '文件解析失败');
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && generation === parseGeneration.current) setBusy(false);
     }
   };
   const patchRow = (
@@ -451,9 +458,11 @@ export function FileImportDialog({
   const selected = allRows.filter(({ row }) => row.include);
   const pageCount = Math.max(1, Math.ceil(filtered.length / 20));
   const save = async () => {
+    setSaving(true);
     setBusy(true);
     setError('');
     try {
+      if (kind === 'profile' && !batchProfileVersion) throw new Error('请选择这批 Profile 的 N6P / N7P 版本标签。不同版本请分批导入。');
       if (selected.some(({ row }) => !row.title.trim() || (row.kind === 'prompt' ? !Object.values(importedPromptLanguages(row)).some((value) => value.trim()) : !row.secret.trim())))
         throw new Error('有选中条目没有名称或内容，请补齐或取消选中。');
       if (
@@ -541,6 +550,8 @@ export function FileImportDialog({
             record.secret = languages.english || languages.chinese || languages.unconfirmed;
           }
           if (kind === 'profile') {
+            record.profileVersion = batchProfileVersion || 'unconfirmed';
+            record.tags = [...record.tags.filter(tag => !/^(?:N6P|N7P)$/i.test(tag)), batchProfileVersion];
             record.profileCodes = grouped.map((r) => ({
               id: r.id,
               label: r.title,
@@ -593,6 +604,7 @@ export function FileImportDialog({
       setError(e instanceof Error ? e.message : '保存失败');
     } finally {
       setBusy(false);
+      setSaving(false);
     }
   };
   return (
@@ -612,7 +624,7 @@ export function FileImportDialog({
       )}
       <Dialog
         onOpenChange={(value) => {
-          if (!busy) setOpen(value);
+          if (!value && !saving) cancelImport(); else if (value) setOpen(true);
         }}
         open={open}
       >
@@ -625,6 +637,8 @@ export function FileImportDialog({
               AI。
             </DialogDescription>
           </DialogHeader>
+          <div className="file-import-cancel-bar"><span>{busy ? saving ? '正在写入保险库…' : '正在本机读取文件…' : '校对完成后再确认入库'}</span><Button variant="outline" disabled={saving} onClick={cancelImport}>{busy ? '取消读取并关闭' : '取消导入'}</Button></div>
+          {kind === 'profile' && <label>本批 Profile 版本标签<select aria-label="本批 Profile 版本标签" value={batchProfileVersion} onChange={event => setBatchProfileVersion(event.target.value as typeof batchProfileVersion)}><option value="">请选择版本；N6P / N7P 请分批导入</option><option value="N6P">N6P · niji 6</option><option value="N7P">N7P · niji 7</option></select></label>}
           <div className="import-toolbar">
             <label className="mini-file">
               <Upload />

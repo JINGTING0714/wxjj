@@ -12,6 +12,7 @@ import type { ProfileShortCode } from '@/lib/prism-types';
 import { natureLabel } from '@/lib/profile-model';
 import { copyText } from '@/lib/clipboard';
 import { formatProfileCode } from '@/lib/short-codes';
+import { secretPreview } from '@/lib/prism-types';
 
 export function ProfileCopyDialog({
   title,
@@ -61,7 +62,7 @@ export function ProfileCopyDialog({
           <div className="profile-copy-list">
             {order.map((code, index) => (
               <article key={code.id}>
-                <label aria-label={`选择 ${code.label || code.secret}`}>
+                <label aria-label={`选择 ${code.label || `短码 ${index + 1}`}`}>
                   <input
                     type="checkbox"
                     checked={selected.includes(code.id)}
@@ -76,7 +77,7 @@ export function ProfileCopyDialog({
                   <span>
                     <strong>{code.label || `短码 ${index + 1}`}</strong>
                     <small>{natureLabel(code)}</small>
-                    <code>{code.secret}</code>
+                    <code>{secretPreview(code.secret)}</code>
                   </span>
                 </label>
                 <div>
@@ -99,7 +100,7 @@ export function ProfileCopyDialog({
             ))}
           </div>
           <pre className="copy-parameter-preview">
-            {selected.length ? value : '请选择短码'}
+            {selected.length ? formatProfileCode(order.filter(code => selected.includes(code.id)).map(code => secretPreview(code.secret)).join(' ')) : '请选择短码'}
           </pre>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>

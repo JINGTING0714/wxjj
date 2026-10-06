@@ -28,6 +28,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { FileImportDialog } from './file-import-dialog';
 import { ScreenshotImportDialog } from './screenshot-import-dialog';
 import { PromptRepairDialog } from './prompt-repair-dialog';
+import { proposePromptRepair } from '@/lib/prompt-repair';
 import { ProfileLibraryPanel } from './profile-library-panel';
 import {
   CustomFieldList,
@@ -152,8 +153,8 @@ const stageOptions = [
   '其他',
 ];
 
-function VisualTile({ asset, pictures, offset = 0 }: { asset: LibraryAsset; pictures?: Picture[]; offset?: number }) {
-  return <RecordExamples images={asset.images} title={asset.title} browseImages={pictures} browseOffset={offset} />;
+function VisualTile({ asset, pictures, offset = 0, onEdit }: { asset: LibraryAsset; pictures?: Picture[]; offset?: number; onEdit?: (id: string) => void }) {
+  return <RecordExamples images={asset.images} title={asset.title} browseImages={pictures} browseOffset={offset} onEditAsset={onEdit} />;
 }
 
 function storedAsset(asset: LibraryAsset): StoredLibraryAsset {
@@ -203,6 +204,7 @@ function SimpleLibraryPanel({
   const [acquisition, setAcquisition] = useState('自创');
   const [stageType, setStageType] = useState('测试阶段 P');
   const [formError, setFormError] = useState('');
+  const [repairStatus, setRepairStatus] = useState('');
   useEffect(() => { setRevealed(new Set()); }, [kind, activeCollection]);
 
   const allCollections = useMemo(
@@ -228,6 +230,18 @@ function SimpleLibraryPanel({
       vault.loadRecords<StoredLibraryAsset>(`assets:${kind}`),
       vault.loadRecords<CollectionRecord>(`collections:${kind}`),
     ]);
+    if (kind === 'prompt') {
+      const repairs = records.filter(record => !record.promptAutoRepairDisabled).map(record => ({ record, repair: proposePromptRepair(record) })).filter(entry => entry.repair);
+      if (repairs.length) {
+        const savedHistory = new Set((await vault.loadRecords<{ id: string }>('prompt-repair-history')).map(entry => entry.id));
+        await vault.writeBatch({ records: repairs.flatMap(({ record, repair }) => [
+          ...(!savedHistory.has(`prompt-language-v3:${record.id}`) ? [{ scope: 'prompt-repair-history', value: { id: `prompt-language-v3:${record.id}`, original: record, repairedAt: new Date().toISOString() } }] : []),
+          { scope: 'assets:prompt', value: repair! },
+        ]) });
+        for (const entry of repairs) records[records.findIndex(record => record.id === entry.record.id)] = entry.repair!;
+        setRepairStatus(`已在本机自动整理 ${repairs.length} 条双语字段；原始内容保留为加密副本。`);
+      }
+    }
     const hydrated = await Promise.all(
       records.map(async (record) => {
         const blobs = await vault.loadBlobs(`asset-image:${record.id}`);
@@ -264,6 +278,11 @@ function SimpleLibraryPanel({
     window.addEventListener('prism:hide-secrets', hide);
     return () => window.removeEventListener('prism:hide-secrets', hide);
   }, []);
+  useEffect(() => {
+    const changed = () => { if (vault.status === 'unlocked' && kind === 'moodboard') void refresh().catch(error => setFormError(String(error))); };
+    window.addEventListener('prism:assets-changed', changed);
+    return () => window.removeEventListener('prism:assets-changed', changed);
+  }, [kind, vault.status]);
 
   const query = `${globalQuery} ${localQuery}`.trim().toLocaleLowerCase();
   const filtered = useMemo(
@@ -296,7 +315,7 @@ function SimpleLibraryPanel({
     [activeCollection, assets, query],
   );
 
-  const browsePictures = useMemo(() => kind === 'prompt' ? filtered.flatMap((asset) => asset.images.map((image) => ({ ...image, assetId: asset.id, title: asset.title, ...promptLanguages(asset) }))) : undefined, [kind, filtered]);
+  const browsePictures = useMemo(() => filtered.flatMap(asset => asset.images.map(image => ({ ...image, assetId: asset.id, title: asset.title, ...(kind === 'prompt' ? promptLanguages(asset) : { copyValue: asset.secret, copyLabel: '复制完整短码' }) }))), [kind, filtered]);
   const browseOffsets = useMemo(() => { const offsets = new Map<string, number>(); browsePictures?.forEach((picture, index) => { if (!offsets.has(picture.assetId)) offsets.set(picture.assetId, index); }); return offsets; }, [browsePictures]);
   const openCreate = () => {
     setEditingAsset(null);
@@ -515,6 +534,8 @@ function SimpleLibraryPanel({
         />
         {kind === 'prompt' && <><ScreenshotImportDialog collections={collections} onImported={() => { void refresh().catch((e) => setFormError(String(e))); }} /><PromptRepairDialog assets={assets} onRepaired={() => { void refresh().catch((e) => setFormError(String(e))); }} /></>}
       </div>
+      {kind === 'moodboard' && <p className="privacy-hint">Moodboard 短码请手动录入；分享页面截图前确认 P 值已隐藏，避免把聊天截图中的短码发出去。</p>}
+      {kind === 'prompt' && repairStatus && <p className="privacy-hint" role="status">{repairStatus}</p>}
       <SectionHead
         description={copy.description}
         eyebrow={copy.eyebrow}
@@ -612,7 +633,7 @@ function SimpleLibraryPanel({
                   id={asset.id}
                   name={asset.title}
                 />
-                <VisualTile asset={asset} pictures={browsePictures} offset={browseOffsets.get(asset.id)} />
+                <VisualTile asset={asset} pictures={browsePictures} offset={browseOffsets.get(asset.id)} onEdit={(id) => { const item = assets.find(record => record.id === id); if (item) openEdit(item); }} />
                 <div>
                   <Badge variant="outline">{copy.noun}</Badge>
                   <h3>{asset.title}</h3>
@@ -629,7 +650,7 @@ function SimpleLibraryPanel({
                 </div>
               </div>
               <div className="record-secret">
-                {kind === 'prompt' ? <div className="prompt-languages">{isRevealed ? Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 原文保留'}</strong><pre>{content}</pre></div>) : <p className="prompt-hidden-label">提示词已隐藏 · 可直接复制</p>}</div> :
+                {kind === 'prompt' ? <div className="prompt-languages">{isRevealed ? Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '待核对原文 · 原文保留'}</strong><pre>{content}</pre></div>) : <p className="prompt-hidden-label">提示词已隐藏 · 可直接复制</p>}</div> :
                 <div
                   className={`record-secret-value ${!isRevealed ? 'is-obscured' : ''}`}
                 >
@@ -663,7 +684,7 @@ function SimpleLibraryPanel({
                         ? '复制 Profile 参数'
                         : '复制短码'}
                   </button>}
-                  {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>}{isRevealed && promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待确认原文</button>}</>}
+                  {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>}{promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待核对原文</button>}</>}
                 </div>
                 {(kind === 'prompt' || isRevealed) && <p>
                   <strong>{asset.author}</strong>
@@ -793,7 +814,7 @@ function SimpleLibraryPanel({
                 placeholder="填写短码"
                 required
               />
-            </label> : <div className="wide-field prompt-language-editor"><p>英文和中文独立保存、搜索与复制。旧版混合原文保留在“待确认”中，请自行核对归属；原有补充信息不会改变。</p>{(['english', 'chinese', 'unconfirmed'] as const).map((language) => <label key={language}><span>{language === 'english' ? '英文 Prompt（默认复制）' : language === 'chinese' ? '中文 Prompt' : '语言待确认 · 保留原文'}</span><SecretField label={language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '待确认 Prompt'} name={language === 'english' ? 'promptEnglish' : language === 'chinese' ? 'promptChinese' : 'promptUnconfirmed'} defaultValue={promptLanguages(editingAsset || undefined)[language]} multiline /></label>)}</div>}
+            </label> : <div className="wide-field prompt-language-editor"><p>英文和中文独立保存、搜索与复制。旧版混合原文保留在“待确认”中，请自行核对归属；原有补充信息不会改变。</p>{(['english', 'chinese', 'unconfirmed'] as const).map((language) => <label key={language}><span>{language === 'english' ? '英文 Prompt（默认复制）' : language === 'chinese' ? '中文 Prompt' : '待核对原文 · 保留原文'}</span><SecretField label={language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '待确认 Prompt'} name={language === 'english' ? 'promptEnglish' : language === 'chinese' ? 'promptChinese' : 'promptUnconfirmed'} defaultValue={promptLanguages(editingAsset || undefined)[language]} multiline /></label>)}</div>}
             {kind === 'profile' && (
               <>
                 <label>

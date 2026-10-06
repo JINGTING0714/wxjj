@@ -1,5 +1,13 @@
 import type { ProfileShortCode, StoredLibraryAsset } from './prism-types';
 
+export function profileVersion(asset: StoredLibraryAsset): 'N6P' | 'N7P' | 'unconfirmed' {
+  if (asset.profileVersion === 'N6P' || asset.profileVersion === 'N7P') return asset.profileVersion;
+  const tags = (asset.tags || []).join(' ');
+  const n6 = /\b(?:n6p|niji\s*6)\b/i.test(tags);
+  const n7 = /\b(?:n7p|niji\s*7)\b/i.test(tags);
+  return n6 !== n7 ? n6 ? 'N6P' : 'N7P' : 'unconfirmed';
+}
+
 export function profileNature(
   value = '',
 ): Pick<ProfileShortCode, 'nature' | 'natureOther'> {
@@ -61,7 +69,7 @@ export function profileChoices(
     profileCodes(asset).map((code) => ({
       ...asset,
       id: profileChoiceId(asset.id, code.id),
-      title: `${asset.title} / ${code.label}`,
+      title: `${profileVersion(asset) === 'unconfirmed' ? '版本待确认' : profileVersion(asset)} · ${asset.title} / ${code.label}`,
       secret: code.secret,
       stageType: natureLabel(code),
       note: code.note,

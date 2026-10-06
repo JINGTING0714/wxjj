@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { copyText } from '@/lib/clipboard';
 
-export type Picture = { url: string; name?: string; assetId?: string; title?: string; english?: string; chinese?: string };
+export type Picture = { url: string; name?: string; assetId?: string; title?: string; english?: string; chinese?: string; unconfirmed?: string; copyValue?: string; copyLabel?: string };
 
 /** Local Blob URLs stay inside the vault page, including while zooming. */
 export function ExampleImage({
@@ -24,11 +24,13 @@ export function ExampleImage({
   alt,
   images,
   index = 0,
+  onEditAsset,
 }: {
   src: string;
   alt: string;
   images?: Picture[];
   index?: number;
+  onEditAsset?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState(index);
@@ -131,9 +133,12 @@ export function ExampleImage({
             </Button>
           </div>
           {picture.assetId && <div className="example-prompt-actions">
-            <Button variant="outline" onClick={() => { let next = current; for (let i = 0; i < pictures.length; i++) { next = (next + 1) % pictures.length; if (pictures[next].assetId !== picture.assetId) break; } setCurrent(next); setZoom(1); }} disabled={!pictures.some((item) => item.assetId !== picture.assetId)}>下一个提示词</Button>
+            <Button variant="outline" onClick={() => { let next = current; for (let i = 0; i < pictures.length; i++) { next = (next + 1) % pictures.length; if (pictures[next].assetId !== picture.assetId) break; } setCurrent(next); setZoom(1); }} disabled={!pictures.some((item) => item.assetId !== picture.assetId)}>{picture.copyValue ? '下一条记录' : '下一个提示词'}</Button>
             {picture.english && <Button onClick={() => void copyText(picture.english!)}>复制英文提示词</Button>}
             {picture.chinese && <Button onClick={() => void copyText(picture.chinese!)}>复制中文提示词</Button>}
+            {picture.unconfirmed && <Button onClick={() => void copyText(picture.unconfirmed!)}>复制待核对原文</Button>}
+            {picture.copyValue && <Button onClick={() => void copyText(picture.copyValue!)}>{picture.copyLabel || '复制完整短码'}</Button>}
+            {onEditAsset && <Button variant="outline" onClick={() => { setOpen(false); onEditAsset(picture.assetId!); }}>{picture.copyValue ? '编辑此条记录' : '编辑此提示词'}</Button>}
           </div>}
           <div className="example-lightbox-scroll" ref={viewport}>
             <div

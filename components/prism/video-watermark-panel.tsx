@@ -53,6 +53,7 @@ export function VideoWatermarkPanel() {
     composition: defaultComposition(),
     outputs: [] as VideoOutput[],
     exportOptions: defaultVideoExport,
+    qualityUpgradeApplied: false,
     job: null as {
       todo: VideoSource[];
       layers: EditorLayer[];
@@ -62,6 +63,26 @@ export function VideoWatermarkPanel() {
     } | null,
   });
   const { state, setState } = workspace;
+  useEffect(() => {
+    if (workspace.ready && !state.qualityUpgradeApplied)
+      setState((current) => ({
+        ...current,
+        qualityUpgradeApplied: true,
+        exportOptions: {
+          ...(current.exportOptions || defaultVideoExport),
+          quality: 'source',
+        },
+        job: current.job
+          ? {
+              ...current.job,
+              exportOptions: {
+                ...(current.job.exportOptions || defaultVideoExport),
+                quality: 'source',
+              },
+            }
+          : null,
+      }));
+  }, [workspace.ready, state.qualityUpgradeApplied]);
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState('');
@@ -379,7 +400,8 @@ export function VideoWatermarkPanel() {
                   }
                   value={(state.exportOptions || defaultVideoExport).quality}
                 >
-                  <option value="high">高清 · 原始分辨率</option>
+                  <option value="source">原像素 · 最高保真（较慢）</option>
+                  <option value="high">高清</option>
                   <option value="ultra">更高质量 · 文件更大</option>
                 </select>
               </label>
@@ -409,6 +431,9 @@ export function VideoWatermarkPanel() {
                 />
               )}
             </div>
+            <p className="privacy-hint">
+              导出前检查画面、文件名和音轨，确认没有私人信息。默认按内容边界去掉外圈空白，保留原始像素清晰度。
+            </p>
             <div className="result-actions desktop-workspace-only">
               <Button
                 disabled={!state.sources.length || !state.layers.length}
@@ -609,7 +634,8 @@ export function VideoWatermarkPanel() {
               }
               value={(state.exportOptions || defaultVideoExport).quality}
             >
-              <option value="high">高清 · 原始分辨率</option>
+              <option value="source">原像素 · 最高保真</option>
+              <option value="high">高清</option>
               <option value="ultra">更高质量 · 文件更大</option>
             </select>
           </label>

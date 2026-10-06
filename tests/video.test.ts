@@ -65,7 +65,8 @@ test('ordinary video avoids full canvas reconstruction; transforms and alpha ret
   assert.equal(simple.direct, true);
   assert.ok(!simple.args.includes('under.png'));
   assert.ok(!simple.args.includes('-loop'));
-  assert.ok(simple.args.includes('ultrafast'));
+  assert.ok(simple.args.includes('fast'));
+  assert.equal(simple.args[simple.args.indexOf('-crf') + 1], '10');
   for (const key of ['scaleX', 'scaleY'] as const) {
     const stretched = { ...c, source: { ...c.source, [key]: 1.2 } };
     assert.equal(
@@ -99,7 +100,7 @@ test('ordinary video avoids full canvas reconstruction; transforms and alpha ret
   assert.equal(transformed.direct, false);
   assert.ok(transformed.args.includes('under.png'));
   assert.ok(transformed.args.includes('yuva420p'));
-  assert.ok(transformed.args.includes('realtime'));
+  assert.ok(transformed.args.includes('good'));
 });
 
 test('progress reports real elapsed time and only estimates after encoding advances', () => {
@@ -148,6 +149,8 @@ test(
       'aac',
       '-t',
       '0.5',
+      '-metadata',
+      'comment=PRIVATE_CODE_TEST',
       'input.mp4',
     );
     engine.FS.rename('input.mp4', 'input');
@@ -263,6 +266,9 @@ test(
       'mp4.rgba',
     );
     assert.equal(engine.FS.readFile('mp4.rgba').length, 96 * 72 * 4);
+    engine.ffprobe('-v', 'error', '-show_entries', 'format_tags=comment', '-of', 'json', 'output.mp4', '-o', 'metadata.json');
+    engine.reset();
+    assert.ok(!new TextDecoder().decode(engine.FS.readFile('metadata.json')).includes('PRIVATE_CODE_TEST'));
     // A multi-frame, non-uniform image catches failures that tiny flat
     // six-frame fixtures miss in the WASM alpha encoder.
     run(

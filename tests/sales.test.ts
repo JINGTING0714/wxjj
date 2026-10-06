@@ -54,12 +54,22 @@ void test('overlap exclusions and unknown numbers remain visible as issues', () 
   assert.ok(result.issues.some((issue) => issue.number === 77 && issue.reason === '本轮号码不存在'));
 });
 
-void test('OCR only proposes number messages and leaves unknown dates for correction', () => {
+void test('OCR proposes number messages and retains the date of the screenshot', () => {
   const blocks = ['甲 2026-09-18 22:15:00', '1、2', '乙 22:15:01', '3', '聊天记录'];
   const messages = messagesFromOcr([{ text: blocks.join('\n'), blocks: blocks.map((text, index) => ({ text, confidence: 90, top: index * 40, bottom: index * 40 + 30 })) }]);
   assert.equal(messages.length, 2);
   assert.equal(messages[0].buyer, '甲');
   assert.equal(messages[0].time, start);
   assert.equal(messages[1].buyer, '乙');
-  assert.equal(messages[1].time, '');
+  assert.equal(messages[1].time, '2026-09-18T22:15:01');
+});
+
+void test('one OCR block with a date heading preserves nicknames, slash numbers and repeated messages', () => {
+  const text = '群聊的聊天记录\n2026年10月3日\nNovonlyyin 22:14:59\n4\n醉清风 22:15:00\n2.40.90.136\n一只咸鱼: ) 22:15:00\n10/102/120/119/127/136\nYuky. 22:15:00\n40。50。136。7。8。26。31。135。65';
+  const rows = messagesFromOcr([{ text, blocks: [{ text, confidence: 90, top: 0, bottom: 900 }] }]);
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].buyer, 'Novonlyyin');
+  assert.equal(rows[0].time, '2026-10-03T22:14:59');
+  assert.equal(rows[2].text, '10/102/120/119/127/136');
+  assert.equal(rows[3].buyer, 'Yuky');
 });

@@ -4,6 +4,7 @@ import {
   fitCompositionToContent,
   layerGeometry,
   resolveComposition,
+  preserveSourceResolution,
   type ContentBounds,
   type LayerTransform,
   type WatermarkComposition,
@@ -357,16 +358,8 @@ export async function applyWatermarks(
       if (!decoded) { decoded = await loadImage(layer.file); cache.set(layer.file, decoded); }
       decodedLayers.push(decoded);
     }
-    const fitted = currentComposition?.fitContent
-      ? fitImageComposition(
-          base.naturalWidth,
-          base.naturalHeight,
-          currentLayers,
-          decodedLayers,
-          currentComposition,
-          base,
-        )
-      : { layers: currentLayers, composition: currentComposition };
+    const bounds = fitImageComposition(base.naturalWidth, base.naturalHeight, currentLayers, decodedLayers, currentComposition, base);
+    const fitted = preserveSourceResolution(bounds.layers, bounds.composition);
     const canvas = document.createElement('canvas');
     const size = compositionSize(
       base.naturalWidth,

@@ -36,6 +36,7 @@ import {
   profileCodes,
   profileImageScope,
   resolveLegacyProfileIds,
+  profileVersion as resolveProfileVersion,
 } from '@/lib/profile-model';
 import {
   normalizeCustomFields,
@@ -102,7 +103,7 @@ function Secret({ value, long = false }: { value: string; long?: boolean }) {
         <button
           aria-label={long ? '复制长码' : '复制 Profile 参数'}
           title={long ? '复制长码' : '复制 --profile 参数'}
-          disabled={!show || !value}
+          disabled={!value}
           onClick={() =>
             void copyText(
               long ? value : formatProfileCode(value),
@@ -274,6 +275,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   const [codes, setCodes] = useState<HydratedCode[]>([]);
   const [fields, setFields] = useState<CustomField[]>([]);
   const [showLong, setShowLong] = useState(false);
+  const [profileVersion, setProfileVersion] = useState<'N6P' | 'N7P' | 'unconfirmed'>('unconfirmed');
   const [acquisition, setAcquisition] = useState('其他');
   const [busy, setBusy] = useState(false);
   const [collectionEditor, setCollectionEditor] =
@@ -285,6 +287,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       vault.loadRecords<StoredLibraryAsset>('assets:profile'),
       vault.loadRecords<CollectionRecord>('collections:profile'),
     ]);
+    for (const record of records) await syncEmotionMoodboards(record, profileCodes(record), libs);
     const hydrated = await Promise.all(
       records.map(async (r) => ({
         ...r,
@@ -338,16 +341,65 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
     );
     setFields(folder?.customFields || []);
     setAcquisition(folder?.acquisition || '其他');
+    setProfileVersion(folder ? resolveProfileVersion(folder) : 'unconfirmed');
     setShowLong(false);
     setError('');
     setEditor(true);
   };
+  async function syncEmotionMoodboards(record: StoredLibraryAsset, storedCodes: ProfileShortCode[], profileCollections = collections) {
+    const [moodboards, moodCollections] = await Promise.all([
+      vault.loadRecords<StoredLibraryAsset>('assets:moodboard'),
+      vault.loadRecords<CollectionRecord>('collections:moodboard'),
+    ]);
+    const desired = storedCodes.filter((code) => code.nature === 'emotion');
+    const linked = moodboards.filter((item) => item.derivedFromProfile?.folderId === record.id);
+    const moodCollectionName = profileCollections.find((item) => item.id === record.collection)?.name;
+    let moodCollection = moodCollectionName ? moodCollections.find((item) => item.name === moodCollectionName) : undefined;
+    if (moodCollectionName && !moodCollection) {
+      moodCollection = { id: crypto.randomUUID(), name: moodCollectionName };
+      await vault.saveRecord('collections:moodboard', moodCollection);
+    }
+    const desiredIds = new Set(desired.map((code) => code.id));
+    const stale = linked.filter((item) => !item.derivedFromProfile || !desiredIds.has(item.derivedFromProfile.codeId));
+    const deleteBlobs = (await Promise.all(stale.map((item) => vault.loadBlobs(`asset-image:${item.id}`)))).flat().map((blob) => blob.id);
+    const writes: VaultWrite = { records: [], blobs: [], deleteRecords: stale.map((item) => item.id), deleteBlobs };
+    for (const code of desired) {
+      const existing = linked.find((item) => item.derivedFromProfile?.codeId === code.id);
+      const id = existing?.id || crypto.randomUUID();
+      const now = new Date().toISOString();
+      const imageBlobs = await vault.loadBlobs(profileImageScope(record.id, code));
+      const fingerprint = JSON.stringify([record.title, moodCollection?.id || 'unfiled', record.author, record.origin, record.sourceUrl, record.acquisition, record.acquisitionOther, record.tags, record.note, code, imageBlobs.map(blob => blob.id)]);
+      if (existing?.emotionSyncFingerprint === fingerprint) continue;
+      const next: StoredLibraryAsset = {
+        ...existing, id, kind: 'moodboard',
+        title: `${record.title}情绪p${desired.length > 1 ? ` · ${code.label}` : ''}`,
+        secret: code.secret, author: record.author, origin: record.origin,
+        sourceUrl: record.sourceUrl, acquisition: record.acquisition,
+        acquisitionOther: record.acquisitionOther, note: code.note || record.note,
+        tags: [...new Set([...(record.tags || []).filter(tag => !/^(?:N6P|N7P)$/i.test(tag)), '自动同步·情绪P'])],
+        collection: moodCollection?.id || 'unfiled',
+        customFields: [...(code.customFields || []), { id: `derived-${record.id}-${code.id}`, label: '来源', value: `Profile ${record.title} · 情绪 P（自动同步）` }],
+        derivedFromProfile: { folderId: record.id, codeId: code.id },
+        emotionSyncFingerprint: fingerprint,
+        createdAt: existing?.createdAt || now, updatedAt: now,
+      };
+      const oldBlobs = existing ? await vault.loadBlobs(`asset-image:${id}`) : [];
+      writes.deleteBlobs!.push(...oldBlobs.map((blob) => blob.id));
+      writes.records!.push({ scope: 'assets:moodboard', value: next });
+      writes.blobs!.push(...imageBlobs.map((blob) => ({ id: crypto.randomUUID(), scope: `asset-image:${id}`, blob: blob.blob, name: blob.name })));
+    }
+    if (writes.records?.length || writes.deleteRecords?.length || writes.blobs?.length || writes.deleteBlobs?.length) {
+      await vault.writeBatch(writes);
+      window.dispatchEvent(new CustomEvent('prism:assets-changed'));
+    }
+  }
   const save = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     void run(async () => {
       if (!codes.length || codes.some((c) => !c.secret.trim()))
         throw new Error('每个 Profile 至少保留一个短码，短码内容不能为空。');
+      if (profileVersion === 'unconfirmed') throw new Error('请选择 N6P 或 N7P，再保存文件夹。');
       if (new Set(codes.map((c) => c.secret.trim())).size !== codes.length)
         throw new Error('同一 Profile 内有重复短码，请核对。');
       if (!(await confirmation.confirmShortCodes(codes.map((c) => c.secret))))
@@ -370,6 +422,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
         longCode: String(data.get('longCode') || '').trim(),
         secret: storedCodes[0].secret,
         profileCodes: storedCodes,
+        profileVersion,
         author: String(data.get('author') || '').trim() || '未记录',
         origin: String(data.get('origin') || '').trim() || '未记录',
         sourceUrl: String(data.get('sourceUrl') || '').trim(),
@@ -390,6 +443,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
       };
       // Never serialize display-only URLs or File objects into a text record.
       delete (record as StoredLibraryAsset & { codes?: HydratedCode[] }).codes;
+      record.tags = [...record.tags.filter(tag => !/^(?:N6P|N7P)$/i.test(tag)), profileVersion];
       const kept = new Set(codes.flatMap((c) => c.images.map((i) => i.id)));
       const batch: VaultWrite = {
         records: [{ scope: 'assets:profile', value: record }],
@@ -420,6 +474,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
               },
             });
       await vault.writeBatch(batch);
+      await syncEmotionMoodboards(record, storedCodes);
       await refresh();
       setEditor(false);
       window.dispatchEvent(new CustomEvent('prism:assets-changed'));
@@ -520,6 +575,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           </>
         }
       />
+      <p className="privacy-hint">短码默认只显示前三位；分享页面截图前请检查展开内容。Profile 短码请在本页手动录入，避免聊天截图泄露 P 值。</p>
       <CollectionRail
         noun="Profile"
         collections={collections}
@@ -569,7 +625,9 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
         }}
       />
       <div className="record-list profile-records">
-        {visible.map((folder) => (
+        {(['N6P', 'N7P', 'unconfirmed'] as const).map(version => <section className="profile-version-group" key={version}>
+          <h2>{version === 'unconfirmed' ? '旧资料 · 请编辑选择 N6P / N7P' : version}<small>{visible.filter(folder => resolveProfileVersion(folder) === version).length} 个文件夹</small></h2>
+        {visible.filter(folder => resolveProfileVersion(folder) === version).map((folder) => (
           <details className="profile-record-group" key={folder.id}>
             <summary className="profile-folder-summary"><span><strong>{folder.title}</strong> · {folder.codes.length} 个短码 · {collections.find((item) => item.id === folder.collection)?.name || '未分类'}</span><span className="profile-folder-tools" onClick={(event) => event.stopPropagation()}><ProfileCopyDialog title={folder.title} codes={folder.codes} /><Button type="button" variant="outline" onClick={() => open(folder)}>编辑 / 排序</Button></span></summary>
             {folder.codes.map((code, index) => (
@@ -587,6 +645,8 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                   <RecordExamples
                     images={code.images}
                     title={code.label || folder.title}
+                    browseImages={code.images.map(image => ({ ...image, assetId: folder.id, title: `${folder.title} / ${code.label}`, copyValue: formatProfileCode(code.secret), copyLabel: '复制完整 Profile 参数' }))}
+                    onEditAsset={() => open(folder)}
                   />
                   <div>
                     <span className={`record-type-label nature-${code.nature}`}>
@@ -651,6 +711,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
             ))}
           </details>
         ))}
+        </section>)}
       </div>
       {!visible.length && (
         <div className="empty-state">
@@ -771,6 +832,12 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
             <label className="wide-field">
               标签
               <Input defaultValue={editing?.tags.join('，')} name="tags" />
+            </label>
+            <label className="wide-field">Profile 版本标签（必选）
+              <select aria-label="Profile 版本标签" value={profileVersion} onChange={event => setProfileVersion(event.target.value as typeof profileVersion)} required>
+                <option value="unconfirmed" disabled>请选择 N6P 或 N7P</option><option value="N6P">N6P · niji 6</option><option value="N7P">N7P · niji 7</option>
+              </select>
+              <small>N6P 和 N7P 在每个分类内分开管理；情绪 P 保存时会同步到 Moodboard。</small>
             </label>
             <label className="wide-field">
               文件夹备注

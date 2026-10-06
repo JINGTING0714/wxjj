@@ -9,7 +9,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { proposePromptRepair } from '@/lib/prompt-repair';
-import type { LibraryAsset } from '@/lib/prism-types';
+import type { LibraryAsset, StoredLibraryAsset } from '@/lib/prism-types';
 import { useVault } from './vault-provider';
 
 export function PromptRepairDialog({
@@ -20,6 +20,42 @@ export function PromptRepairDialog({
   onRepaired: () => void;
 }) {
   const vault = useVault();
+  const [history, setHistory] = useState<
+    Array<{ id: string; original: StoredLibraryAsset }>
+  >([]);
+  const undoable = history.filter((entry) =>
+    assets.some(
+      (asset) =>
+        asset.id === entry.original.id &&
+        asset.updatedAt === entry.original.updatedAt &&
+        !asset.promptAutoRepairDisabled,
+    ),
+  );
+  async function undo() {
+    if (
+      !undoable.length ||
+      !window.confirm(
+        `撤销 ${undoable.length} 条尚未手动修改的自动整理？词文、备注和补充字段恢复为整理前内容，例图保留，之后可自行校对。`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      await vault.writeBatch({
+        records: undoable.map((entry) => ({
+          scope: 'assets:prompt',
+          value: { ...entry.original, promptAutoRepairDisabled: true },
+        })),
+      });
+      setHistory([]);
+      onRepaired();
+      setOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '撤销失败');
+    } finally {
+      setBusy(false);
+    }
+  }
   const [open, setOpen] = useState(false),
     [selected, setSelected] = useState<string[]>([]),
     [busy, setBusy] = useState(false),
@@ -64,18 +100,28 @@ export function PromptRepairDialog({
         onClick={() => {
           setSelected([]);
           setOpen(true);
+          void vault
+            .loadRecords<{ id: string; original: StoredLibraryAsset }>(
+              'prompt-repair-history',
+            )
+            .then(setHistory)
+            .catch(() => setHistory([]));
         }}
       >
         检查旧条目的双语字段{proposals.length ? `（${proposals.length}）` : ''}
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open && vault.status === 'unlocked'} onOpenChange={setOpen}>
         <DialogContent className="prompt-repair-dialog">
-          <DialogTitle>修正原文件补充中的提示词</DialogTitle>
+          <DialogTitle>检查双语归类</DialogTitle>
           <DialogDescription>
             勾选并保存后，将识别出的词文移入英文／中文字段。例图、私人备注与其他补充字段保留；请先核对预览。
           </DialogDescription>
           <div className="prompt-repair-list">
-            {!proposals.length && <p>没有发现需要修正的条目。</p>}
+            {!proposals.length && (
+              <p>
+                库中明确的中英文已经归类，没有发现额外候选。仍需核对的原文可以直接复制。
+              </p>
+            )}
             {proposals.map(({ original, repair }) => (
               <article key={original.id}>
                 <label>
@@ -101,6 +147,13 @@ export function PromptRepairDialog({
           </div>
           {error && <p role="alert">{error}</p>}
           <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={busy || !undoable.length}
+              onClick={() => void undo()}
+            >
+              撤销自动整理{undoable.length ? `（${undoable.length}）` : ''}
+            </Button>
             <Button
               variant="outline"
               onClick={() =>

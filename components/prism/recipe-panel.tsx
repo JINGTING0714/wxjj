@@ -600,7 +600,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               secret: a!.secret,
             }));
           return (
-            <details className="asset-record-fold" key={recipe.id}><summary><RecordExamples images={recipe.images} title={recipe.title} /><strong>{recipe.title}</strong> · {recipeOrder(recipe).length} 个库中条目 · {(recipe.manualEntries || []).length} 个手填条目</summary><article className="record-row">
+            <div className="asset-record-fold recipe-record-open" key={recipe.id}><article className="record-row">
               <div className="record-identity">
                 <SelectItem
                   selection={selection}
@@ -615,7 +615,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 </div>
               </div>
               <div className="record-secret">
-                <div className="record-secret-value recipe-entry-list">
+                <div className="record-secret-value recipe-entry-list" data-revealed={open}>
                   {[...entries, ...(recipe.manualEntries || [])].map((e) => (
                     <div key={e.id}>
                       <span>
@@ -685,7 +685,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 </button>
               </div>
             </article>
-            </details>
+            </div>
           );
         })}
         {!visible.length && (

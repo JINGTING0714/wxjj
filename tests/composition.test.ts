@@ -9,6 +9,7 @@ import {
   sourceCoversCanvas,
   layerGeometry,
   layerBounds,
+  preserveSourceResolution,
 } from '../lib/watermark-composition';
 import {
   stretchLayer,
@@ -33,7 +34,7 @@ test('batch dynamic copies draw each current source; fixed materials stay fixed 
     set src(url: string) { void fetch(url).then(response => response.text()).then(name => { this.name = name; this.onload?.(); }, () => this.onerror?.()); }
   }
   let painted: string[] = [], rotations: number[] = [];
-  const context = { clearRect() { painted=[]; rotations=[]; }, fillRect(){}, save(){}, restore(){}, translate(){}, rotate(value:number){rotations.push(value);}, drawImage(image:TestImage){painted.push(image.name);}, globalAlpha:1 };
+  const context = { clearRect() { painted=[]; rotations=[]; }, getImageData(_x:number,_y:number,width:number,height:number){return {data:new Uint8ClampedArray(width*height*4).fill(255)};}, fillRect(){}, save(){}, restore(){}, translate(){}, rotate(value:number){rotations.push(value);}, drawImage(image:TestImage){painted.push(image.name);}, globalAlpha:1 };
   Object.assign(globalThis, { Image: TestImage, document: { createElement: () => ({width:0,height:0,getContext:()=>context,toBlob:(callback:(blob:Blob)=>void)=>callback(new Blob([JSON.stringify({painted,rotations})],{type:'image/png'}))}) }, window: {setTimeout} });
   try {
     const dynamic={...defaultComposition().source, sourceCopy:true, file:new File([],'rule.png'),scale:0.3};
@@ -45,6 +46,16 @@ test('batch dynamic copies draw each current source; fixed materials stay fixed 
     for(const output of outputs) URL.revokeObjectURL(output.url);
     assert.equal(dynamic.file.size,0);
   } finally { Object.assign(globalThis,original); }
+});
+test('automatic export removes outer canvas and preserves source pixels after editing scale', () => {
+  const composition = defaultComposition();
+  composition.canvasWidth = composition.canvasHeight = 2;
+  composition.source.scale = .5;
+  const fitted = fitCompositionToContent(1000, 600, [], [], composition);
+  const exported = preserveSourceResolution(fitted.layers, fitted.composition);
+  assert.deepEqual(compositionSize(1000,600,exported.composition),{width:1000,height:600});
+  assert.equal(exported.composition.source.scale,1);
+  assert.equal(composition.source.scale,.5);
 });
 
 test('edge stretching changes only that axis and anchors the opposite edge after rotation', () => {

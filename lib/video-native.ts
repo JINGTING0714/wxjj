@@ -44,8 +44,6 @@ export async function nativeWatermarkVideo(
     Mp4OutputFormat,
     ALL_FORMATS,
     Conversion,
-    QUALITY_HIGH,
-    QUALITY_VERY_HIGH,
     canEncodeVideo,
   } = await import('mediabunny');
   signal.throwIfAborted();
@@ -71,6 +69,19 @@ export async function nativeWatermarkVideo(
     context.imageSmoothingQuality = 'high';
     const primary = await input.getPrimaryVideoTrack();
     if (!primary) return null;
+    const stats = await primary.computePacketStats(120);
+    const frameRate =
+      Number.isFinite(stats.averagePacketRate) && stats.averagePacketRate > 0
+        ? stats.averagePacketRate
+        : 30;
+    const bitrate = Math.max(
+      8_000_000,
+      stats.averageBitrate * 1.5,
+      canvas.width *
+        canvas.height *
+        frameRate *
+        (options.quality === 'source' ? 0.5 : 0.3),
+    );
     // Keep all audio tracks. Unsupported audio causes a fallback, never a silent drop.
     report(0, '准备浏览器快速处理');
     const source = composition.source;
@@ -85,14 +96,14 @@ export async function nativeWatermarkVideo(
     conversion = await Conversion.init({
       input,
       output,
+      tags: {},
       showWarnings: false,
       video: (track) =>
         track !== primary
           ? { discard: true }
           : {
               codec: 'avc',
-              quality:
-                options.quality === 'ultra' ? QUALITY_VERY_HIGH : QUALITY_HIGH,
+              bitrate,
               hardwareAcceleration,
               allowRotationMetadata: false,
               processedWidth: canvas.width,

@@ -1,17 +1,7 @@
 import type { StoredLibraryAsset } from './prism-types';
 export function classifyPrompt(text: string) {
   if (!text.trim()) return { english: '', chinese: '', unconfirmed: '' };
-  const chinese = /\p{Script=Han}/u.test(text),
-    latin = /[A-Za-z]/.test(text);
-  if (latin && !chinese && !/[^\p{ASCII}\s\p{P}\p{N}\p{S}]/u.test(text))
-    return { english: text, chinese: '', unconfirmed: '' };
-  if (
-    chinese &&
-    !latin &&
-    !/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text)
-  )
-    return { english: '', chinese: text, unconfirmed: '' };
-  return { english: '', chinese: '', unconfirmed: text };
+  return classifyImportedPromptText(text);
 }
 
 /** Conservative import mapping. Existing vault records never pass through this function. */
@@ -39,16 +29,31 @@ export function classifyImportedPromptText(text: string) {
         ? englishLabel?.[1] || chineseLabel?.[1] || ''
         : raw;
     if (!line) continue;
+    if (explicit && /^--[a-z]+\b/i.test(line)) {
+      (explicit === 'english' ? english : chinese).push(line);
+      continue;
+    }
     if (/^(?:使用|用法|说明|注意|建议|刷\s*n\d)/i.test(line)) {
       unconfirmed.push(line);
       continue;
     }
-    const han = [...line.matchAll(/\p{Script=Han}/gu)].length;
-    const latin = [...line.matchAll(/[A-Za-z]/g)].length;
-    if (!han && latin >= 4) {
+    const body = line.split(/\s--[a-z]/i)[0];
+    const han = [...body.matchAll(/\p{Script=Han}/gu)].length;
+    const latin = [...body.matchAll(/\p{Script=Latin}/gu)].length;
+    if (
+      /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(body)
+    ) {
+      unconfirmed.push(line);
+      continue;
+    }
+    if (!han && latin >= 2) {
       english.push(line);
       explicit = 'english';
-    } else if (han >= 2 && han >= latin * 0.35) {
+    } else if (
+      han >= 2 &&
+      (han >= latin * 0.35 ||
+        (han >= 4 && (body.match(/[A-Za-z]+/g)?.length || 0) <= 3))
+    ) {
       chinese.push(line);
       explicit = 'chinese';
     } else if (explicit && /^--[a-z]+\b/i.test(line))

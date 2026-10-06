@@ -20,55 +20,112 @@ export type ScreenshotPromptDraft = {
   saved: boolean;
 };
 
-const chatDecoration = /^(?:\d{1,2}:\d{2}(?::\d{2})?|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|微信|聊天记录)$/;
-const usage = /^(?:使用|用法|说明|注意|建议|刷\s*n\d|参数说明)/i;
-const chineseLabel = /^(?:中文(?:提示词|译文)?|译文|翻译)\s*[:：]?\s*/i;
-const englishLabel = /^(?:英文(?:提示词|原文)?|english\s*prompt|prompt)\s*[:：]?\s*/i;
+const chatDecoration = /^(?:[|lI1_—–\-·•*]+|\d{1,2}:\d{2}(?::\d{2})?|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|微信|聊天记录|群聊的聊天记录)$/i;
+const dateLine = /(?:20\d{2}\s*[年/-]\s*\d{1,2}\s*[月/-]\s*\d{1,2}|\d{1,2}\s*月\s*\d{1,2}\s*日)\s*(?:\d{1,2}:\d{2}(?::\d{2})?)?/;
+const usage = /^(?:使用(?:方法|说明)?|用法|说明|注意|建议|如何使用|刷\s*n\d|参数说明|复制后)/i;
+const chineseLabel = /^(?:中文(?:提示词|译文|版)?|译文|翻译)\s*[:：]?\s*/i;
+const englishLabel = /^(?:英文(?:提示词|原文|版)?|english\s*prompt|prompt\s*(?:en|english))\s*[:：]?\s*/i;
+const parameter = /--(?:ar|chaos|cw|cref|fast|iw|no|profile|quality|q|raw|repeat|seed|sref|stop|style|stylize|sw|tile|v|video|weird|niji)\b/i;
+
+function cleanLine(value: string) {
+  return value.replace(/[\u200b\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function hasHan(value: string) {
+  return /\p{Script=Han}/u.test(value);
+}
+
+function englishLine(value: string) {
+  const letters = value.match(/[A-Za-z]/g)?.length || 0;
+  const words = value.match(/[A-Za-z]{2,}/g)?.length || 0;
+  return letters >= 12 && words >= 3;
+}
+
+function promptLine(value: string) {
+  if (!value || chatDecoration.test(value) || dateLine.test(value)) return false;
+  if (parameter.test(value)) return true;
+  if (usage.test(value)) return false;
+  const han = value.match(/\p{Script=Han}/gu)?.length || 0;
+  if (han >= 6 && value.length >= 12) return true;
+  return englishLine(value) && /[,.;:()[\]{}]/.test(value);
+}
+
+function makeDraft(
+  segment: { lines: string[]; screenshot: number; top: number; confidence: number },
+  index: number,
+): ScreenshotPromptDraft | null {
+  const lines = segment.lines.map(cleanLine).filter(Boolean);
+  if (!lines.length) return null;
+  const english: string[] = [];
+  const chinese: string[] = [];
+  const unconfirmed: string[] = [];
+  const notes: string[] = [];
+  const hasChinesePrompt = lines.some((line) => hasHan(line));
+  for (const original of lines) {
+    const line = original.replace(chineseLabel, '').replace(englishLabel, '').trim();
+    if (!line) continue;
+    if (usage.test(line) && !parameter.test(line)) {
+      notes.push(line);
+      continue;
+    }
+    if (chineseLabel.test(original) || hasHan(line)) chinese.push(line);
+    else if (englishLabel.test(original) || englishLine(line)) {
+      if (/^(?:--|chaos\s+\d|ar\s+\d)/i.test(line) && parameter.test(line) && hasChinesePrompt && !english.length) chinese.push(line);
+      else english.push(line);
+    } else unconfirmed.push(line);
+  }
+  const joined = (values: string[]) => values.join(' ').replace(/--\s+(?=[A-Za-z])/g, '--').replace(/\s+([,.;:!?])/g, '$1').trim();
+  const result = {
+    english: joined(english),
+    chinese: joined(chinese),
+    unconfirmed: joined(unconfirmed),
+    note: joined(notes),
+  };
+  if (!result.english && !result.chinese && !result.unconfirmed && !result.note) return null;
+  return {
+    id: crypto.randomUUID(), screenshot: segment.screenshot, top: segment.top,
+    confidence: segment.confidence, title: `提示词 ${index + 1}`,
+    ...result, include: false, saved: false,
+  };
+}
 
 export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
   const drafts: ScreenshotPromptDraft[] = [];
   pages.forEach((page, screenshot) => {
-    // OCR often returns an entire chat bubble as one block. Split its lines before
-    // deciding which language each fragment belongs to.
-    const fragments = page.blocks.flatMap((block) => block.text.split(/\r?\n/).map((text, index, lines) => ({
-      text,
-      confidence: block.confidence,
-      top: block.top + (block.bottom - block.top) * index / Math.max(1, lines.length),
-    })));
-    for (const block of fragments) {
-      const raw = block.text.trim();
-      if (!raw || chatDecoration.test(raw) || /^\d{1,2}月\d{1,2}日/.test(raw)) continue;
-      const hasHan = /\p{Script=Han}/u.test(raw);
-      const english = raw.replace(englishLabel, '').trim();
-      const chinese = raw.replace(chineseLabel, '').trim();
-      const previous = drafts[drafts.length - 1];
-      if (!hasHan && /[A-Za-z]/.test(raw) && english.length >= 18) {
-        const continues = previous && previous.screenshot === screenshot &&
-          /^[a-z,.;:)]/.test(english) && block.top - previous.top < 350;
-        if (continues) {
-          previous.english += ` ${english}`;
-          previous.confidence = Math.min(previous.confidence, block.confidence);
-        } else {
-          drafts.push({
-            id: crypto.randomUUID(), screenshot, top: block.top,
-            confidence: block.confidence, title: `提示词 ${drafts.length + 1}`,
-            english, chinese: '', unconfirmed: '', note: '', include: false, saved: false,
-          });
-        }
-      } else if (hasHan && previous && previous.screenshot === screenshot &&
-        (chineseLabel.test(raw) || (!usage.test(raw) && raw.length >= 24))) {
-        previous.chinese = [previous.chinese, chinese].filter(Boolean).join('\n');
-        previous.confidence = Math.min(previous.confidence, block.confidence);
-      } else if (hasHan && previous && previous.screenshot === screenshot && usage.test(raw)) {
-        previous.unconfirmed = [previous.unconfirmed, raw].filter(Boolean).join('\n');
-      } else if (raw.length >= 8) {
-        drafts.push({
-          id: crypto.randomUUID(), screenshot, top: block.top,
-          confidence: block.confidence, title: `待确认 ${drafts.length + 1}`,
-          english: '', chinese: '', unconfirmed: raw, note: '', include: false, saved: false,
-        });
+    // Phone chat screenshots are often returned as one giant OCR block. Use
+    // message date boundaries and Midjourney parameter lines instead of
+    // assuming that one OCR block equals one prompt.
+    const source = (page.text || page.blocks.map((block) => block.text).join('\n'))
+      .split(/\r?\n/).map(cleanLine).filter(Boolean);
+    let active: { lines: string[]; screenshot: number; top: number; confidence: number } | null = null;
+    let lineIndex = 0;
+    let previousBottom = 0;
+    const flush = () => {
+      if (!active) return;
+      const draft = makeDraft(active, drafts.length);
+      if (draft) drafts.push(draft);
+      active = null;
+    };
+    for (const raw of source) {
+      const geometry = page.blocks.find(item => cleanLine(item.text) === raw);
+      if (active && geometry && geometry.top - previousBottom > Math.max(42, (geometry.bottom - geometry.top) * 2.5) && !chineseLabel.test(raw) && !usage.test(raw)) flush();
+      if (geometry) previousBottom = geometry.bottom;
+      if (dateLine.test(raw) || /^(?:微信|聊天记录|群聊的聊天记录)/i.test(raw)) {
+        flush(); lineIndex++; continue;
       }
+      if (chatDecoration.test(raw) || raw.length < 3) { lineIndex++; continue; }
+      if (promptLine(raw)) {
+        if (!active) {
+          const block = page.blocks.find((item) => item.text.includes(raw));
+          active = { lines: [], screenshot, top: block?.top ?? lineIndex, confidence: block?.confidence ?? 0 };
+        }
+        active.lines.push(raw);
+      } else if (active && usage.test(raw)) active.lines.push(raw);
+      else if (active && hasHan(raw) && raw.length >= 8) active.lines.push(raw);
+      else if (active && raw.length >= 8 && englishLine(raw)) active.lines.push(raw);
+      lineIndex++;
     }
+    flush();
   });
   return drafts;
 }

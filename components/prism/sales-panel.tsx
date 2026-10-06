@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import type { PipelineSource } from '@/lib/pipeline';
 import { recognizeLocalImages } from '@/lib/local-ocr';
 import { messagesFromOcr } from '@/lib/sales-screenshot';
+import { DateTimeFields } from './date-time-fields';
 import {
   extractSaleNumbers, reconcileSales,
   type RushOrder, type SaleAssignment, type SaleMessage,
@@ -12,6 +13,7 @@ import {
 import { SectionHead } from './studio-shared';
 import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { useVault } from './vault-provider';
+import { SaleRoundCreateDialog, type ManualSaleDraft } from './sale-round-create-dialog';
 
 type SaleItem = { number: number; sourceId: string; name: string; file?: File; cleared?: boolean };
 type SaleRound = {
@@ -47,6 +49,12 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   const screenshotUrls = useFileUrls(active?.screenshots || []);
   const patchRound = (id: string, update: (round: SaleRound) => SaleRound) =>
     setState((current) => ({ ...current, rounds: current.rounds.map((round) => round.id === id ? update(round) : round) }));
+  const createManual = async (draft: ManualSaleDraft) => {
+    const id = crypto.randomUUID();
+    const round: SaleRound = { ...draft, id, createdAt: new Date().toISOString(), rushOrder: 'exclude', boardIds: [], screenshots: [], messages: [], complete: false, assignments: [], manualNumbers: [], deliveredNumbers: [] };
+    setState(current => ({ rounds: [round, ...current.rounds], active: id }));
+    await workspace.flush(); setStep(0); setMessage(`已创建场次并固定 ${round.items.length} 个号码。接下来上传聊天截图核对。`);
+  };
   useEffect(() => {
     const receive = (event: Event) => {
       const incoming = (event as CustomEvent<IncomingSaleRound>).detail;
@@ -102,10 +110,12 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
     if (!active?.screenshots.length) return;
     setBusy(true);
     try {
-      const pages = await recognizeLocalImages(active.screenshots, setMessage);
+      const pages = await recognizeLocalImages(active.screenshots, setMessage, 'sales');
       const candidates = messagesFromOcr(pages);
       patchRound(active.id, (round) => ({ ...round, complete: false, assignments: [], messages: candidates }));
-      setMessage(`识别到 ${candidates.length} 条号码候选。请按原截图补齐遗漏消息、昵称和时间，确认截图完整后再核对。`);
+      setMessage(candidates.length
+        ? `识别到 ${candidates.length} 条号码候选。请按原截图补齐遗漏消息、昵称和时间，确认截图完整后再核对。`
+        : '识别完成，但没有找到号码候选。请确认截图清晰、顺序正确；可以删除错误截图后重传，或用“补录漏识别的购买消息”手动添加。');
     } catch (error) {
       setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动添加消息核对。`);
     } finally { setBusy(false); }
@@ -119,6 +129,15 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       [files[index], files[to]] = [files[to], files[index]];
       return { ...round, screenshots: files, messages: [], assignments: [], complete: false };
     });
+  };
+  const removeScreenshot = (index: number) => {
+    if (!active) return;
+    patchRound(active.id, (round) => ({
+      ...round,
+      screenshots: round.screenshots.filter((_, item) => item !== index),
+      messages: [], assignments: [], complete: false,
+    }));
+    setMessage('已删除这张成绩单截图；请确认剩余截图顺序后重新识别。');
   };
   const calculate = () => {
     if (!active || !result) return;
@@ -188,25 +207,25 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
     onOpenCollage();
   };
   return <div className="studio-page sales-page" data-sale-step={step}>
-    <SectionHead eyebrow="SALES RECONCILIATION" number="10" title="售图核对" description="按截图顺序核对号码、交付后清理站内图片，并用剩图重新拼图。" />
+    <SectionHead eyebrow="SALES RECONCILIATION" number="10" title="售图核对" description="按截图顺序核对号码、交付后清理站内图片，并用剩图重新拼图。" actions={<SaleRoundCreateDialog disabled={!workspace.ready || vault.status !== 'unlocked'} onCreate={createManual} />} />
     {workspace.saveError && <p className="error-banner">{workspace.saveError}</p>}
     {message && <output className="ledger-message">{message}</output>}
-    <div className="sales-round-toolbar"><label>场次<select value={active?.id || ''} onChange={(event) => setState((current) => ({ ...current, active: event.target.value }))}>{state.rounds.map((round) => <option key={round.id} value={round.id}>{round.name}</option>)}</select></label><p>每场号码固定。新场次从拼图工坊生成的拼图创建。</p></div>
-    {!active ? <p className="empty-state">还没有售图场次。先在拼图工坊排图、编号，然后点“创建售图场次”。</p> : <>
-      <div className="sales-settings"><label>场次名称<input value={active.name} onChange={(event) => patchRound(active.id, (round) => ({ ...round, name: event.target.value }))} /></label><label>正式开始日期时间<input type="datetime-local" step="0.001" value={active.startTime} onChange={(event) => patchRound(active.id, (round) => ({ ...round, startTime: event.target.value, assignments: [] }))} /></label><label>抢跑处理<select value={active.rushOrder} onChange={(event) => patchRound(active.id, (round) => ({ ...round, rushOrder: event.target.value as SaleRound['rushOrder'], assignments: [] }))}><option value="exclude">抢跑不参与</option><option value="original">后置 · 原先后顺序</option><option value="nearest">后置 · 越接近正式第一人越先</option></select></label></div>
+    <div className="sales-round-toolbar"><label>场次<select value={active?.id || ''} onChange={(event) => setState((current) => ({ ...current, active: event.target.value }))}>{state.rounds.map((round) => <option key={round.id} value={round.id}>{round.name}</option>)}</select></label><p>每场号码固定。可自行新建，也可从编号拼图创建。</p></div>
+    {!active ? <p className="empty-state">还没有场次。点击“新建售图场次”，或从拼图工坊生成的编号拼图创建。</p> : <>
+      <div className="sales-settings"><label>场次名称<input value={active.name} onChange={(event) => patchRound(active.id, (round) => ({ ...round, name: event.target.value }))} /></label><DateTimeFields label="正式开始时间" value={active.startTime} onChange={value => patchRound(active.id, round => ({ ...round, startTime: value, assignments: [] }))} /><label>抢跑处理<select value={active.rushOrder} onChange={(event) => patchRound(active.id, (round) => ({ ...round, rushOrder: event.target.value as SaleRound['rushOrder'], assignments: [] }))}><option value="exclude">抢跑不参与</option><option value="original">后置 · 原先后顺序</option><option value="nearest">后置 · 越接近正式第一人越先</option></select></label></div>
       <nav className="sales-step-tabs" aria-label="售图核对步骤">{['上传与校对','分配与交付','清理与剩图'].map((label, index) => <Button key={label} variant={step === index ? 'default' : 'outline'} onClick={() => setStep(index)}>{index + 1}. {label}</Button>)}</nav>
       <section className="sales-section" data-step="0">
         <h2>1. 截图顺序与消息校对</h2>
         <p>按聊天真实先后顺序上传；缺图必须补齐才可核对交付。重叠的同一条消息请只保留一次。</p>
         <label className="mini-file">上传成绩单截图<input type="file" accept="image/*" multiple onChange={(event) => { const added = Array.from(event.target.files || []); patchRound(active.id, (round) => ({ ...round, screenshots: [...round.screenshots, ...added], complete: false, assignments: [], messages: [] })); event.target.value = ''; }} /></label>
-        <div className="sales-screenshots">{active.screenshots.map((file, index) => <article key={`${file.name}-${index}`}><img src={screenshotUrls[index]} alt={`第 ${index + 1} 张成绩单截图`} /><span>{index + 1}. {file.name}</span><button disabled={index === 0} onClick={() => moveScreenshot(index, -1)} type="button">上移</button><button disabled={index === active.screenshots.length - 1} onClick={() => moveScreenshot(index, 1)} type="button">下移</button></article>)}</div>
-        <div className="sales-actions"><Button disabled={!active.screenshots.length || busy} onClick={() => void recognize()}>{busy ? '识别中…' : '本机识别号码候选'}</Button><Button onClick={addMessage} variant="outline">手动补一条消息</Button></div>
-        <div className="sales-messages">{orderedMessages.map((entry, index) => <article key={entry.id}>
+        <div className="sales-screenshots">{active.screenshots.map((file, index) => <article key={`${file.name}-${index}`}><img src={screenshotUrls[index]} alt={`第 ${index + 1} 张成绩单截图`} /><span>{index + 1}. {file.name}</span><button disabled={index === 0 || busy} onClick={() => moveScreenshot(index, -1)} type="button">上移</button><button disabled={index === active.screenshots.length - 1 || busy} onClick={() => moveScreenshot(index, 1)} type="button">下移</button><button disabled={busy} onClick={() => removeScreenshot(index)} type="button">删除</button></article>)}</div>
+        <div className="sales-actions"><Button disabled={!active.screenshots.length || busy} onClick={() => void recognize()}>{busy ? '识别中…' : '本机识别号码候选'}</Button><Button onClick={addMessage} variant="outline">补录漏识别的购买消息</Button></div>
+        <p className="privacy-hint">识别漏掉购买者、时间或号码时，可补录截图中的那一条购买消息；这里不会发送聊天消息。</p><div className="sales-messages">{orderedMessages.map((entry, index) => <article key={entry.id}>
           <strong>消息 {index + 1} · 第 {entry.screenshot + 1} 张</strong>
           <div className="sales-message-order"><button disabled={index === 0 || orderedMessages[index - 1].screenshot !== entry.screenshot} type="button" onClick={() => moveMessage(index, -1)}>上移</button><button disabled={index === orderedMessages.length - 1 || orderedMessages[index + 1].screenshot !== entry.screenshot} type="button" onClick={() => moveMessage(index, 1)}>下移</button></div>
           <label>对应截图<select value={entry.screenshot} onChange={(event) => patchMessage(entry.id, { screenshot: Number(event.target.value) })}>{active.screenshots.map((file, screen) => <option key={`${file.name}-${screen}`} value={screen}>第 {screen + 1} 张</option>)}</select></label>
           <label>昵称<input value={entry.buyer} onChange={(event) => patchMessage(entry.id, { buyer: event.target.value })} /></label>
-          <label>显示时间<input type="datetime-local" step="0.001" value={entry.time} onChange={(event) => patchMessage(entry.id, { time: event.target.value })} /></label>
+          <DateTimeFields label="消息时间" value={entry.time} onChange={value => patchMessage(entry.id, { time: value })} />
           <label>号码原文<textarea value={entry.text} onChange={(event) => patchMessage(entry.id, { text: event.target.value })} /></label>
           <label><input type="checkbox" checked={!!entry.ignored} onChange={(event) => patchMessage(entry.id, { ignored: event.target.checked })} />重复截图中的同一消息／不参与</label>
         </article>)}</div>
@@ -214,7 +233,7 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         <Button disabled={!result || !active.screenshots.length || !active.messages.length || busy} onClick={calculate}>生成核对结果</Button>
       </section>
       <section className="sales-section" data-step="1"><h2>2. 号码与购买者</h2><div className="sales-items">{active.items.map((item) => { const allocation = assigned.get(item.number); return <button key={item.number} type="button" onClick={() => setSelectedNumber(item.number)} className={item.cleared ? 'is-cleared' : ''}><strong>{item.number}</strong><span>{item.cleared ? '已清理' : allocation ? allocation.buyer : active.manualNumbers.includes(item.number) ? '后来售出' : '剩余'}</span></button>; })}</div>{selectedItem && <div className="sales-preview"><strong>{selectedItem.number} · {selectedItem.name}</strong>{previewUrl ? <img src={previewUrl} alt={`${selectedItem.number} 号对应图片`} /> : <p>站内图片已清理，仅保留文字记录。</p>}</div>}{buyers.map((buyer) => { const owned = active.assignments.filter((entry) => entry.buyer === buyer).map((entry) => entry.number); const allDelivered = owned.every((number) => active.deliveredNumbers.includes(number)); return <article className="sales-buyer" key={buyer}><strong>{buyer}：{owned.join('、')}</strong><span>{active.assignments.some((entry) => entry.buyer === buyer && entry.rush) ? '含后置抢跑分配' : '正式时间消息'}</span><Button variant="outline" onClick={() => patchRound(active.id, (round) => ({ ...round, deliveredNumbers: allDelivered ? round.deliveredNumbers.filter((number) => !owned.includes(number)) : [...new Set([...round.deliveredNumbers, ...owned])] }))}>{allDelivered ? '撤销交付确认' : '确认原图已交付'}</Button></article>; })}{result?.issues.length ? <div className="sales-issues"><strong>核对提示</strong>{result.issues.map((issue, index) => <p key={index}>{issue.number ?? '消息'}：{issue.reason}</p>)}</div> : null}</section>
-      <section className="sales-section" data-step="2"><h2>3. 后来售出与重新拼图</h2><p>你可以补记聊天核对后又没有的号码；已分配的号码不会被静默覆盖。</p><div className="sales-actions"><input aria-label="后来售出的号码" placeholder="例如 3、7、12" value={manualInput} onChange={(event) => setManualInput(event.target.value)} /><Button variant="outline" onClick={markManual}>标记后来售出</Button></div><div className="sales-manual-list">{active.manualNumbers.map((number) => <span key={number}>{number} 号 <button disabled={active.items.find((item) => item.number === number)?.cleared} type="button" onClick={() => patchRound(active.id, (round) => ({ ...round, manualNumbers: round.manualNumbers.filter((item) => item !== number) }))}>撤销标记</button></span>)}</div><p>当前可用于下一版拼图：{remaining.length} 张。</p><div className="sales-actions"><Button disabled={busy} onClick={() => void clearSold()}>确认并清理已售图片与旧拼图</Button><Button disabled={!remaining.length} onClick={sendRemaining} variant="outline">剩图送去重新拼图</Button></div><p>站内清理后仍需自行删除手机或电脑本地保存的原图及副本。</p></section>
+      <section className="sales-section" data-step="2"><h2>3. 后来售出与重新拼图</h2><p>你可以补记聊天核对后又没有的号码；已分配的号码不会被静默覆盖。</p><div className="sales-actions"><input aria-label="后来售出的号码" placeholder="例如 3、7、12" value={manualInput} onChange={(event) => setManualInput(event.target.value)} /><Button variant="outline" onClick={markManual}>标记后来售出</Button></div><div className="sales-manual-list">{active.manualNumbers.map((number) => <span key={number}>{number} 号 <button disabled={active.items.find((item) => item.number === number)?.cleared} type="button" onClick={() => patchRound(active.id, (round) => ({ ...round, manualNumbers: round.manualNumbers.filter((item) => item !== number) }))}>撤销标记</button></span>)}</div><p>当前可用于下一版拼图：{remaining.filter(item => item.file).length} 张。</p><div className="sales-actions"><Button disabled={busy} onClick={() => void clearSold()}>确认并清理已售图片与旧拼图</Button><Button disabled={!remaining.some(item => item.file)} onClick={sendRemaining} variant="outline">剩图送去重新拼图</Button></div><p>站内清理后仍需自行删除手机或电脑本地保存的原图及副本。</p></section>
     </>}
   </div>;
 }

@@ -8,11 +8,11 @@ import {
 
 export type VideoExportOptions = {
   format: 'auto' | 'mp4' | 'webm-alpha';
-  quality: 'high' | 'ultra';
+  quality: 'source' | 'high' | 'ultra';
 };
 export const defaultVideoExport: VideoExportOptions = {
   format: 'auto',
-  quality: 'high',
+  quality: 'source',
 };
 
 // FFmpeg's native VP8/VP9 decoders discard WebM alpha. Use libvpx when
@@ -108,12 +108,22 @@ export function videoExportPlan(
         `[bg][src]overlay=x=${number(size.width * c.source.x)}-overlay_w/2:y=${number(size.height * c.source.y)}-overlay_h/2:format=auto:shortest=1[body]`,
         `[body][2:v]overlay=0:0:format=auto:eof_action=repeat${finalFormat}[out]`,
       ].join(';');
-  const crf = options.quality === 'ultra' ? '16' : '20';
+  const crf =
+    options.quality === 'source'
+      ? '10'
+      : options.quality === 'ultra'
+        ? '14'
+        : '16';
   // This pinned WASM core's VP9 alpha path crashes on real-sized video.
   // VP8 carries the same WebM alpha channel; use a generous pixel-based
   // bitrate budget and low quantizer without changing dimensions or timing.
   const alphaBitrate = String(
-    Math.max(2_000_000, Math.round(size.width * size.height * 12)),
+    Math.max(
+      8_000_000,
+      Math.round(
+        size.width * size.height * (options.quality === 'source' ? 32 : 18),
+      ),
+    ),
   );
   const extension = alpha ? 'webm' : 'mp4';
   return {
@@ -137,6 +147,12 @@ export function videoExportPlan(
       '[out]',
       '-map',
       '0:a?',
+      '-map_metadata',
+      '-1',
+      '-map_metadata:s',
+      '-1',
+      '-map_chapters',
+      '-1',
       '-t',
       number(duration),
       '-fps_mode',
@@ -150,15 +166,23 @@ export function videoExportPlan(
             '-b:v',
             alphaBitrate,
             '-crf',
-            options.quality === 'ultra' ? '4' : '8',
+            options.quality === 'source'
+              ? '0'
+              : options.quality === 'ultra'
+                ? '2'
+                : '4',
+            '-qmin',
+            '0',
+            '-qmax',
+            options.quality === 'source' ? '10' : '16',
             '-auto-alt-ref',
             '0',
             '-lag-in-frames',
             '0',
             '-deadline',
-            options.quality === 'ultra' ? 'good' : 'realtime',
+            'good',
             '-cpu-used',
-            options.quality === 'ultra' ? '4' : '8',
+            '4',
             '-metadata:s:v:0',
             'alpha_mode=1',
             '-c:a',
@@ -170,7 +194,7 @@ export function videoExportPlan(
             '-crf',
             crf,
             '-preset',
-            options.quality === 'ultra' ? 'fast' : 'ultrafast',
+            'fast',
             '-pix_fmt',
             'yuv420p',
             '-movflags',
