@@ -81,23 +81,41 @@ function done(tx: IDBTransaction) {
       );
   });
 }
-async function db() {
+async function openDatabase(version?: number) {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    // Unlocking an existing vault must never trigger an upgrade or scan its files.
+    const req = version === undefined ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version);
+    let settled = false;
     req.onupgradeneeded = () => {
+      if (settled) { req.transaction!.abort(); return; }
       if (!req.result.objectStoreNames.contains('meta')) req.result.createObjectStore('meta', { keyPath: 'key' });
-      for (const name of ['records', 'blobs']) if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: 'id' }).createIndex('scope', 'scope');
-      for (const name of ['records','blobs']) { const store = req.transaction!.objectStore(name); if (!store.indexNames.contains('backup-revision')) store.createIndex('backup-revision', 'iv'); }
+      for (const name of ['records', 'blobs']) if (!req.result.objectStoreNames.contains(name)) {
+        const store = req.result.createObjectStore(name, { keyPath: 'id' });
+        store.createIndex('scope', 'scope'); store.createIndex('backup-revision', 'iv');
+      }
       if (!req.result.objectStoreNames.contains('backup-staging')) req.result.createObjectStore('backup-staging', { keyPath: 'id' }).createIndex('job', 'job');
     };
-    req.onsuccess = () => { req.result.onversionchange = () => req.result.close(); resolve(req.result); };
-    req.onblocked = () => reject(new Error('另一个旧页面正在使用保险库，请关闭这个网站的其他标签页后重试。现有资料不会改变。'));
-    req.onerror = () =>
-      reject(
+    req.onsuccess = () => { if (settled) { req.result.close(); return; } settled = true; req.result.onversionchange = () => req.result.close(); resolve(req.result); };
+    req.onblocked = () => { settled = true; reject(new Error('恢复备份需要准备暂存区。请关闭这个网站的旧标签页后重试；当前资料保留，解锁和导出仍可使用。')); };
+    req.onerror = () => { settled = true; reject(
         req.error ||
           new Error('无法打开本地保险库，请允许浏览器保存网站数据。'),
-      );
+      ); };
   });
+}
+async function db(requireStaging = false) {
+  const database = await openDatabase();
+  if (!requireStaging || database.objectStoreNames.contains('backup-staging')) return database;
+  // Older vaults need only an empty staging store for restore, added on demand.
+  // Do not create indexes over their existing encrypted media.
+  const next = database.version + 1; database.close();
+  try { return await openDatabase(next); }
+  catch (reason) {
+    if (!(reason instanceof DOMException) || reason.name !== 'VersionError') throw reason;
+    const upgraded = await openDatabase();
+    if (upgraded.objectStoreNames.contains('backup-staging')) return upgraded;
+    upgraded.close(); throw reason;
+  }
 }
 async function getMeta() {
   const database = await db();
@@ -580,7 +598,7 @@ export async function importVaultFile(file: File, password: string, options?: { 
     try { key = await rawKey(await openEnvelope(await rawKey(recoveryBytes(password)), meta.recovery)); await verify(key, meta); }
     catch { throw new Error('恢复密钥不匹配，没有修改本机数据。'); }
   } else key = await passwordKey(password, meta);
-  const database = await db(), job = crypto.randomUUID();
+  const database = await db(true), job = crypto.randomUUID();
   const cleanup = async () => {
     const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
     const cursor = tx.objectStore('backup-staging').index('job').openKeyCursor(IDBKeyRange.only(job));

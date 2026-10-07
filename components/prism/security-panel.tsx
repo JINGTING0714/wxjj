@@ -73,14 +73,18 @@ export function SecurityPanel() {
       setBusy(false);
     }
   };
-  const submit = (e: FormEvent) => {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Password managers can fill the native input without a React change event.
+    const fields = new FormData(e.currentTarget);
+    const submittedPassword = String(fields.get('prism-vault-password') ?? password);
+    const submittedConfirm = String(fields.get('prism-vault-confirm') ?? confirmPassword);
     void run(async () => {
       if (vault.status === 'uninitialized') {
-        if (password !== confirmPassword) throw new Error('两次密码不一致');
-        await vault.setup(password);
+        if (submittedPassword !== submittedConfirm) throw new Error('两次密码不一致');
+        await vault.setup(submittedPassword);
         setNotice('保险库已创建。请接着设置恢复密钥，并单独妥善保管。');
-      } else await vault.unlock(password);
+      } else await vault.unlock(submittedPassword);
       setPassword('');
       setConfirmPassword('');
     });
@@ -172,6 +176,8 @@ export function SecurityPanel() {
                 <Badge>
                   {vault.status === 'unlocked'
                     ? '已解锁'
+                    : vault.status === 'loading'
+                      ? '正在读取'
                     : vault.status === 'uninitialized'
                       ? '尚未创建'
                       : '已锁定'}
@@ -190,6 +196,7 @@ export function SecurityPanel() {
                   <label>
                     保险库密码
                     <Input
+                      name="prism-vault-password"
                       autoComplete={
                         vault.status === 'uninitialized'
                           ? 'new-password'
@@ -206,6 +213,8 @@ export function SecurityPanel() {
                     <label>
                       再次输入密码
                       <Input
+                        name="prism-vault-confirm"
+                        autoComplete="new-password"
                         minLength={8}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         required
@@ -221,6 +230,8 @@ export function SecurityPanel() {
                     <KeyRound />
                     {busy
                       ? '请稍候…'
+                      : vault.status === 'loading'
+                        ? '正在读取本机保险库…'
                       : vault.status === 'uninitialized'
                         ? '创建并解锁'
                         : '解锁保险库'}
@@ -332,6 +343,8 @@ export function SecurityPanel() {
                       ? '原备份恢复密钥'
                       : '原设备导出时的保险库密码'}
                     <Input
+                      name="prism-backup-password"
+                      autoComplete={useRecovery ? 'off' : 'section-backup current-password'}
                       onChange={(e) => setBackupPassword(e.target.value)}
                       required
                       type="password"
@@ -387,6 +400,8 @@ export function SecurityPanel() {
                   <label>
                     验证当前密码
                     <Input
+                      name="prism-recovery-current-password"
+                      autoComplete="section-recovery current-password"
                       onChange={(e) => setRecoveryPassword(e.target.value)}
                       required
                       type="password"
@@ -446,6 +461,8 @@ export function SecurityPanel() {
                   <label>
                     恢复密钥
                     <Input
+                      name="prism-recovery-code"
+                      autoComplete="off"
                       onChange={(e) => setRecoveryInput(e.target.value)}
                       placeholder="PRISM-…"
                       required
@@ -456,6 +473,8 @@ export function SecurityPanel() {
                   <label>
                     新密码
                     <Input
+                      name="prism-recovery-new-password"
+                      autoComplete="new-password"
                       minLength={8}
                       onChange={(e) => setNewPassword(e.target.value)}
                       required
@@ -466,6 +485,8 @@ export function SecurityPanel() {
                   <label>
                     再次输入新密码
                     <Input
+                      name="prism-recovery-new-confirm"
+                      autoComplete="new-password"
                       minLength={8}
                       onChange={(e) => setNewConfirm(e.target.value)}
                       required

@@ -32,6 +32,38 @@ async function clear() {
 }
 beforeEach(clear);
 
+void test('existing schema v1 unlock and export do not upgrade or scan files, even with an old tab open', async () => {
+  const oldConnection = await new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open('prism-local-vault', 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore('meta', { keyPath: 'key' });
+      for (const name of ['records','blobs']) req.result.createObjectStore(name, { keyPath: 'id' }).createIndex('scope', 'scope');
+    };
+    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+  });
+  let file: File;
+  try {
+    const key = await createVault('existing-schema-password');
+    await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'preserve', note: '原库文字' } }], blobs: [{ scope: 'test', id: 'original', blob: new Blob(['original image bytes']), name: 'original.png' }] });
+    const unlocked = await unlockVault('existing-schema-password');
+    assert.equal((await loadEncryptedRecords<{ note: string }>(unlocked, 'test'))[0].note, '原库文字');
+    file = new File([await exportVaultFile(unlocked)], 'existing.prism');
+    assert.equal((await inspectVaultFile(file)).files, 1);
+    assert.equal(oldConnection.version, 1);
+    assert.ok(!oldConnection.objectStoreNames.contains('backup-staging'));
+    assert.ok(!oldConnection.transaction('blobs').objectStore('blobs').indexNames.contains('backup-revision'));
+  } finally { oldConnection.close(); }
+  const restored = await importVaultFile(file!, 'existing-schema-password');
+  assert.equal((await loadEncryptedRecords<{ note: string }>(restored.key, 'test'))[0].note, '原库文字');
+  assert.equal(await (await loadEncryptedBlobs(restored.key, 'test'))[0].blob.text(), 'original image bytes');
+  const upgraded = await new Promise<IDBDatabase>((resolve, reject) => { const req = indexedDB.open('prism-local-vault'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
+  try {
+    assert.equal(upgraded.version, 2);
+    assert.ok(upgraded.objectStoreNames.contains('backup-staging'));
+    assert.ok(!upgraded.transaction('blobs').objectStore('blobs').indexNames.contains('backup-revision'));
+  } finally { upgraded.close(); }
+});
+
 void test('streaming backup writes standard ZIP entries incrementally and restores exact data', async () => {
   const key = await createVault('stream-export-password');
   await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'stream-record', note: '保留' } }], blobs: [{ id: 'large', scope: 'test-image', blob: new Blob([new Uint8Array(3 * 1024 * 1024).fill(71)]), name: 'large.png' }] });
