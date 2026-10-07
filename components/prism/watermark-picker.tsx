@@ -9,7 +9,7 @@ import { ExampleImage } from './example-image';
 import type { CollectionRecord, StoredWatermark } from '@/lib/prism-types';
 import { loadImage } from '@/lib/image-processing';
 
-export function WatermarkPicker({ onUse, disabled }: { onUse: (file: File) => void; disabled: boolean }) {
+export function WatermarkPicker({ onUse, disabled }: { onUse: (file: File) => void | Promise<void>; disabled: boolean }) {
   const vault = useVault();
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [category, setCategory] = useState('all'), [query, setQuery] = useState('');
@@ -50,7 +50,7 @@ export function WatermarkPicker({ onUse, disabled }: { onUse: (file: File) => vo
         files.push(new File([upload.file], `${upload.title.trim()}.${upload.file.name.split('.').pop() || 'png'}`, { type: upload.file.type }));
       }
       await vault.writeBatch({ records, blobs });
-      files.forEach(onUse); setUploads([]); setNewCategory('');
+      for (const file of files) await onUse(file); setUploads([]); setNewCategory('');
       window.dispatchEvent(new CustomEvent('prism:watermarks-changed'));
     } catch (reason) { setError(reason instanceof Error ? reason.message : '水印保存失败'); }
     finally { setBusy(false); }
@@ -61,7 +61,7 @@ export function WatermarkPicker({ onUse, disabled }: { onUse: (file: File) => vo
   </div>
   <Dialog open={open} onOpenChange={setOpen}><DialogContent className="watermark-picker-dialog"><DialogTitle>按分类选水印</DialogTitle><DialogDescription>先选库或搜索名称；点击预览图可放大，确认后再添加图层。</DialogDescription>
     <div className="watermark-picker-filter"><label>水印库<select aria-label="水印库" value={category} onChange={event => setCategory(event.target.value)}><option value="all">全部水印</option><option value="unfiled">未分类</option>{collections.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>搜索<input placeholder="名称、作者或标签" value={query} onChange={event => setQuery(event.target.value)} /></label></div>
-    <div className="watermark-picker-grid">{items.map((item, index) => (category === 'all' || item.record.collection === category) && `${item.record.title} ${item.record.author} ${item.record.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && <article key={item.record.id}><ExampleImage src={urls[index]} alt={item.record.title} /><strong>{item.record.title}</strong><small>{collections.find(category => category.id === item.record.collection)?.name || '未分类'}</small><Button onClick={() => { onUse(new File([item.file], `${item.record.title}.${item.file.name.split('.').pop() || 'png'}`, { type: item.file.type })); setOpen(false); }}>使用这张水印</Button></article>)}</div>
+    <div className="watermark-picker-grid">{items.map((item, index) => (category === 'all' || item.record.collection === category) && `${item.record.title} ${item.record.author} ${item.record.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && <article key={item.record.id}><ExampleImage src={urls[index]} alt={item.record.title} /><strong>{item.record.title}</strong><small>{collections.find(category => category.id === item.record.collection)?.name || '未分类'}</small><Button onClick={async () => { await onUse(new File([item.file], `${item.record.title}.${item.file.name.split('.').pop() || 'png'}`, { type: item.file.type })); setOpen(false); }}>使用这张水印</Button></article>)}</div>
     {!items.length && <p>暂时没有水印，可以上传并命名保存。</p>}{error && <p role="alert">{error}</p>}
   </DialogContent></Dialog>
   <Dialog open={!!uploads.length} onOpenChange={value => { if (!value && !busy) setUploads([]); }}><DialogContent className="watermark-picker-dialog"><DialogTitle>先命名、归库，再启用水印</DialogTitle><DialogDescription>保存到本机水印库后才会加入当前图层。分享前请确认素材不含私人信息。</DialogDescription>

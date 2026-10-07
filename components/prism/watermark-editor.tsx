@@ -421,6 +421,16 @@ export function WatermarkEditor({
   const frame = useRef<number>(0);
   const currentLayers = useRef(layers);
   currentLayers.current = layers;
+  const useWatermark = async (file: File) => {
+    try {
+      const image = await loadImage(file);
+      let original = source && dimensions.get(source);
+      if (!original && source) { const loaded = await loadImage(source); original = { w: loaded.naturalWidth, h: loaded.naturalHeight, opaque: true }; }
+      const scale = original ? Math.min(.6 * canvas.canvasWidth, .6 * canvas.canvasHeight * (original.h / original.w) * (image.naturalWidth / image.naturalHeight)) : .6;
+      const layer = { ...defaultLayer(file), scale: Math.max(.01, Math.min(6, scale)) };
+      const next = [...currentLayers.current, layer]; onChange(next); currentLayers.current = next; setActive(layer.id);
+    } catch (error) { setError(error instanceof Error ? error.message : '水印图片无法读取，请重试。'); }
+  };
   const currentCanvas = useRef(canvas);
   currentCanvas.current = canvas;
   const change = (id: string, patch: Partial<EditorLayer>) => {
@@ -897,12 +907,7 @@ export function WatermarkEditor({
               <Redo2 />
               重做
             </Button>
-            <WatermarkPicker disabled={disabled} onUse={file => {
-              const layer = defaultLayer(file);
-              onChange([...currentLayers.current, layer]);
-              currentLayers.current = [...currentLayers.current, layer];
-              setActive(layer.id);
-            }} />
+            <WatermarkPicker disabled={disabled || !source} onUse={useWatermark} />
             <Button
               disabled={
                 disabled ||
@@ -1182,12 +1187,7 @@ export function WatermarkEditor({
             <h3>水印与图层</h3>
             <p>添加、选择、排序或锁定图层。</p>
           </div>
-          <WatermarkPicker disabled={disabled} onUse={file => {
-            const layer = defaultLayer(file);
-            onChange([...currentLayers.current, layer]);
-            currentLayers.current = [...currentLayers.current, layer];
-            setActive(layer.id);
-          }} />
+          <WatermarkPicker disabled={disabled || !source} onUse={useWatermark} />
           <div className="transform-layer-list">
             {[...stack].reverse().map((layer) => (
               <article
@@ -1450,6 +1450,7 @@ export function WatermarkEditor({
                       ? { ...defaultComposition().source, locked: false }
                       : {
                           ...defaultLayer(selected.file),
+                          scale: base && dimensions.get(selected.file) ? Math.max(.01, Math.min(.6 * canvas.canvasWidth, .6 * canvas.canvasHeight * base.h / base.w * dimensions.get(selected.file)!.w / dimensions.get(selected.file)!.h)) : .6,
                           ...(selected.text ? { text: selected.text } : {}),
                         }),
                     id: selected.id,
