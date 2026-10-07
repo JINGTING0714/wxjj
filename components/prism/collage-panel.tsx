@@ -1,4 +1,5 @@
 'use client';
+import { moveListItem } from './sortable-list';
 import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
@@ -795,6 +796,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                     >
                       <SourceSelection
                         sources={state.sources}
+                        onReorder={(from, to) => setState(current => ({ ...current, sources: moveListItem(current.sources, from, to), job: null, lastGenerated: null }))}
                         disabled={processing}
                         onRemove={async (ids) => {
                           setState((s) => ({
@@ -1238,6 +1240,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                     {Array.from({ length: previewCells }, (_, index) => (
                       <button
                         type="button"
+                        data-drop-position={dragOver === currentPreview * previewCells + index ? `放到第 ${currentPreview * previewCells + index + 1} 位` : undefined}
                         data-collage-index={
                           currentPreview * previewCells + index
                         }

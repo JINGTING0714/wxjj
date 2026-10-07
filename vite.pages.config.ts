@@ -13,6 +13,7 @@ export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('.', import.meta.url)) } },
   define: { 'process.env.NEXT_PUBLIC_BASE_PATH': JSON.stringify('/wxjj') },
   plugins: [react(), mediaEngineAssets()],
+  worker: { format: 'es' },
   css: { postcss: { plugins: [tailwindcss()] } },
   build: { outDir: '../dist/pages', emptyOutDir: true },
   preview: { host: '127.0.0.1', port: 4173, strictPort: true },

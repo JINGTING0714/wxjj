@@ -8,6 +8,7 @@ export type SaleMessage = {
   time: string;
   text: string;
   ignored?: boolean;
+  ocrConfidence?: number;
 };
 
 export type SaleAssignment = {

@@ -104,13 +104,21 @@ export async function recognizeLocalImages(
         const result = await worker.recognize(cut.toDataURL('image/png'), {}, { text: true, blocks: true });
         const lines = (result.data.blocks || []).flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines));
         for (const line of lines) {
+          if (mode === 'sales' && /^\s*\d/.test(line.text) && !/:|年|月|日/.test(line.text) && !/^20\d{2}/.test(line.text)) {
+            // Scrollbar fragments far to the right are outside a number claim.
+            // Remove only geometrically isolated nonnumeric noise, never a digit.
+            const words = line.words.filter(word => !(left + word.bbox.x0 / scale > canvas.width * .75 && !/\d/.test(word.text) && word.text.trim().length <= 3));
+            if (words.length !== line.words.length) line.text = words.map(word => word.text).join(' ');
+          }
           const text = line.text.trim();
-          if (mode === 'prompt' && preciseAvailable && text.length >= 5) {
+          if (preciseAvailable && text.length >= 5 && (mode === 'prompt' || (line.confidence < 90 && /\p{Script=Han}/u.test(text)))) {
             const lineCanvas = document.createElement('canvas');
             const top = region.top + line.bbox.y0 / scale;
             const height = (line.bbox.y1 - line.bbox.y0) / scale;
             const contentLeft = Math.max(0, left + line.bbox.x0 / scale - 2);
-            const contentRight = Math.min(canvas.width, left + line.bbox.x1 / scale + 2);
+            const clock = text.match(/\d{1,2}:\d{2}(?::\d{2})?/)?.[0];
+            const clockWord = mode === 'sales' && clock ? line.words.find(word => /\d{1,2}:\d{2}/.test(word.text)) : undefined;
+            const contentRight = Math.min(canvas.width, clockWord ? left + clockWord.bbox.x0 / scale - 4 : left + line.bbox.x1 / scale + 2);
             lineCanvas.width = Math.ceil(contentRight - contentLeft); lineCanvas.height = Math.ceil(height + 8);
             const lineContext = lineCanvas.getContext('2d');
             if (lineContext) {
@@ -120,7 +128,9 @@ export async function recognizeLocalImages(
                 onProgress?.(`第 ${index + 1} 张 · 正在逐行精细识别文字和标点`);
                 const { preciseText } = await import('./precise-ocr');
                 const precise = await preciseText(lineCanvas);
-                if (precise.text.trim() && precise.confidence >= 80) { line.text = precise.text.trim(); line.confidence = precise.confidence; lineCanvas.width = lineCanvas.height = 0; continue; }
+                if (clockWord && clock && /[\p{L}\p{Script=Han}]/u.test(precise.text)) precise.text = `${precise.text.trim()} ${clock}`;
+                const keepsClock = mode !== 'sales' || !clock || precise.text.includes(clock);
+                if (precise.text.trim() && precise.confidence >= 80 && keepsClock) { line.text = precise.text.trim(); line.confidence = precise.confidence; lineCanvas.width = lineCanvas.height = 0; continue; }
               } catch { preciseAvailable = false; }
             }
             lineCanvas.width = lineCanvas.height = 0;

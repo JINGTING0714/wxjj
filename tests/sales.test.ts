@@ -71,5 +71,22 @@ void test('one OCR block with a date heading preserves nicknames, slash numbers 
   assert.equal(rows[0].buyer, 'Novonlyyin');
   assert.equal(rows[0].time, '2026-10-03T22:14:59');
   assert.equal(rows[2].text, '10/102/120/119/127/136');
-  assert.equal(rows[3].buyer, 'Yuky');
+  assert.equal(rows[3].buyer, 'Yuky.');
+});
+
+void test('space-separated claims are retained in chat order, including repeated buyers', () => {
+  const text = '群聊的聊天记录\n2026年10月4日\n测试者甲 22:04:59\n72\n测试者乙 22:05:00\n56/100/31\n测试者丙 22:05:00\n76 101\n测试者丁 22:05:00\n36 49 97\n测试者戊 22:05:00\n11 41\n测试者丁 22:05:00\n36 49 97\n测试者己 22:05:00\n24';
+  const rows = messagesFromOcr([{ text, blocks: [] }]);
+  assert.equal(rows.length, 7);
+  assert.deepEqual(rows.map(row => row.text), ['72', '56/100/31', '76 101', '36 49 97', '11 41', '36 49 97', '24']);
+  assert.equal(rows[2].buyer, '测试者丙');
+  assert.equal(rows[4].buyer, '测试者戊');
+  assert.ok(rows.every(row => row.time.startsWith('2026-10-04T')));
+});
+
+void test('an uncertain buyer is retained for review instead of silently dropping the number claim', () => {
+  const rows = messagesFromOcr([{ text: '2026年10月4日\n22:05:00\n76 101', blocks: [] }]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].buyer, '');
+  assert.ok(reconcileSales(rows, [76, 101], '2026-10-04T22:05:00', 'exclude').issues.some(issue => issue.reason === '昵称或时间待确认'));
 });

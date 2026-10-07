@@ -1,6 +1,6 @@
 /* oxlint-disable next/no-img-element */
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useVault } from './vault-provider';
@@ -11,6 +11,7 @@ import { loadImage } from '@/lib/image-processing';
 
 export function WatermarkPicker({ onUse, disabled }: { onUse: (file: File) => void | Promise<void>; disabled: boolean }) {
   const vault = useVault();
+  const uploadId = useId();
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [category, setCategory] = useState('all'), [query, setQuery] = useState('');
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
@@ -56,10 +57,10 @@ export function WatermarkPicker({ onUse, disabled }: { onUse: (file: File) => vo
     finally { setBusy(false); }
   }
   return <><div className="layer-source-actions">
-    <label className="mini-file">上传水印<input type="file" accept="image/*" multiple disabled={disabled || busy} onChange={event => { setError(''); setUploads(Array.from(event.target.files || []).map(file => ({ file, title: file.name.replace(/\.[^.]+$/, ''), collection: 'unfiled' }))); event.target.value = ''; }} /></label>
+    <label className="mini-file">上传水印<input id={uploadId} type="file" accept="image/*" multiple disabled={disabled || busy} onChange={event => { setError(''); setOpen(false); const added = Array.from(event.target.files || []).map(file => ({ file, title: file.name.replace(/\.[^.]+$/, ''), collection: 'unfiled' })); setUploads(current => [...current, ...added]); event.target.value = ''; }} /></label>
     <Button variant="outline" disabled={disabled} onClick={() => { setError(''); setOpen(true); }}>从水印库选择</Button>
   </div>
-  <Dialog open={open} onOpenChange={setOpen}><DialogContent className="watermark-picker-dialog"><DialogTitle>按分类选水印</DialogTitle><DialogDescription>先选库或搜索名称；点击预览图可放大，确认后再添加图层。</DialogDescription>
+  <Dialog open={open} onOpenChange={setOpen}><DialogContent className="watermark-picker-dialog" data-file-drop-target={uploadId}><DialogTitle>按分类选水印</DialogTitle><DialogDescription>先选库或搜索名称；点击预览图可放大，确认后再添加图层。</DialogDescription>
     <div className="watermark-picker-filter"><label>水印库<select aria-label="水印库" value={category} onChange={event => setCategory(event.target.value)}><option value="all">全部水印</option><option value="unfiled">未分类</option>{collections.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>搜索<input placeholder="名称、作者或标签" value={query} onChange={event => setQuery(event.target.value)} /></label></div>
     <div className="watermark-picker-grid">{items.map((item, index) => (category === 'all' || item.record.collection === category) && `${item.record.title} ${item.record.author} ${item.record.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && <article key={item.record.id}><ExampleImage src={urls[index]} alt={item.record.title} /><strong>{item.record.title}</strong><small>{collections.find(category => category.id === item.record.collection)?.name || '未分类'}</small><Button onClick={async () => { await onUse(new File([item.file], `${item.record.title}.${item.file.name.split('.').pop() || 'png'}`, { type: item.file.type })); setOpen(false); }}>使用这张水印</Button></article>)}</div>
     {!items.length && <p>暂时没有水印，可以上传并命名保存。</p>}{error && <p role="alert">{error}</p>}

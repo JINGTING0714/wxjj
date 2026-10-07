@@ -1,4 +1,5 @@
 'use client';
+import { moveListItem } from './sortable-list';
 import { useEffect, useRef, useState } from 'react';
 import {
   Download,
@@ -297,6 +298,7 @@ export function VideoWatermarkPanel() {
             </div>
             <div className="desktop-workspace-only">
               <SourceSelection
+                onReorder={(from, to) => setState(current => ({ ...current, sources: moveListItem(current.sources, from, to), job: null }))}
                 disabled={busy}
                 onRemove={async (ids) => {
                   setState((current) => ({
@@ -575,6 +577,7 @@ export function VideoWatermarkPanel() {
         title="视频源文件"
       >
         <SourceSelection
+          onReorder={(from, to) => setState(current => ({ ...current, sources: moveListItem(current.sources, from, to), job: null }))}
           disabled={busy}
           onRemove={async (ids) => {
             setState((current) => ({

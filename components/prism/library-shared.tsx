@@ -10,7 +10,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -44,18 +44,23 @@ export function CollectionRail({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState('');
+  const search = useDeferredValue(categoryQuery.trim().toLocaleLowerCase());
+  const counts = useMemo(() => {
+    const result = new Map<string, number>();
+    for (const record of records) { const id = record.collection || 'unfiled'; result.set(id, (result.get(id) || 0) + 1); }
+    return result;
+  }, [records]);
   const options = [
     { id: 'all', name: `全部${noun}` },
     { id: 'unfiled', name: '未分类' },
     ...collections,
   ];
   const current = options.find((item) => item.id === active) || options[0];
-  const filteredOptions = options.filter((item) => ['all', 'unfiled'].includes(item.id) || item.name.toLocaleLowerCase().includes(categoryQuery.trim().toLocaleLowerCase()));
+  const filteredOptions = options.filter((item) => ['all', 'unfiled'].includes(item.id) || item.name.toLocaleLowerCase().includes(search));
   const countFor = (id: string) =>
     id === 'all'
       ? records.length
-      : records.filter((record) => (record.collection || 'unfiled') === id)
-          .length;
+      : counts.get(id) || 0;
   return (
     <div className="collection-rail">
       <button

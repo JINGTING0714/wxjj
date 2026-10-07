@@ -1,6 +1,7 @@
 /* oxlint-disable next/no-img-element */
 // Local Blob previews stay on this device and bypass server image optimization.
 'use client';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -135,24 +136,24 @@ export function SaleRoundCreateDialog({
                     multiple
                     onChange={(event) => {
                       const files = Array.from(event.target.files || []);
-                      setItems(
-                        files.map((file, index) => ({
+                      setItems(current => [...current,
+                        ...files.map((file, index) => ({
                           number:
                             Number(
                               file.name.match(/^(\d{1,4})(?=\D|$)/)?.[1],
-                            ) || index + 1,
+                            ) || Math.max(0, ...current.map(item => item.number)) + index + 1,
                           sourceId: crypto.randomUUID(),
                           name: file.name,
                           file,
                         })),
-                      );
+                      ]);
                       event.target.value = '';
                     }}
                   />
                 </label>
-                <div className="sale-create-images">
+                <SortableList className="sale-create-images" disabled={busy} onMove={(from, to) => setItems(current => moveListItem(current, from, to))}>
                   {items.map((item, index) => (
-                    <article key={item.sourceId}>
+                    <article key={item.sourceId}><SortHandle disabled={busy} />
                       <img src={urls[index]} alt={item.name} />
                       <span>{item.name}</span>
                       <label>
@@ -177,7 +178,7 @@ export function SaleRoundCreateDialog({
                       </label>
                     </article>
                   ))}
-                </div>
+                </SortableList>
               </>
             )}
           </div>

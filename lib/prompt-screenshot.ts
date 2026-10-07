@@ -100,6 +100,10 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
     // assuming that one OCR block equals one prompt.
     const source = (page.text || page.blocks.map((block) => block.text).join('\n'))
       .split(/\r?\n/).map(cleanLine).filter(Boolean);
+    const positions = new Map<string, typeof page.blocks>();
+    for (const block of page.blocks) for (const line of block.text.split(/\r?\n/)) {
+      const key = cleanLine(line); const matches = positions.get(key) || []; matches.push(block); positions.set(key, matches);
+    }
     let active: { lines: string[]; screenshot: number; top: number; confidence: number } | null = null;
     let lineIndex = 0;
     let previousBottom = 0;
@@ -110,7 +114,7 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
       active = null;
     };
     for (const raw of source) {
-      const geometry = page.blocks.find(item => cleanLine(item.text) === raw);
+      const geometry = positions.get(raw)?.shift();
       if (active && geometry && geometry.top - previousBottom > Math.max(42, (geometry.bottom - geometry.top) * 2.5) && !chineseLabel.test(raw) && !usage.test(raw)) flush();
       if (geometry) previousBottom = geometry.bottom;
       if (dateLine.test(raw) || /^(?:微信|聊天记录|群聊的聊天记录)/i.test(raw)) {
@@ -119,9 +123,10 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
       if (chatDecoration.test(raw) || raw.length < 3) { lineIndex++; continue; }
       if (promptLine(raw) || isPromptVariantMarker(raw)) {
         if (!active) {
-          const block = page.blocks.find((item) => item.text.includes(raw));
+          const block = geometry;
           active = { lines: [], screenshot, top: block?.top ?? lineIndex, confidence: block?.confidence ?? 0 };
         }
+        if (geometry) active.confidence = Math.min(active.confidence, geometry.confidence);
         active.lines.push(raw);
       } else if (active && usage.test(raw)) active.lines.push(raw);
       else if (active && hasHan(raw) && raw.length >= 8) active.lines.push(raw);

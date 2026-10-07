@@ -7,6 +7,7 @@ import { defaultComposition } from '../lib/watermark-composition';
 import { pngFixture } from './png-fixtures';
 import { deepCleanPng } from '../lib/png-cleaner';
 import { syncProfileMoodboards } from '../lib/profile-moodboard-sync';
+import { syncPromptVariants } from '../lib/prompt-variant-sync';
 import type { StoredLibraryAsset, CollectionRecord, StoredRecipe } from '../lib/prism-types';
 import {
   createVault,
@@ -29,6 +30,46 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+void test('split prompt versions keep original examples in an encrypted pool until ownership is reviewed', async () => {
+  const key = await createVault('variant-pool-password');
+  const first = 'A cinematic portrait, lifting a silver necklace --ar 3:4';
+  const second = 'A cinematic portrait, adjusting round glasses --ar 3:4';
+  const record: StoredLibraryAsset = { id: 'mixed', kind: 'prompt', title: '双版本', secret: `${first}\n\n${second}`, promptEnglish: `${first}\n\n${second}`, author: '作者', origin: '购买', acquisition: '付费', note: '', tags: [], collection: 'unfiled' };
+  await writeVaultBatch(key, { records: [{ scope: 'assets:prompt', value: record }], blobs: [
+    { id: 'silver', scope: 'asset-image:mixed', blob: new Blob(['silver-example']), name: 'silver.png' },
+    { id: 'glasses', scope: 'asset-image:mixed', blob: new Blob(['glasses-example']), name: 'glasses.png' },
+  ] });
+  const vault = { loadRecords: <T>(scope: string) => loadEncryptedRecords<T>(key, scope), loadBlobs: (scope: string) => loadEncryptedBlobs(key, scope), writeBatch: (batch: Parameters<typeof writeVaultBatch>[1]) => writeVaultBatch(key, batch) };
+  assert.equal(await syncPromptVariants(vault), 1);
+  const versions = await loadEncryptedRecords<StoredLibraryAsset>(key, 'assets:prompt');
+  assert.deepEqual(versions.map(version => version.promptEnglish), [first, second]);
+  assert.ok(versions.every(version => version.promptExampleReviewRequired));
+  const images = await loadEncryptedBlobs(key, versions[0].promptExamplePoolScope!);
+  assert.deepEqual((await Promise.all(images.map(image => image.blob.text()))).sort(), ['glasses-example', 'silver-example']);
+  assert.equal((await loadEncryptedBlobs(key, `asset-image:${versions[1].id}`)).length, 0);
+  assert.equal(await syncPromptVariants(vault), 0);
+  assert.equal((await loadEncryptedBlobs(key, versions[0].promptExamplePoolScope!)).length, 2);
+});
+
+void test('older split versions with copied examples request ownership review without losing images', async () => {
+  const key = await createVault('legacy-variant-password');
+  const record: StoredLibraryAsset = { id: 'old', kind: 'prompt', title: '旧词条 · 版本 1', secret: 'A portrait, silver necklace --ar 3:4', promptEnglish: 'A portrait, silver necklace --ar 3:4', promptFamilyId: 'old', author: '作者', origin: '', acquisition: '', note: '', tags: [], collection: 'unfiled' };
+  await writeVaultBatch(key, { records: [
+    { scope: 'assets:prompt', value: record },
+    { scope: 'assets:prompt', value: { ...record, id: 'old:variant:2', title: '旧词条 · 版本 2', secret: 'A portrait, round glasses --ar 3:4', promptEnglish: 'A portrait, round glasses --ar 3:4' } },
+    { scope: 'prompt-variant-history', value: { id: 'prompt-variants:old', original: record } },
+  ], blobs: [
+    { id: 'a', scope: 'asset-image:old', blob: new Blob(['original-example']), name: 'example.png' },
+    { id: 'b', scope: 'asset-image:old:variant:2', blob: new Blob(['original-example']), name: 'example.png' },
+  ] });
+  const vault = { loadRecords: <T>(scope: string) => loadEncryptedRecords<T>(key, scope), loadBlobs: (scope: string) => loadEncryptedBlobs(key, scope), writeBatch: (batch: Parameters<typeof writeVaultBatch>[1]) => writeVaultBatch(key, batch) };
+  assert.equal(await syncPromptVariants(vault), 1);
+  assert.ok((await loadEncryptedRecords<StoredLibraryAsset>(key, 'assets:prompt')).every(version => version.promptExampleReviewRequired));
+  assert.equal((await loadEncryptedBlobs(key, 'asset-image:old')).length, 1);
+  assert.equal((await loadEncryptedBlobs(key, 'asset-image:old:variant:2')).length, 1);
+  assert.equal(await syncPromptVariants(vault), 0);
+});
 
 void test('emotion-only folders move with examples and recipe references; categories only exist for emotion records', async () => {
   const key = await createVault('emotion-sync-password');

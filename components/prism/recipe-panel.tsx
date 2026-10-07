@@ -1,4 +1,5 @@
 'use client';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import {
   CollectionRail,
   CollectionDialog,
@@ -761,7 +762,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 placeholder="3:4、9:16 或任何自定义说明"
               />
             </label>
-            <div className="wide-field recipe-selection-tools"><p>选择顺序会影响配方排列和复制顺序。手动录入内容不参与一键复制。</p><details><summary>已选 {selectedOrder.length} 个 · 查看与调整全局顺序</summary>{selectedOrder.map((item, index) => <div className="order-controls" key={`${item.kind}:${item.id}`}><span>{index + 1}. {assetById.get(item.id)?.title || '缺失引用（保留）'}</span><Button type="button" variant="outline" disabled={index === 0} onClick={() => setSelectedOrder((order) => moveRecipeChoice(order, index, index - 1))}>上移</Button><Button type="button" variant="outline" disabled={index === selectedOrder.length - 1} onClick={() => setSelectedOrder((order) => moveRecipeChoice(order, index, index + 1))}>下移</Button><Button type="button" variant="ghost" onClick={() => { toggle(item.kind === 'profile' ? setSelectedProfiles : setSelectedMoodboards, item.id); setSelectedOrder((order) => order.filter((choice) => !(choice.id === item.id && choice.kind === item.kind))); }}>移除</Button></div>)}</details><div className="mobile-workspace-only recipe-picker-tabs"><Button type="button" variant={pickerTab === 'profile' ? 'default' : 'outline'} onClick={() => setPickerTab('profile')}>Profile</Button><Button type="button" variant={pickerTab === 'moodboard' ? 'default' : 'outline'} onClick={() => setPickerTab('moodboard')}>Moodboard</Button></div></div>
+            <div className="wide-field recipe-selection-tools"><p>选择顺序会影响配方排列和复制顺序。手动录入内容不参与一键复制。</p><details><summary>已选 {selectedOrder.length} 个 · 查看与调整全局顺序</summary><SortableList onMove={(from, to) => setSelectedOrder(order => moveListItem(order, from, to))}>{selectedOrder.map((item, index) => <div className="order-controls" key={`${item.kind}:${item.id}`}><SortHandle /><span>{index + 1}. {assetById.get(item.id)?.title || '缺失引用（保留）'}</span><Button type="button" variant="outline" disabled={index === 0} onClick={() => setSelectedOrder((order) => moveRecipeChoice(order, index, index - 1))}>上移</Button><Button type="button" variant="outline" disabled={index === selectedOrder.length - 1} onClick={() => setSelectedOrder((order) => moveRecipeChoice(order, index, index + 1))}>下移</Button><Button type="button" variant="ghost" onClick={() => { toggle(item.kind === 'profile' ? setSelectedProfiles : setSelectedMoodboards, item.id); setSelectedOrder((order) => order.filter((choice) => !(choice.id === item.id && choice.kind === item.kind))); }}>移除</Button></div>)}</SortableList></details><div className="mobile-workspace-only recipe-picker-tabs"><Button type="button" variant={pickerTab === 'profile' ? 'default' : 'outline'} onClick={() => setPickerTab('profile')}>Profile</Button><Button type="button" variant={pickerTab === 'moodboard' ? 'default' : 'outline'} onClick={() => setPickerTab('moodboard')}>Moodboard</Button></div></div>
             <div className="wide-field picker-columns" data-picker-tab={pickerTab}>
               <SelectionList
                 items={profiles}
@@ -927,7 +928,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
               fields={customFields}
               onChange={setCustomFields}
             />
-            <div className="wide-field existing-image-editor">
+            <div className="wide-field existing-image-editor" data-file-drop-target="recipe-example-images">
               <span>现有例图</span>
               {existingImages.length ? (
                 <div>
@@ -960,10 +961,11 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
             <label className="wide-field upload-field">
               <span>追加配方例图（可多选）</span>
               <input
+                id="recipe-example-images"
                 accept="image/*"
                 multiple
                 onChange={(event) =>
-                  setNewImages(Array.from(event.target.files || []))
+                  setNewImages(current => [...current, ...Array.from(event.target.files || [])])
                 }
                 type="file"
               />

@@ -367,6 +367,8 @@ export default function Home() {
   useEffect(() => { let clean: (() => void) | undefined; let stopped = false; void import('@/lib/file-drop').then(module => { if (!stopped) clean = module.installFileDrop(); }); return () => { stopped = true; clean?.(); }; }, []);
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
+  const visitedLibraries = useRef(new Set<ViewId>());
+  visitedLibraries.current.add(activeView);
   const flowDrag = useRef({ startX: 0, left: 0, down: false, moved: false });
   const globalQuery = '';
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
@@ -712,31 +714,31 @@ export default function Home() {
                 className="content-frame studio-frame"
                 hidden={activeView !== 'prompts'}
               >
-                <LibraryPanel globalQuery={globalQuery} kind="prompt" />
+                {visitedLibraries.current.has('prompts') && <LibraryPanel globalQuery={globalQuery} kind="prompt" />}
               </div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'profiles'}
               >
-                <LibraryPanel globalQuery={globalQuery} kind="profile" />
+                {visitedLibraries.current.has('profiles') && <LibraryPanel globalQuery={globalQuery} kind="profile" />}
               </div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'moodboards'}
               >
-                <LibraryPanel globalQuery={globalQuery} kind="moodboard" />
+                {visitedLibraries.current.has('moodboards') && <LibraryPanel globalQuery={globalQuery} kind="moodboard" />}
               </div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'watermarks'}
               >
-                <WatermarkLibraryPanel globalQuery={globalQuery} />
+                {visitedLibraries.current.has('watermarks') && <WatermarkLibraryPanel globalQuery={globalQuery} />}
               </div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'recipes'}
               >
-                <RecipePanel globalQuery={globalQuery} />
+                {visitedLibraries.current.has('recipes') && <RecipePanel globalQuery={globalQuery} />}
               </div>
               <div
                 className="content-frame studio-frame"

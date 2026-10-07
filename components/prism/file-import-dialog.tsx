@@ -199,7 +199,7 @@ function PreviewRow({
     return () => window.removeEventListener('prism:hide-secrets', hide);
   }, []);
   return (
-    <article className="import-row" data-selection-id={row.id}>
+    <article className="import-row" data-selection-id={row.id} data-file-drop-target={`import-example-${row.id}`}>
       <label className="check-line">
         <input
           checked={row.include}
@@ -295,6 +295,7 @@ function PreviewRow({
           <Plus />
           补充例图
           <input
+            id={`import-example-${row.id}`}
             accept="image/*"
             multiple
             onChange={(e) => {

@@ -1,4 +1,5 @@
 'use client';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   ArrowDown,
@@ -1188,7 +1189,7 @@ export function WatermarkEditor({
             <p>添加、选择、排序或锁定图层。</p>
           </div>
           <WatermarkPicker disabled={disabled || !source} onUse={useWatermark} />
-          <div className="transform-layer-list">
+          <SortableList className="transform-layer-list" disabled={disabled} onMove={(from, to) => { const displayed = [...stack].reverse(); if (!displayed[from].locked) publishStack(moveListItem(displayed, from, to).reverse()); }}>
             {[...stack].reverse().map((layer) => (
               <article
                 className={layer.id === selectedId ? 'is-active' : ''}
@@ -1212,7 +1213,7 @@ export function WatermarkEditor({
                     {layer.locked ? ' · 已锁定' : ''}
                   </strong>
                 </button>
-                <span className="layer-order-actions">
+                <span className="layer-order-actions"><SortHandle disabled={disabled || layer.locked} />
                   <button
                     type="button"
                     aria-label={layer.opacity <= 0 ? '显示图层' : '隐藏图层'}
@@ -1266,7 +1267,7 @@ export function WatermarkEditor({
                 </span>
               </article>
             ))}
-          </div>
+          </SortableList>
           <p className="stage-tip">
             列表从上到下对应从前到后。锁定层不会响应拖动，也不会挡住未锁定图层的操作。
           </p>

@@ -1,4 +1,5 @@
 'use client';
+import { SortableList, SortHandle } from './sortable-list';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { BulkActions, SelectItem, useSelection } from './bulk-selection';
@@ -8,11 +9,13 @@ import type { PipelineSource } from '@/lib/pipeline';
 export function SourceSelection({
   sources,
   onRemove,
+  onReorder,
   disabled = false,
   openByDefault = false,
 }: {
   sources: PipelineSource[];
   onRemove: (ids: string[]) => void | Promise<void>;
+  onReorder?: (from: number, to: number) => void;
   disabled?: boolean;
   openByDefault?: boolean;
 }) {
@@ -47,14 +50,14 @@ export function SourceSelection({
           `从此队列移除选中的 ${count} 个原文件副本？\n电脑原文件和已完成成品不会删除。被移除原图的成品将不能在本批重打；需要时可重新导入原文件。`
         }
       />
-      <DragSelection className="source-selection-list" selection={selection} disabled={disabled}>
+      <DragSelection selection={selection} disabled={disabled}><SortableList className="source-selection-list" disabled={disabled || !onReorder} onMove={(from, to) => { const rows = visible.slice(current * 50, (current + 1) * 50); onReorder?.(sources.findIndex(source => source.id === rows[from].id), sources.findIndex(source => source.id === rows[to].id)); }}>
         {visible.slice(current * 50, (current + 1) * 50).map((s) => (
-          <div key={s.id} data-selection-id={s.id}>
+          <div key={s.id} data-selection-id={s.id}>{onReorder && <SortHandle disabled={disabled} />}
             <SelectItem selection={selection} id={s.id} name={s.file.name} />
             <span>{s.file.name}</span>
           </div>
         ))}
-      </DragSelection>
+      </SortableList></DragSelection>
       <div className="source-selection-pages">
         <Button
           type="button"

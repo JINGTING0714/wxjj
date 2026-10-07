@@ -25,3 +25,20 @@ void test('two action variants in one chat message produce separate draft cards'
   const rows = draftsFromOcr([{ text, blocks: [] }]);
   assert.equal(rows.length, 2); assert.match(rows[0].chinese, /项链/); assert.match(rows[1].chinese, /眼镜/); assert.ok(!rows[0].chinese.includes('眼镜'));
 });
+
+void test('unlabeled screenshot variants with different actions each retain their own complete parameters', () => {
+  const text = '测试作者 2026年8月20日 12:33\n森林中的双人肖像，身穿绿色外套，人物抬手整理项链\n--chaos 25 --ar 9:16 --profile AbC123 --stylize 650 --niji 7\n森林中的双人肖像，身穿绿色外套，人物撑伞回头微笑\n--chaos 25 --ar 9:16 --profile XyZ789 --stylize 750 --niji 7';
+  const rows = draftsFromOcr([{ text, blocks: [] }]);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].chinese, /项链.*--profile AbC123/);
+  assert.match(rows[1].chinese, /撑伞.*--profile XyZ789/);
+  assert.ok(!rows[0].chinese.includes('撑伞') && !rows[1].chinese.includes('项链'));
+});
+
+void test('two bilingual screenshot variants align by version without copying both commands together', () => {
+  const text = '版本一：A cinematic portrait, lifting a silver necklace --ar 3:4\n中文：电影光线的肖像，抬手整理银色项链 --ar 3:4\n版本二：A cinematic portrait, adjusting round glasses --ar 3:4\n中文：电影光线的肖像，抬手扶圆框眼镜 --ar 3:4';
+  const rows = draftsFromOcr([{ text, blocks: [] }]);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].english, /necklace/); assert.match(rows[0].chinese, /项链/);
+  assert.match(rows[1].english, /glasses/); assert.match(rows[1].chinese, /眼镜/);
+});

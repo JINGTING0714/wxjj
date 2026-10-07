@@ -1,4 +1,5 @@
 'use client';
+import { PromptExampleAssignment } from './prompt-example-assignment';
 import { formatProfileCode } from '@/lib/short-codes';
 import { copyText } from '@/lib/clipboard';
 import { promptLanguages } from '@/lib/prompt-language';
@@ -23,7 +24,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 
 import { FileImportDialog } from './file-import-dialog';
 import { ScreenshotImportDialog } from './screenshot-import-dialog';
@@ -207,6 +208,19 @@ function SimpleLibraryPanel({
   const [stageType, setStageType] = useState('测试阶段 P');
   const [formError, setFormError] = useState('');
   const [repairStatus, setRepairStatus] = useState('');
+  const [exampleFamily, setExampleFamily] = useState<LibraryAsset[]>([]);
+  const imageUrls = useRef(new Map<string, string>());
+  const createdUrls = useRef(new Set<string>());
+  const imageUrl = (blob: Blob, key?: string) => {
+    if (key && imageUrls.current.has(key)) return imageUrls.current.get(key)!;
+    const url = URL.createObjectURL(blob); createdUrls.current.add(url);
+    if (key) imageUrls.current.set(key, url);
+    return url;
+  };
+  useEffect(() => () => {
+    for (const url of createdUrls.current) URL.revokeObjectURL(url);
+    createdUrls.current.clear(); imageUrls.current.clear();
+  }, [vault.session]);
   useEffect(() => { setRevealed(new Set()); }, [kind, activeCollection]);
 
   const allCollections = useMemo(
@@ -260,7 +274,7 @@ function SimpleLibraryPanel({
           images: blobs.map((entry) => ({
             id: entry.id,
             name: entry.name,
-            url: URL.createObjectURL(entry.blob),
+            url: imageUrl(entry.blob, `${entry.id}:${entry.updatedAt}`),
           })),
         } satisfies LibraryAsset;
       }),
@@ -292,38 +306,19 @@ function SimpleLibraryPanel({
     return () => window.removeEventListener('prism:assets-changed', changed);
   }, [kind, vault.status]);
 
-  const query = `${globalQuery} ${localQuery}`.trim().toLocaleLowerCase();
+  const query = useDeferredValue(`${globalQuery} ${localQuery}`.trim().toLocaleLowerCase());
+  const searchIndex = useMemo(() => new Map(assets.map(asset => [asset.id, [asset.title, ...Object.values(promptLanguages(asset)), asset.author, asset.origin, asset.acquisition, asset.acquisitionOther, asset.stageType, asset.stageTypeOther, asset.stageNote, asset.note, ...asset.tags, ...(asset.customFields || []).flatMap(field => [field.label, field.value])].join(' ').toLocaleLowerCase()])), [assets]);
   const filtered = useMemo(
     () =>
       assets.filter((asset) => {
         const inCollection =
           activeCollection === 'all' || asset.collection === activeCollection;
-        const extra = (asset.customFields || []).flatMap((field) => [
-          field.label,
-          field.value,
-        ]);
-        const haystack = [
-          asset.title,
-          ...Object.values(promptLanguages(asset)),
-          asset.author,
-          asset.origin,
-          asset.acquisition,
-          asset.acquisitionOther,
-          asset.stageType,
-          asset.stageTypeOther,
-          asset.stageNote,
-          asset.note,
-          ...asset.tags,
-          ...extra,
-        ]
-          .join(' ')
-          .toLocaleLowerCase();
-        return inCollection && (!query || haystack.includes(query));
+        return inCollection && (!query || searchIndex.get(asset.id)?.includes(query));
       }),
-    [activeCollection, assets, query],
+    [activeCollection, assets, query, searchIndex],
   );
 
-  const browsePictures = useMemo(() => filtered.flatMap(asset => asset.images.map(image => ({ ...image, assetId: asset.id, title: asset.title, ...(kind === 'prompt' ? promptLanguages(asset) : { copyValue: asset.secret, copyLabel: '复制完整短码' }) }))), [kind, filtered]);
+  const browsePictures = useMemo(() => filtered.flatMap(asset => (asset.promptExampleReviewRequired ? [] : asset.images).map(image => ({ ...image, assetId: asset.id, title: asset.title, ...(kind === 'prompt' ? promptLanguages(asset) : { copyValue: asset.secret, copyLabel: '复制完整短码' }) }))), [kind, filtered]);
   const browseOffsets = useMemo(() => { const offsets = new Map<string, number>(); browsePictures?.forEach((picture, index) => { if (!offsets.has(picture.assetId)) offsets.set(picture.assetId, index); }); return offsets; }, [browsePictures]);
   const openCreate = () => {
     setEditingAsset(null);
@@ -418,7 +413,7 @@ function SimpleLibraryPanel({
       const added = newImageFiles.map((file) => ({
         id: crypto.randomUUID(),
         name: file.name,
-        url: URL.createObjectURL(file),
+        url: imageUrl(file),
         file,
       }));
       await vault.writeBatch({
@@ -642,10 +637,11 @@ function SimpleLibraryPanel({
                   id={asset.id}
                   name={asset.title}
                 />
-                <VisualTile asset={asset} pictures={browsePictures} offset={browseOffsets.get(asset.id)} onEdit={(id) => { const item = assets.find(record => record.id === id); if (item) openEdit(item); }} />
+                <VisualTile asset={asset.promptExampleReviewRequired ? { ...asset, images: [] } : asset} pictures={browsePictures} offset={browseOffsets.get(asset.id)} onEdit={(id) => { const item = assets.find(record => record.id === id); if (item) openEdit(item); }} />
                 <div>
                   <Badge variant="outline">{copy.noun}</Badge>
                   <h3>{asset.title}</h3>
+                  {kind === 'prompt' && asset.promptExamplePoolScope && <button type="button" className="variant-example-action" onClick={() => setExampleFamily(assets.filter(version => version.promptFamilyId === asset.promptFamilyId && version.promptExamplePoolScope === asset.promptExamplePoolScope))}>{asset.promptExampleReviewRequired ? '例图归属待核对 · 分配各版本例图' : '调整各版本例图'}</button>}
                   <p>
                     {asset.tags.length ? asset.tags.join(' / ') : '未添加标签'}
                   </p>
@@ -754,6 +750,7 @@ function SimpleLibraryPanel({
         )}
       </div>
 
+      {!!exampleFamily.length && <PromptExampleAssignment family={exampleFamily} onClose={() => setExampleFamily([])} onSaved={() => void refresh()} />}
       <Dialog onOpenChange={setAssetDialog} open={assetDialog}>
         <DialogContent className="asset-dialog asset-dialog-wide">
           <DialogHeader>
@@ -925,7 +922,7 @@ function SimpleLibraryPanel({
               fields={customFields}
               onChange={setCustomFields}
             />
-            <div className="wide-field existing-image-editor">
+            <div className="wide-field existing-image-editor" data-file-drop-target={`library-example-images-${kind}`}>
               <span>现有例图</span>
               {existingImages.length ? (
                 <div>
@@ -958,10 +955,11 @@ function SimpleLibraryPanel({
             <label className="wide-field upload-field">
               <span>追加例图（可多选）</span>
               <input
+                id={`library-example-images-${kind}`}
                 accept="image/*"
                 multiple
                 onChange={(event) =>
-                  setNewImageFiles(Array.from(event.target.files || []))
+                  setNewImageFiles(current => [...current, ...Array.from(event.target.files || [])])
                 }
                 type="file"
               />
@@ -985,13 +983,10 @@ function SimpleLibraryPanel({
             {kind === 'prompt' && editingAsset && assets.some(asset => asset.id === editingAsset.id) && <Button type="button" variant="outline" onClick={async () => {
               const original = editingAsset;
               const form = new FormData(document.getElementById('asset-form') as HTMLFormElement);
-              const pending = newImageFiles;
-              const kept = new Set(existingImages.map(image => image.id));
-              const images = await vault.loadBlobs(`asset-image:${original.id}`);
-              setEditingAsset({ ...original, id: prismId('prompt-version'), title: `${String(form.get('title') || original.title)} · 新版本`, promptFamilyId: original.promptFamilyId || original.id, promptVariantLabel: '新版本', promptEnglish: String(form.get('promptEnglish') || ''), promptChinese: String(form.get('promptChinese') || ''), promptUnconfirmed: String(form.get('promptUnconfirmed') || ''), note: String(form.get('note') || ''), customFields: normalizeCustomFields(customFields), createdAt: undefined, images: [] });
+              setEditingAsset({ ...original, id: prismId('prompt-version'), title: `${String(form.get('title') || original.title)} · 新版本`, promptFamilyId: original.promptFamilyId || original.id, promptVariantLabel: '新版本', promptExamplePoolScope: undefined, promptExampleReviewRequired: false, promptEnglish: String(form.get('promptEnglish') || ''), promptChinese: String(form.get('promptChinese') || ''), promptUnconfirmed: String(form.get('promptUnconfirmed') || ''), note: String(form.get('note') || ''), customFields: normalizeCustomFields(customFields), createdAt: undefined, images: [] });
               setExistingImages([]); setRemovedImageIds([]);
-              setNewImageFiles([...images.filter(image => kept.has(image.id)).map(image => new File([image.blob], image.name, { type: image.blob.type })), ...pending]);
-              setFormError('这是独立的新版本。请修改动作、配饰或词文后保存，原版本会保留。');
+              setNewImageFiles([]);
+              setFormError('这是独立的新版本。请修改词文并上传这个版本对应的例图，原版本会保留。');
             }}>新增独立版本</Button>}
             <Button onClick={() => setAssetDialog(false)} variant="ghost">
               取消

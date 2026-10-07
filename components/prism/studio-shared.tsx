@@ -1,6 +1,7 @@
 'use client';
 
 import { Plus, Trash2 } from 'lucide-react';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,15 +50,16 @@ export function CustomFieldsEditor({
         <Button onClick={() => onChange([...fields, { id: prismId('field'), label: '', value: '' }])} size="sm" type="button" variant="outline"><Plus /> 添加字段</Button>
       </div>
       {fields.length === 0 ? <p className="custom-fields-empty">例如：版权范围、福利 P、测试批次、推荐参数、购买日期……</p> : (
-        <div className="custom-fields-list">
+        <SortableList className="custom-fields-list" onMove={(from, to) => onChange(moveListItem(fields, from, to))}>
           {fields.map((field) => (
             <div key={field.id}>
+              <SortHandle />
               <Input aria-label="自定义字段名称" onChange={(event) => patch(field.id, { label: event.target.value })} placeholder="字段名称" value={field.label} />
               <Input aria-label="自定义字段内容" onChange={(event) => patch(field.id, { value: event.target.value })} placeholder="字段内容" value={field.value} />
               <button aria-label="删除自定义字段" onClick={() => onChange(fields.filter((item) => item.id !== field.id))} type="button"><Trash2 /></button>
             </div>
           ))}
-        </div>
+        </SortableList>
       )}
     </fieldset>
   );

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import type { PipelineSource } from '@/lib/pipeline';
 import { recognizeLocalImages } from '@/lib/local-ocr';
@@ -43,6 +45,7 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   const [removedMessage, setRemovedMessage] = useState<{ roundId: string; entry: SaleMessage } | null>(null);
   const workspace = useWorkspaceState('sales', { rounds: [] as SaleRound[], active: '' });
   const { state, setState } = workspace;
+  const [supplement, setSupplement] = useState<{ screenshot: number; position: number; buyer: string; time: string; text: string } | null>(null);
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -97,23 +100,39 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   };
   const addMessage = () => {
     if (!active) return;
-    patchRound(active.id, (round) => ({ ...round, complete: false, assignments: [], messages: [...round.messages, {
-      id: crypto.randomUUID(), screenshot: Math.max(0, round.screenshots.length - 1),
-      order: round.messages.length, buyer: '', time: '', text: '',
-    }] }));
+    const screenshot = Math.min(reviewScreenshot, Math.max(0, active.screenshots.length - 1));
+    setSupplement({ screenshot, position: orderedMessages.filter(entry => entry.screenshot === screenshot).length, buyer: '', time: active.startTime, text: '' });
   };
-  const moveMessage = (index: number, delta: number) => {
-    if (!active) return;
-    patchRound(active.id, (round) => {
+  const saveSupplement = () => {
+    if (!active || !supplement) return;
+    if (!supplement.buyer.trim() || !supplement.time || !extractSaleNumbers(supplement.text).length) { setMessage('请补齐昵称、时间和号码，再加入这条购买消息。'); return; }
+    patchRound(active.id, round => {
       const messages = [...round.messages].sort((a, b) => a.screenshot - b.screenshot || a.order - b.order);
-      const to = index + delta;
-      if (to < 0 || to >= messages.length || messages[to].screenshot !== messages[index].screenshot) return round;
-      [messages[index], messages[to]] = [messages[to], messages[index]];
-      return { ...round, complete: false, assignments: [], messages: messages.map((item, order) => ({ ...item, order })) };
+      const same = messages.filter(entry => entry.screenshot === supplement.screenshot);
+      const before = same[supplement.position];
+      const last = same[same.length - 1];
+      const offset = before ? messages.indexOf(before) : last ? messages.indexOf(last) + 1 : messages.findIndex(entry => entry.screenshot > supplement.screenshot);
+      messages.splice(offset < 0 ? messages.length : offset, 0, { id: crypto.randomUUID(), screenshot: supplement.screenshot, order: 0, buyer: supplement.buyer.trim(), time: supplement.time, text: supplement.text.trim() });
+      return { ...round, complete: false, assignments: [], messages: messages.map((entry, order) => ({ ...entry, order })) };
     });
+    setReviewScreenshot(supplement.screenshot); setSupplement(null);
+    setMessage('补录已放到指定位置。请对照原图检查；还可以拖动排序或删除。');
   };
+  const reorderMessages = (from: number, to: number) => {
+    if (!active || from === to || to < 0 || to >= orderedMessages.length) return;
+    patchRound(active.id, round => {
+      const messages = [...round.messages].sort((a, b) => a.screenshot - b.screenshot || a.order - b.order);
+      const destinationScreenshot = messages[to].screenshot;
+      const movedId = messages[from].id;
+      const next = moveListItem(messages, from, to).map((entry, order) => ({ ...entry, order, screenshot: entry.id === movedId ? destinationScreenshot : entry.screenshot }));
+      return { ...round, complete: false, assignments: [], messages: next };
+    });
+    setReviewScreenshot(orderedMessages[to].screenshot);
+  };
+  const moveMessage = (index: number, delta: number) => reorderMessages(index, index + delta);
   const recognize = async () => {
     if (!active?.screenshots.length) return;
+    if (active.messages.length && !(await confirmation.ask('重新识别会替换当前消息及补录内容。请先确认你希望重新识别。', '重新识别', '确认重新识别'))) return;
     setBusy(true);
     try {
       const pages = await recognizeLocalImages(active.screenshots, setMessage, 'sales');
@@ -127,24 +146,25 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动添加消息核对。`);
     } finally { setBusy(false); }
   };
-  const moveScreenshot = (index: number, delta: number) => {
-    if (!active) return;
-    patchRound(active.id, (round) => {
-      const files = [...round.screenshots];
-      const to = index + delta;
-      if (to < 0 || to >= files.length) return round;
-      [files[index], files[to]] = [files[to], files[index]];
-      return { ...round, screenshots: files, messages: [], assignments: [], complete: false };
-    });
+  const reorderScreenshots = (from: number, to: number) => {
+    if (!active || from === to || to < 0 || to >= active.screenshots.length) return;
+    const order = moveListItem(active.screenshots.map((_, index) => index), from, to);
+    patchRound(active.id, round => ({ ...round, screenshots: moveListItem(round.screenshots, from, to), messages: round.messages.map(entry => ({ ...entry, screenshot: order.indexOf(entry.screenshot) })), assignments: [], complete: false }));
+    setReviewScreenshot(current => order.indexOf(current));
   };
-  const removeScreenshot = (index: number) => {
-    if (!active) return;
-    patchRound(active.id, (round) => ({
-      ...round,
-      screenshots: round.screenshots.filter((_, item) => item !== index),
-      messages: [], assignments: [], complete: false,
+  const moveScreenshot = (index: number, delta: number) => reorderScreenshots(index, index + delta);
+  const removeScreenshot = async (index: number) => {
+    if (!active || !(await confirmation.ask('删除这张截图及其对应消息吗？其他截图的校对内容会保留。', '删除截图', '确认删除'))) return;
+    patchRound(active.id, round => ({
+      ...round, screenshots: round.screenshots.filter((_, item) => item !== index),
+      messages: round.messages.filter(entry => entry.screenshot !== index).map(entry => ({ ...entry, screenshot: entry.screenshot > index ? entry.screenshot - 1 : entry.screenshot })), assignments: [], complete: false,
     }));
-    setMessage('已删除这张成绩单截图；请确认剩余截图顺序后重新识别。');
+    setReviewScreenshot(current => Math.max(0, Math.min(current, active.screenshots.length - 2)));
+    setMessage('已删除截图和对应消息，其他已校对内容仍保留。');
+  };
+  const goStep = (next: number) => {
+    setStep(next);
+    requestAnimationFrame(() => document.querySelector(`.sales-section[data-step="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
   const calculate = () => {
     if (!active || !result) return;
@@ -157,7 +177,8 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       return;
     }
     patchRound(active.id, (round) => ({ ...round, assignments: result.assignments, deliveredNumbers: [] }));
-    setStep(1);
+    goStep(1);
+    confirmation.notify('核对结果已生成，现在进入“分配与交付”。请逐位确认购买者的号码和实际交付情况，再进行站内清理。', '核对完成');
     setMessage(`已核对 ${result.assignments.length} 个号码；${result.remaining.length} 个号码未分配。请逐人确认实际交付。`);
   };
   const removeMessage = async (entry: SaleMessage) => {
@@ -220,39 +241,55 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   };
   return <div className="studio-page sales-page" data-sale-step={step}>
     {confirmation.dialog}
+    <Dialog open={!!supplement} onOpenChange={open => { if (!open) setSupplement(null); }}>
+      <DialogContent className="sale-supplement-dialog">
+        <DialogHeader><DialogTitle>补录购买消息</DialogTitle></DialogHeader>
+        {supplement && <><p>对照原截图填写，再选好插入位置。</p>
+          <label>对应截图<select aria-label="对应截图" value={supplement.screenshot} onChange={event => { const screenshot = Number(event.target.value); setSupplement({ ...supplement, screenshot, position: 0 }); }}>{active?.screenshots.map((_, index) => <option key={index} value={index}>第 {index + 1} 张</option>)}</select></label>
+          <label>插入位置<select aria-label="插入位置" value={supplement.position} onChange={event => setSupplement({ ...supplement, position: Number(event.target.value) })}>{Array.from({ length: orderedMessages.filter(entry => entry.screenshot === supplement.screenshot).length + 1 }, (_, index) => <option value={index} key={index}>第 {supplement.screenshot + 1} 张 · 插入为第 {index + 1} 条消息</option>)}</select></label>
+          <label>昵称<input autoFocus value={supplement.buyer} onChange={event => setSupplement({ ...supplement, buyer: event.target.value })} /></label>
+          <DateTimeFields label="消息时间" value={supplement.time} onChange={time => setSupplement({ ...supplement, time })} />
+          <label>号码原文<textarea value={supplement.text} onChange={event => setSupplement({ ...supplement, text: event.target.value })} placeholder="例如 76 101" /></label>
+          <Button onClick={saveSupplement}>加入所选位置</Button></>}
+      </DialogContent>
+    </Dialog>
     <SectionHead eyebrow="SALES RECONCILIATION" number="10" title="售图核对" description="按截图顺序核对号码、交付后清理站内图片，并用剩图重新拼图。" actions={<SaleRoundCreateDialog disabled={!workspace.ready || vault.status !== 'unlocked'} onCreate={createManual} />} />
     {workspace.saveError && <p className="error-banner">{workspace.saveError}</p>}
     {message && <output className="ledger-message">{message}</output>}
     <div className="sales-round-toolbar"><label>场次<select value={active?.id || ''} onChange={(event) => setState((current) => ({ ...current, active: event.target.value }))}>{state.rounds.map((round) => <option key={round.id} value={round.id}>{round.name}</option>)}</select></label><p>每场号码固定。可自行新建，也可从编号拼图创建。</p></div>
     {!active ? <p className="empty-state">还没有场次。点击“新建售图场次”，或从拼图工坊生成的编号拼图创建。</p> : <>
       <div className="sales-settings"><label>场次名称<input value={active.name} onChange={(event) => patchRound(active.id, (round) => ({ ...round, name: event.target.value }))} /></label><DateTimeFields compact label="正式开始时间" value={active.startTime} onChange={value => patchRound(active.id, round => ({ ...round, startTime: value, assignments: [] }))} /><label>抢跑处理<select value={active.rushOrder} onChange={(event) => patchRound(active.id, (round) => ({ ...round, rushOrder: event.target.value as SaleRound['rushOrder'], assignments: [] }))}><option value="exclude">抢跑不参与</option><option value="original">后置 · 原先后顺序</option><option value="nearest">后置 · 越接近正式第一人越先</option></select></label></div>
-      <nav className="sales-step-tabs" aria-label="售图核对步骤">{['上传与校对','分配与交付','清理与剩图'].map((label, index) => <Button key={label} variant={step === index ? 'default' : 'outline'} onClick={() => setStep(index)}>{index + 1}. {label}</Button>)}</nav>
+
       <section className="sales-section" data-step="0">
         <h2>1. 截图顺序与消息校对</h2>
         <p>按聊天真实先后顺序上传；缺图必须补齐才可核对交付。重叠的同一条消息请只保留一次。</p>
-        <label className="mini-file">上传成绩单截图<input type="file" accept="image/*" multiple onChange={(event) => { const added = Array.from(event.target.files || []); patchRound(active.id, (round) => ({ ...round, screenshots: [...round.screenshots, ...added], complete: false, assignments: [], messages: [] })); event.target.value = ''; }} /></label>
-        <div className="sales-review-workspace"><aside className="sales-review-original">
+        <label className="mini-file">上传成绩单截图<input id="sales-chat-images" disabled={busy} type="file" accept="image/*" multiple onChange={(event) => { const added = Array.from(event.target.files || []); patchRound(active.id, (round) => ({ ...round, screenshots: [...round.screenshots, ...added], complete: false, assignments: [] })); event.target.value = ''; }} /></label>
+        <div className="sales-review-workspace"><aside className="sales-review-original" data-file-drop-target="sales-chat-images" tabIndex={0}>
+        {!screenshotUrls.length && <button type="button" className="sales-empty-preview" onClick={() => document.getElementById('sales-chat-images')?.click()}>拖入聊天截图，或按 Ctrl+V 粘贴图片<br /><small>也可以点击选择截图；上传后在这里对照原图。</small></button>}
         {screenshotUrls.length > 0 && <ScreenshotReview key={`${active.id}:${Math.min(reviewScreenshot, screenshotUrls.length - 1)}`} url={screenshotUrls[Math.min(reviewScreenshot, screenshotUrls.length - 1)]} title={`原聊天截图 · 第 ${Math.min(reviewScreenshot + 1, screenshotUrls.length)} 张`} />}
-        <div className="sales-screenshots">{active.screenshots.map((file, index) => <article key={`${file.name}-${index}`}><ExampleImage src={screenshotUrls[index]} alt={`第 ${index + 1} 张成绩单截图`} /><button onClick={() => setReviewScreenshot(index)}>对照第 {index + 1} 张</button><span>{file.name}</span><button disabled={index === 0 || busy} onClick={() => moveScreenshot(index, -1)} type="button">上移</button><button disabled={index === active.screenshots.length - 1 || busy} onClick={() => moveScreenshot(index, 1)} type="button">下移</button><button disabled={busy} onClick={() => removeScreenshot(index)} type="button">删除截图</button></article>)}</div>
+        <SortableList className="sales-screenshots" disabled={busy} onMove={reorderScreenshots}>{active.screenshots.map((file, index) => <article key={`${file.name}-${index}`}><SortHandle disabled={busy} /><ExampleImage src={screenshotUrls[index]} alt={`第 ${index + 1} 张成绩单截图`} /><button onClick={() => setReviewScreenshot(index)}>对照第 {index + 1} 张</button><span>{file.name}</span><button disabled={index === 0 || busy} onClick={() => moveScreenshot(index, -1)} type="button">上移</button><button disabled={index === active.screenshots.length - 1 || busy} onClick={() => moveScreenshot(index, 1)} type="button">下移</button><button disabled={busy} onClick={() => void removeScreenshot(index)} type="button">删除截图</button></article>)}</SortableList>
         </aside><div className="sales-review-results">
         <div className="sales-actions"><Button disabled={!active.screenshots.length || busy} onClick={() => void recognize()}>{busy ? '识别中…' : '本机识别号码候选'}</Button><Button onClick={addMessage} variant="outline">补录漏识别的购买消息</Button></div>
         <p className="privacy-hint">识别漏掉购买者、时间或号码时，可补录截图中的那一条购买消息；这里不会发送聊天消息。点击或编辑消息会切换左侧对应截图。</p>
         {removedMessage?.roundId === active.id && <Button variant="outline" onClick={() => { patchRound(active.id, round => ({ ...round, complete: false, assignments: [], messages: [...round.messages, removedMessage.entry] })); setRemovedMessage(null); }}>撤销删除消息</Button>}
-        <div className="sales-messages">{orderedMessages.map((entry, index) => <article key={entry.id} onFocusCapture={() => setReviewScreenshot(entry.screenshot)}>
+        <SortableList className="sales-messages" disabled={busy} onMove={reorderMessages}>{orderedMessages.map((entry, index) => <article key={entry.id} onFocusCapture={() => setReviewScreenshot(entry.screenshot)}>
           <strong>消息 {index + 1} · 第 {entry.screenshot + 1} 张</strong>
-          <div className="sales-message-order"><button disabled={index === 0 || orderedMessages[index - 1].screenshot !== entry.screenshot} type="button" onClick={() => moveMessage(index, -1)}>上移</button><button disabled={index === orderedMessages.length - 1 || orderedMessages[index + 1].screenshot !== entry.screenshot} type="button" onClick={() => moveMessage(index, 1)}>下移</button><button type="button" onClick={() => void removeMessage(entry)}>删除消息</button></div>
-          <label>对应截图<select value={entry.screenshot} onChange={(event) => patchMessage(entry.id, { screenshot: Number(event.target.value) })}>{active.screenshots.map((file, screen) => <option key={`${file.name}-${screen}`} value={screen}>第 {screen + 1} 张</option>)}</select></label>
+          <div className="sales-message-order"><SortHandle disabled={busy} /><button disabled={index === 0} type="button" onClick={() => moveMessage(index, -1)}>上移</button><button disabled={index === orderedMessages.length - 1} type="button" onClick={() => moveMessage(index, 1)}>下移</button><button type="button" onClick={() => void removeMessage(entry)}>删除消息</button></div>
+          {entry.ocrConfidence !== undefined && entry.ocrConfidence < 90 && <p className="sales-ocr-warning">OCR 参考值 {Math.round(entry.ocrConfidence)}%，低于 90%。请仔细对照原图检查昵称、时间和号码。</p>}
+          <label>对应截图<select aria-label="对应截图" value={entry.screenshot} onChange={(event) => patchMessage(entry.id, { screenshot: Number(event.target.value) })}>{active.screenshots.map((file, screen) => <option key={`${file.name}-${screen}`} value={screen}>第 {screen + 1} 张</option>)}</select></label>
           <label>昵称<input value={entry.buyer} onChange={(event) => patchMessage(entry.id, { buyer: event.target.value })} /></label>
           <DateTimeFields compact label="消息时间" value={entry.time} onChange={value => patchMessage(entry.id, { time: value })} />
           <label>号码原文<textarea value={entry.text} onChange={(event) => patchMessage(entry.id, { text: event.target.value })} /></label>
           <label><input type="checkbox" checked={!!entry.ignored} onChange={(event) => patchMessage(entry.id, { ignored: event.target.checked })} />重复截图中的同一消息／不参与</label>
-        </article>)}</div>
+        </article>)}</SortableList>
         <label className="sales-complete"><input type="checkbox" checked={active.complete} onChange={async event => { const checked = event.target.checked; if (checked && !(await confirmation.ask('请确认：所有聊天截图已补齐，顺序、昵称、时分秒和号码已逐条核对；重叠消息只参与一次。这样才能安心生成交付清单。', '确认人工复核完成', '已复核，继续'))) return; patchRound(active.id, round => ({ ...round, complete: checked, assignments: [] })); }} />我已核对全部截图、顺序、昵称、时间和号码；没有缺图或漏消息</label>
         <Button disabled={!result || !active.screenshots.length || !active.messages.length || busy} onClick={calculate}>生成核对结果</Button>
         </div></div>
       </section>
       <section className="sales-section" data-step="1"><h2>2. 号码与购买者</h2><div className="sales-items">{active.items.map((item) => { const allocation = assigned.get(item.number); return <button key={item.number} type="button" onClick={() => setSelectedNumber(item.number)} className={item.cleared ? 'is-cleared' : ''}><strong>{item.number}</strong><span>{item.cleared ? '已清理' : allocation ? allocation.buyer : active.manualNumbers.includes(item.number) ? '后来售出' : '剩余'}</span></button>; })}</div>{selectedItem && <div className="sales-preview"><strong>{selectedItem.number} · {selectedItem.name}</strong>{previewUrl ? <img src={previewUrl} alt={`${selectedItem.number} 号对应图片`} /> : <p>站内图片已清理，仅保留文字记录。</p>}</div>}{buyers.map((buyer) => { const owned = active.assignments.filter((entry) => entry.buyer === buyer).map((entry) => entry.number); const allDelivered = owned.every((number) => active.deliveredNumbers.includes(number)); return <article className="sales-buyer" key={buyer}><strong>{buyer}：{owned.join('、')}</strong><span>{active.assignments.some((entry) => entry.buyer === buyer && entry.rush) ? '含后置抢跑分配' : '正式时间消息'}</span><Button variant="outline" onClick={() => patchRound(active.id, (round) => ({ ...round, deliveredNumbers: allDelivered ? round.deliveredNumbers.filter((number) => !owned.includes(number)) : [...new Set([...round.deliveredNumbers, ...owned])] }))}>{allDelivered ? '撤销交付确认' : '确认原图已交付'}</Button></article>; })}{result?.issues.length ? <div className="sales-issues"><strong>核对提示</strong>{result.issues.map((issue, index) => <p key={index}>{issue.number ?? '消息'}：{issue.reason}</p>)}</div> : null}</section>
       <section className="sales-section" data-step="2"><h2>3. 后来售出与重新拼图</h2><p>你可以补记聊天核对后又没有的号码；已分配的号码不会被静默覆盖。</p><div className="sales-actions"><input aria-label="后来售出的号码" placeholder="例如 3、7、12" value={manualInput} onChange={(event) => setManualInput(event.target.value)} /><Button variant="outline" onClick={markManual}>标记后来售出</Button></div><div className="sales-manual-list">{active.manualNumbers.map((number) => <span key={number}>{number} 号 <button disabled={active.items.find((item) => item.number === number)?.cleared} type="button" onClick={() => patchRound(active.id, (round) => ({ ...round, manualNumbers: round.manualNumbers.filter((item) => item !== number) }))}>撤销标记</button></span>)}</div><p>当前可用于下一版拼图：{remaining.filter(item => item.file).length} 张。</p><div className="sales-actions"><Button disabled={busy} onClick={() => void clearSold()}>确认并清理已售图片与旧拼图</Button><Button disabled={!remaining.some(item => item.file)} onClick={sendRemaining} variant="outline">剩图送去重新拼图</Button></div><p>站内清理后仍需自行删除手机或电脑本地保存的原图及副本。</p></section>
+      <nav className="sales-step-tabs" aria-label="售图核对步骤">{['上传与校对','分配与交付','清理与剩图'].map((label, index) => <Button key={label} variant={step === index ? 'default' : 'outline'} onClick={() => goStep(index)}>{index + 1}. {label}</Button>)}</nav>
+      {step === 1 && <Button className="sales-next-step" onClick={() => goStep(2)}>继续：清理与剩图 →</Button>}
     </>}
   </div>;
 }

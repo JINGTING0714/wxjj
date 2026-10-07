@@ -1,4 +1,5 @@
 'use client';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -59,9 +60,9 @@ export function ProfileCopyDialog({
           <DialogDescription>
             勾选要使用的短码，并调整本次复制的顺序。
           </DialogDescription>
-          <div className="profile-copy-list">
+          <SortableList className="profile-copy-list" onMove={(from, to) => setOrder(current => moveListItem(current, from, to))}>
             {order.map((code, index) => (
-              <article key={code.id}>
+              <article key={code.id}><SortHandle />
                 <label aria-label={`选择 ${code.label || `短码 ${index + 1}`}`}>
                   <input
                     type="checkbox"
@@ -98,7 +99,7 @@ export function ProfileCopyDialog({
                 </div>
               </article>
             ))}
-          </div>
+          </SortableList>
           <pre className="copy-parameter-preview">
             {selected.length ? formatProfileCode(order.filter(code => selected.includes(code.id)).map(code => secretPreview(code.secret)).join(' ')) : '请选择短码'}
           </pre>

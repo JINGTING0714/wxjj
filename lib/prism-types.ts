@@ -33,6 +33,8 @@ export type StoredLibraryAsset = {
   promptAutoRepairDisabled?: boolean;
   promptFamilyId?: string;
   promptVariantLabel?: string;
+  promptExamplePoolScope?: string;
+  promptExampleReviewRequired?: boolean;
   profileCodes?: ProfileShortCode[];
   stageType?: string;
   stageTypeOther?: string;

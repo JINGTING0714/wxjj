@@ -1,4 +1,5 @@
 'use client';
+import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { copyText } from '@/lib/clipboard';
 import {
@@ -138,7 +139,7 @@ function CodeEditor({
     return () => window.removeEventListener('prism:hide-secrets', hide);
   }, []);
   return (
-    <section className="profile-code-editor">
+    <section className="profile-code-editor" data-file-drop-target={`profile-code-images-${code.id}`}>
       <div className="profile-code-heading">
         <h3>短码 {index + 1}</h3>
         <Button onClick={onRemove} type="button" variant="ghost">
@@ -208,7 +209,7 @@ function CodeEditor({
           value={code.note}
         />
       </label>
-      <div className="profile-code-examples">
+      <div className="profile-code-examples" data-file-drop-target={`profile-code-images-${code.id}`}>
         {code.images.map((image) => (
           <figure key={image.id}>
             <ExampleImage alt={image.name} src={image.url} />
@@ -243,6 +244,7 @@ function CodeEditor({
           <ImageIcon />
           <span>给此短码导入例图</span>
           <input
+            id={`profile-code-images-${code.id}`}
             accept="image/*"
             multiple
             onChange={(e) => {
@@ -799,9 +801,9 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
               <textarea defaultValue={editing?.note} name="note" />
             </label>
             <CustomFieldsEditor fields={fields} onChange={setFields} />
-            <div className="wide-field profile-code-editors">
+            <div className="wide-field profile-code-editors"><SortableList disabled={busy} onMove={(from, to) => setCodes(current => moveListItem(current, from, to))}>
               {codes.map((code, i) => (
-                <div key={code.id}><div className="order-controls"><span>第 {i + 1} 位</span><Button type="button" variant="outline" disabled={i === 0 || busy} onClick={() => setCodes((current) => { const next = [...current]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; return next; })}>上移</Button><Button type="button" variant="outline" disabled={i === codes.length - 1 || busy} onClick={() => setCodes((current) => { const next = [...current]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; return next; })}>下移</Button></div>
+                <div key={code.id}><div className="order-controls"><SortHandle disabled={busy} /><span>第 {i + 1} 位</span><Button type="button" variant="outline" disabled={i === 0 || busy} onClick={() => setCodes((current) => { const next = [...current]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; return next; })}>上移</Button><Button type="button" variant="outline" disabled={i === codes.length - 1 || busy} onClick={() => setCodes((current) => { const next = [...current]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; return next; })}>下移</Button></div>
                 <CodeEditor
                   code={code}
                   index={i}
@@ -824,7 +826,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                   }}
                 />
                 </div>
-              ))}
+              ))}</SortableList>
               <Button
                 onClick={() => setCodes((items) => [...items, newCode()])}
                 type="button"

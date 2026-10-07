@@ -1,4 +1,5 @@
 'use client';
+import { moveListItem } from './sortable-list';
 import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
@@ -679,6 +680,7 @@ export function WatermarkPanel({
                 <div className="desktop-workspace-only">
                   <SourceSelection
                     sources={batch.sources}
+                    onReorder={(from, to) => update(batch.id, current => ({ ...current, sources: moveListItem(current.sources, from, to), job: null }))}
                     disabled={running[batch.id] !== undefined}
                     onRemove={async (ids) => {
                       update(batch.id, (b) => ({
@@ -871,6 +873,7 @@ export function WatermarkPanel({
             >
               <SourceSelection
                 sources={batch.sources}
+                onReorder={(from, to) => update(batch.id, current => ({ ...current, sources: moveListItem(current.sources, from, to), job: null }))}
                 disabled={running[batch.id] !== undefined}
                 openByDefault
                 onRemove={async (ids) => {
