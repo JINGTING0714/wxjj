@@ -226,6 +226,7 @@ export function WatermarkEditor({
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
   const [mobilePreviewFullscreen, setMobilePreviewFullscreen] = useState(false);
+  useEffect(() => { setMobilePreviewFullscreen(false); }, [mobilePanel]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [desktopTab, setDesktopTab] = useState('watermarks');
   const [textDraft, setTextDraft] = useState<TextLayerStyle>(defaultTextStyle);
@@ -298,8 +299,6 @@ export function WatermarkEditor({
   const mobileDirectEditing = mobileTouchEditing;
   useEffect(() => {
     if (!mobilePreviewFullscreen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMobilePreviewFullscreen(false);
     };
@@ -310,7 +309,6 @@ export function WatermarkEditor({
     document.addEventListener('keydown', closeOnEscape);
     desktop.addEventListener('change', closeOnDesktop);
     return () => {
-      document.body.style.overflow = previous;
       document.removeEventListener('keydown', closeOnEscape);
       desktop.removeEventListener('change', closeOnDesktop);
     };
@@ -328,18 +326,13 @@ export function WatermarkEditor({
           media.matches &&
           !frame.hidden &&
           root.parentElement?.getClientRects().length;
-        if (visible && !wasVisible.current) {
-          wasVisible.current = true;
-          setMobilePreviewFullscreen(true);
-        } else if (!visible) {
-          wasVisible.current = false;
-          if (!media.matches) setMobilePreviewFullscreen(false);
-        }
+        wasVisible.current = Boolean(visible);
+        if (!visible) setMobilePreviewFullscreen(false);
       });
     };
     syncVisibility();
     const observer = new MutationObserver(syncVisibility);
-    observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
+    observer.observe(frame, { attributes: true, subtree: true, attributeFilter: ['hidden'] });
     media.addEventListener('change', syncVisibility);
     return () => {
       observer.disconnect();

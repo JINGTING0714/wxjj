@@ -12,6 +12,38 @@ export const calculatorInitial = (): CalculatorState => ({
   display: '0',
   fresh: true,
 });
+
+/** Parse typed arithmetic without executing pasted code. */
+export function calculatorExpression(raw: string): CalculatorState {
+  try {
+    const source = raw.normalize('NFKC').replace(/\s/g, '').replace(/[×x]/g, '*').replace(/÷/g, '/').replace(/[−–]/g, '-');
+    if (!source || source.length > 200 || !/^[\d.+*/()\-]+$/.test(source)) throw new Error('请输入数字和加减乘除算式');
+    const tokens = source.match(/\d+(?:\.\d*)?|\.\d+|[()+*/\-]/g) || [];
+    if (tokens.join('') !== source || tokens.length > 128) throw new Error('算式格式不正确');
+    let index = 0;
+    const atom = (depth: number): number => {
+      if (depth > 20) throw new Error('括号层数过多');
+      const token = tokens[index++];
+      if (token === '+' || token === '-') return (token === '-' ? -1 : 1) * atom(depth + 1);
+      if (token === '(') { const value = sum(depth + 1); if (tokens[index++] !== ')') throw new Error('请补齐括号'); return value; }
+      if (!token || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)) throw new Error('算式不完整');
+      return Number(token);
+    };
+    const product = (depth: number): number => {
+      let value = atom(depth);
+      while (tokens[index] === '*' || tokens[index] === '/') { const operator = tokens[index++]; value = result(value, operator === '*' ? '×' : '÷', atom(depth)); }
+      return value;
+    };
+    const sum = (depth: number): number => {
+      let value = product(depth);
+      while (tokens[index] === '+' || tokens[index] === '-') { const operator = tokens[index++]; value = result(value, operator === '-' ? '−' : '+', product(depth)); }
+      return value;
+    };
+    const value = sum(0);
+    if (index !== tokens.length || !Number.isFinite(value) || Math.abs(value) >= 1e16) throw new Error('请检查算式是否完整、数值是否过大');
+    return { display: String(Number(value.toPrecision(12))), expression: `${raw.trim()} =`, fresh: true };
+  } catch (reason) { return { display: reason instanceof Error ? reason.message : '计算错误', fresh: true, error: true }; }
+}
 const operators = ['+', '−', '×', '÷'];
 function result(a: number, operator: string, b: number) {
   if (operator === '÷' && b === 0) throw new Error('不能除以零');

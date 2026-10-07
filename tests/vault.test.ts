@@ -8,6 +8,7 @@ import { pngFixture } from './png-fixtures';
 import { deepCleanPng } from '../lib/png-cleaner';
 import { syncProfileMoodboards } from '../lib/profile-moodboard-sync';
 import { syncPromptVariants } from '../lib/prompt-variant-sync';
+import { BackupZipWriter, openBackupZip } from '../lib/backup-zip';
 import type { StoredLibraryAsset, CollectionRecord, StoredRecipe } from '../lib/prism-types';
 import {
   createVault,
@@ -30,6 +31,62 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+void test('streaming backup writes standard ZIP entries incrementally and restores exact data', async () => {
+  const key = await createVault('stream-export-password');
+  await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'stream-record', note: '保留' } }], blobs: [{ id: 'large', scope: 'test-image', blob: new Blob([new Uint8Array(3 * 1024 * 1024).fill(71)]), name: 'large.png' }] });
+  const chunks: Uint8Array<ArrayBuffer>[] = [], progress: number[] = [];
+  const result = await exportVaultFile(key, { write: async bytes => { assert.ok(bytes.byteLength <= 1024 * 1024); chunks.push(bytes.slice()); }, onProgress: status => progress.push(status.current) });
+  assert.equal(result, undefined);
+  assert.ok(chunks.length > 5 && progress.includes(2));
+  const file = new File(chunks, 'stream.prism');
+  const zip = await JSZip.loadAsync(await file.arrayBuffer(), { checkCRC32: true });
+  assert.ok(zip.file('manifest.json'));
+  const info = await inspectVaultFile(file); assert.equal(info.files, 1); assert.equal(info.records, 1);
+  await clear(); const restored = await importVaultFile(file, 'stream-export-password');
+  assert.equal((await loadEncryptedRecords<{ id: string; note: string }>(restored.key, 'test'))[0].note, '保留');
+  const bytes = new Uint8Array(await (await loadEncryptedBlobs(restored.key, 'test-image'))[0].blob.arrayBuffer());
+  assert.equal(bytes.length, 3 * 1024 * 1024); assert.ok(bytes.every(value => value === 71));
+});
+
+void test('failed output and interrupted staged restore preserve the live vault', async () => {
+  const key = await createVault('failure-safe-password');
+  await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'keep', note: '不要丢失' } }], blobs: [{ id: 'file', scope: 'test-image', blob: new Blob(['original']), name: 'image.png' }] });
+  await assert.rejects(exportVaultFile(key, { write: async () => { throw new Error('disk full'); } }), /disk full/);
+  assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '不要丢失');
+  const backup = new File([await exportVaultFile(key)], 'safe.prism');
+  let checks = 0;
+  await assert.rejects(importVaultFile(backup, 'failure-safe-password', { assertSession: () => { if (++checks >= 2) throw new Error('cancelled staging'); } }), /cancelled staging/);
+  assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '不要丢失');
+  assert.equal(await (await loadEncryptedBlobs(key, 'test-image'))[0].blob.text(), 'original');
+  checks = 0;
+  await assert.rejects(importVaultFile(backup, 'failure-safe-password', { assertSession: () => { if (++checks >= 4) throw new Error('cancelled commit'); } }), /cancelled commit/);
+  assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '不要丢失');
+  assert.equal(await (await loadEncryptedBlobs(key, 'test-image'))[0].blob.text(), 'original');
+});
+
+void test('a changed encrypted revision aborts export without overwriting current data', async () => {
+  const key = await createVault('revision-check-password');
+  await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'keep', note: '旧内容' } }] });
+  let changed = false;
+  await assert.rejects(exportVaultFile(key, { write: async () => { if (changed) return; changed = true; await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'keep', note: '新内容' } }] }); } }), /资料发生变化/);
+  assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '新内容');
+});
+
+void test('ZIP64 offsets can be read through slices without allocating the whole archive', async () => {
+  const chunks: Uint8Array<ArrayBuffer>[] = [], base = 0x100000000 + 8;
+  const writer = new BackupZipWriter(async chunk => { chunks.push(chunk.slice()); });
+  Reflect.set(writer, 'offset', base);
+  const payload = new TextEncoder().encode('original encrypted bytes');
+  await writer.add('test.bin', payload); await writer.finish();
+  const physical = new Blob(chunks);
+  const sparse = { size: base + physical.size, slice(start: number, end: number) {
+    if (start >= base) return physical.slice(start - base, end - base);
+    return new Blob([new Uint8Array(Math.min(end, base) - start), ...(end > base ? [physical.slice(0, end - base)] : [])]);
+  } } as Blob;
+  const zip = await openBackupZip(sparse);
+  assert.equal(new TextDecoder().decode(await zip.read('test.bin')), 'original encrypted bytes');
+});
 
 void test('split prompt versions keep original examples in an encrypted pool until ownership is reviewed', async () => {
   const key = await createVault('variant-pool-password');

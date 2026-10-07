@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculatorInitial, calculatorKey } from '../lib/calculator';
+import { calculatorExpression, calculatorInitial, calculatorKey } from '../lib/calculator';
 import {
   classifyPrompt,
   promptLanguages,
@@ -226,6 +226,15 @@ void test('unlabeled bilingual cells stay in language fields and suspect notes r
 });
 const calculate = (keys: string[]) =>
   keys.reduce(calculatorKey, calculatorInitial());
+void test('typed arithmetic handles operator precedence, parentheses, signs and invalid pasted text safely', () => {
+  assert.equal(calculatorExpression('15*3+4').display, '49');
+  assert.equal(calculatorExpression('(15 + 3) × 4').display, '72');
+  assert.equal(calculatorExpression('-2.5 + .3').display, '-2.2');
+  assert.equal(calculatorExpression('1÷0').error, true);
+  assert.equal(calculatorExpression('2 +').error, true);
+  assert.equal(calculatorExpression('alert(1)').error, true);
+  assert.equal(calculatorExpression('1; globalThis.secret').error, true);
+});
 void test('calculator handles all operations, decimals, repeat equals, sign, clear and backspace', () => {
   assert.equal(calculate(['3','×','1','3','+','1','0','×','3','=']).display, '69');
   assert.equal(calculate(['2','+','3','×','4','−','8','÷','2','=']).display, '10');

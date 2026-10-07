@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { calculatorInitial, calculatorKey } from '@/lib/calculator';
+import { calculatorExpression, calculatorInitial, calculatorKey } from '@/lib/calculator';
 import { SectionHead } from './studio-shared';
 const keys = [
   'AC',
@@ -26,28 +26,16 @@ const keys = [
 ];
 export function CalculatorPanel({ compact = false, onUse, canUse = false }: { compact?: boolean; onUse?: (value: string) => void; canUse?: boolean }) {
   const [state, setState] = useState(calculatorInitial);
-  const root = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const element = root.current;
-    if (!element) return;
-    const keyDown = (event: KeyboardEvent) => {
-      const mapping: Record<string, string> = {
-        Enter: '=',
-        Escape: 'AC',
-        Backspace: '⌫',
-        '*': '×',
-        '/': '÷',
-        '-': '−',
-      };
-      const key = mapping[event.key] || event.key;
-      if (keys.includes(key)) {
-        event.preventDefault();
-        setState((current) => calculatorKey(current, key));
-      }
-    };
-    element.addEventListener('keydown', keyDown);
-    return () => element.removeEventListener('keydown', keyDown);
-  }, []);
+  const [draft, setDraft] = useState('');
+  const press = (key: string) => {
+    if (key === 'AC') { setDraft(''); setState(calculatorInitial()); return; }
+    if (draft) {
+      if (key === '=') { setState(calculatorExpression(draft)); setDraft(''); }
+      else if (key === '⌫') setDraft(value => value.slice(0, -1));
+      else if (key === '±') setDraft(value => `-(${value})`);
+      else setDraft(value => value + key);
+    } else setState(current => calculatorKey(current, key));
+  };
   return (
     <div className={compact ? 'calculator-compact' : 'studio-page'}>
       {!compact && <SectionHead
@@ -56,7 +44,13 @@ export function CalculatorPanel({ compact = false, onUse, canUse = false }: { co
         title="计算器"
         description="简单计算，手动确认。计算结果不会自动创建账目。"
       />}
-      <section ref={root} className="prism-calculator" aria-label="简易计算器">
+      <section className="prism-calculator" aria-label="简易计算器" tabIndex={0} onKeyDown={event => {
+        if (event.target instanceof HTMLInputElement) return;
+        const mapping: Record<string, string> = { Enter: '=', Escape: 'AC', Backspace: '⌫', '*': '×', '/': '÷', '-': '−' };
+        const key = mapping[event.key] || event.key;
+        if (keys.includes(key)) { event.preventDefault(); press(key); }
+      }}>
+        <label className="calculator-expression"><span>输入算式</span><input type="text" inputMode="text" aria-label="输入算式" placeholder="例如 15×3+4，按回车或等号计算" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); press('='); } else if (event.key === 'Escape') { event.preventDefault(); press('AC'); } }} /></label>
         <small>
           {state.expression || '先乘除，后加减 · 支持键盘输入'}
         </small>
@@ -79,13 +73,13 @@ export function CalculatorPanel({ compact = false, onUse, canUse = false }: { co
                       ? '清除'
                       : key
               }
-              onClick={() => setState((current) => calculatorKey(current, key))}
+              onClick={() => press(key)}
             >
               {key}
             </Button>
           ))}
         </div>
-        {onUse && <Button type="button" className="calculator-use" disabled={!canUse || !Number.isFinite(Number(state.display))} onClick={() => { const calculated = state.tokens?.length ? calculatorKey(state, '=') : state; setState(calculated); if (!calculated.error) onUse(calculated.display); }} variant="outline">将结果填入当前金额草稿</Button>}
+        {onUse && <Button type="button" className="calculator-use" disabled={!canUse || !Number.isFinite(Number(state.display))} onClick={() => { const calculated = draft ? calculatorExpression(draft) : state.tokens?.length ? calculatorKey(state, '=') : state; setState(calculated); setDraft(''); if (!calculated.error) onUse(calculated.display); }} variant="outline">将结果填入当前金额草稿</Button>}
       </section>
     </div>
   );

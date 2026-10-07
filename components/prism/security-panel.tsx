@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { BackupInfo } from '@/lib/local-vault';
+import { downloadBlob } from '@/lib/download';
 import {
   MobileWorkspace,
   MobileWorkspacePanel,
@@ -24,12 +25,7 @@ import {
 } from '@/components/prism/mobile-workspace';
 
 export function downloadLocalFile(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  downloadBlob(blob, name, { retainMs: 600_000 });
 }
 export function SecurityPanel() {
   const vault = useVault();
@@ -39,6 +35,8 @@ export function SecurityPanel() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [lastBackup, setLastBackup] = useState('');
+  const [exportProgress, setExportProgress] = useState('');
+  const [readyBackup, setReadyBackup] = useState<{ blob: Blob; name: string } | null>(null);
   const [backup, setBackup] = useState<File>();
   const [info, setInfo] = useState<BackupInfo>();
   const [backupPassword, setBackupPassword] = useState('');
@@ -89,15 +87,36 @@ export function SecurityPanel() {
   };
   const exportBackup = () =>
     run(async () => {
-      downloadLocalFile(
-        await vault.exportBackup(),
-        `wxjj-complete-${new Date().toISOString().slice(0, 10)}.prism`,
-      );
+      const name = `wxjj-complete-${new Date().toISOString().slice(0, 10)}.prism`;
+      const picker = (window as Window & { showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
+      let stream: FileSystemWritableFileStream | undefined;
+      let savedDirectly = false;
+      setExportProgress('正在准备完整备份…'); setReadyBackup(null);
+      try {
+        if (picker) {
+          try {
+            // Open while the button click still has user activation.
+            const handle = await picker.call(window, { suggestedName: name, types: [{ description: 'PRISM 加密完整备份', accept: { 'application/zip': ['.prism'] } }] });
+            stream = await handle.createWritable();
+          } catch (reason) {
+            if (reason instanceof DOMException && reason.name === 'AbortError') { setNotice('已取消选择保存位置，保险库资料保留。'); return; }
+            if (!(reason instanceof DOMException) || !['SecurityError','NotAllowedError','NotSupportedError'].includes(reason.name)) throw reason;
+          }
+        }
+        const output = stream;
+        const blob = await vault.exportBackup({ write: output ? bytes => output.write(bytes) : undefined, onProgress: progress => setExportProgress(`${progress.stage} · ${progress.current} / ${progress.total} 项`) });
+        if (output) { await output.close(); stream = undefined; savedDirectly = true; }
+        else {
+          if (!blob || !blob.size) throw new Error('未生成完整备份，请重试；站内资料保留。');
+          setReadyBackup({ blob, name }); downloadLocalFile(blob, name);
+        }
+      } catch (reason) { await stream?.abort().catch(() => {}); throw reason; }
+      finally { setExportProgress(''); }
       const generated = new Date().toLocaleString('zh-CN');
       localStorage.setItem('prism-last-backup', generated);
       setLastBackup(generated);
       setNotice(
-        '加密完整备份已生成，请确认下载完成，并与恢复密钥分开保管。',
+        savedDirectly ? '完整备份已保存到你选择的位置，逐项校验已通过。恢复密钥请另外保管。' : '完整备份已生成。若未弹出下载，请点击“再次下载已生成备份”；恢复密钥请另外保管。',
       );
     });
   return (
@@ -259,6 +278,8 @@ export function SecurityPanel() {
                   />
                 </label>
               </div>
+              {exportProgress && <p className="backup-progress" role="status" aria-live="polite">{exportProgress}<br />正在逐项校验并写入，请保持页面打开。</p>}
+              {readyBackup && <Button variant="outline" onClick={() => downloadLocalFile(readyBackup.blob, readyBackup.name)}>再次下载已生成备份</Button>}
               <div className="backup-checklist"><strong>{lastBackup ? `本设备最近生成备份：${lastBackup}` : '尚无本设备备份生成记录'}</strong><ol><li>先保存编辑内容，再点“完整导出”。</li><li>确认 .prism 文件已下载到设备。</li><li>牢记导出时密码，恢复密钥另外保管。</li></ol></div>
               {backup && info && (
                 <form

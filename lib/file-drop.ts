@@ -12,7 +12,7 @@ export function installFileDrop() {
       if (direct && visible(direct)) return { input: direct, zone: label! };
       const preview = target.closest('.watermark-input-panel');
       const source = preview?.closest('.mobile-workspace')?.querySelector<HTMLInputElement>('.watermark-source-panel input[type=file], .video-source-panel input[type=file]');
-      if (source && visible(source)) return { input: source, zone: preview! };
+      if (source && !source.matches(':disabled') && preview?.getClientRects().length) return { input: source, zone: preview };
       const panel = target.closest('.screenshot-import-dialog, .sales-section, .mobile-workspace, .studio-page, [role=dialog]');
       const inputs = panel ? Array.from(panel.querySelectorAll<HTMLInputElement>('input[type=file]')).filter(visible) : [];
       const input = inputs.find(item => /image|video|\.(?:png|jpe?g|webp|avif|gif|bmp)\b/.test(item.accept));

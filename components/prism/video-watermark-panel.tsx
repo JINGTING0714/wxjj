@@ -464,7 +464,7 @@ export function VideoWatermarkPanel() {
             )}
           </MobileWorkspacePanel>
 
-          <MobileWorkspacePrimaryAction>
+          <MobileWorkspacePrimaryAction className={mobilePanel === 'output' ? 'is-visible' : 'is-contextual'}>
             {busy ? (
               <Button
                 onClick={() => controller.current?.abort()}

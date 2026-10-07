@@ -1,4 +1,5 @@
 'use client';
+import { ImageDownloadDialog } from '@/components/prism/image-download-dialog';
 
 import {
   Aperture,
@@ -364,6 +365,19 @@ function NavItem({
 
 export default function Home() {
   const vault = useVault();
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        document.documentElement.style.setProperty('--prism-viewport-height', `${viewport?.height || window.innerHeight}px`);
+        document.documentElement.style.setProperty('--prism-viewport-top', `${viewport?.offsetTop || 0}px`);
+      });
+    };
+    update(); window.addEventListener('resize', update); viewport?.addEventListener('resize', update); viewport?.addEventListener('scroll', update);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', update); viewport?.removeEventListener('resize', update); viewport?.removeEventListener('scroll', update); };
+  }, []);
   useEffect(() => { let clean: (() => void) | undefined; let stopped = false; void import('@/lib/file-drop').then(module => { if (!stopped) clean = module.installFileDrop(); }); return () => { stopped = true; clean?.(); }; }, []);
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
@@ -416,6 +430,7 @@ export default function Home() {
 
   return (
     <TooltipProvider>
+      <ImageDownloadDialog />
       <SiteTools previous={navigationOrder[navigationIndex - 1]?.label} next={navigationOrder[navigationIndex + 1]?.label} onPrevious={() => { const entry = navigationOrder[navigationIndex - 1]; if (entry) setActiveView(entry.id); }} onNext={() => { const entry = navigationOrder[navigationIndex + 1]; if (entry) setActiveView(entry.id); }} />
       <main
         className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' ? 'editor-active' : ''}`}

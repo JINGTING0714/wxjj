@@ -1,4 +1,4 @@
-import JSZip from 'jszip';
+import { BackupZipWriter, openBackupZip } from './backup-zip';
 
 const DB_NAME = 'prism-local-vault';
 const STORES = ['meta', 'records', 'blobs'];
@@ -83,15 +83,15 @@ function done(tx: IDBTransaction) {
 }
 async function db() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
-      req.result.createObjectStore('meta', { keyPath: 'key' });
-      for (const name of ['records', 'blobs'])
-        req.result
-          .createObjectStore(name, { keyPath: 'id' })
-          .createIndex('scope', 'scope');
+      if (!req.result.objectStoreNames.contains('meta')) req.result.createObjectStore('meta', { keyPath: 'key' });
+      for (const name of ['records', 'blobs']) if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: 'id' }).createIndex('scope', 'scope');
+      for (const name of ['records','blobs']) { const store = req.transaction!.objectStore(name); if (!store.indexNames.contains('backup-revision')) store.createIndex('backup-revision', 'iv'); }
+      if (!req.result.objectStoreNames.contains('backup-staging')) req.result.createObjectStore('backup-staging', { keyPath: 'id' }).createIndex('job', 'job');
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => { req.result.onversionchange = () => req.result.close(); resolve(req.result); };
+    req.onblocked = () => reject(new Error('另一个旧页面正在使用保险库，请关闭这个网站的其他标签页后重试。现有资料不会改变。'));
     req.onerror = () =>
       reject(
         req.error ||
@@ -452,231 +452,165 @@ export async function loadEncryptedBlobs(
   }
   return result;
 }
-async function snapshot(): Promise<Snapshot> {
+export type BackupProgress = { stage: string; current: number; total: number };
+export type VaultExportOptions = {
+  write?: (bytes: Uint8Array<ArrayBuffer>) => Promise<void>;
+  onProgress?: (progress: BackupProgress) => void;
+  assertSession?: () => void;
+};
+async function hash(bytes: ArrayBuffer) { return b64(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))); }
+async function validateRecord(record: EncryptedRecord, key: CryptoKey, files: Map<string, string>) {
+  let value: { id: string; data?: unknown };
+  try {
+    value = JSON.parse(new TextDecoder().decode(await decrypt(key, record.iv, record.payload)));
+    if (value.id !== record.id) throw new Error();
+  } catch { throw new Error('备份中有文字记录无法解密或不完整。未修改当前设备，请回原设备核对资料。'); }
+  if (record.scope === 'workspaces') {
+    const scope = `workspace-files:${record.id.replace(/^workspace:/, '')}`, pending: unknown[] = [value.data];
+    while (pending.length) {
+      const item = pending.pop();
+      if (!item || typeof item !== 'object') continue;
+      if ('__prismFile' in item) {
+        const reference = item as { id?: unknown };
+        if (typeof reference.id !== 'string' || files.get(reference.id) !== scope) throw new Error('备份中的工坊队列缺少引用的原图、视频或水印文件。未修改当前设备，请回原设备重新导出完整备份。');
+      } else pending.push(...Object.values(item));
+    }
+  }
+}
+async function validateBlob(record: EncryptedBlobRecord, key: CryptoKey) {
+  try { await decrypt(key, record.iv, record.payload); if (record.privateMeta) JSON.parse(new TextDecoder().decode(await openEnvelope(key, record.privateMeta))); }
+  catch { throw new Error('备份中有图片或文件无法解密。未修改当前设备，请使用完整的原设备备份。'); }
+}
+async function exportPlan(database: IDBDatabase, kind: 'records' | 'blobs') {
+  const store = database.transaction(kind).objectStore(kind);
+  if (!store.indexNames.contains('backup-revision')) return new Promise<{ id: string; scope: string; revision: string }[]>((resolve, reject) => {
+    const rows: { id: string; scope: string; revision: string }[] = [], cursor = store.index('scope').openCursor();
+    cursor.onerror = () => reject(cursor.error);
+    cursor.onsuccess = () => { const value = cursor.result; if (!value) { resolve(rows); return; } rows.push({ id: String(value.primaryKey), scope: String(value.key), revision: value.value.iv }); value.continue(); };
+  });
+  // Both key cursors share one snapshot and never materialize file payloads.
+  const collect = (index: string) => new Promise<[string,string][]>((resolve, reject) => {
+    const rows: [string,string][] = [], cursor = store.index(index).openKeyCursor();
+    cursor.onerror = () => reject(cursor.error);
+    cursor.onsuccess = () => { const value = cursor.result; if (!value) { resolve(rows); return; } rows.push([String(value.primaryKey), String(value.key)]); value.continue(); };
+  });
+  const [scopes, revisions] = await Promise.all([collect('scope'), collect('backup-revision')]);
+  const byId = new Map(revisions);
+  return scopes.map(([id,scope]) => ({ id, scope, revision: byId.get(id)! }));
+}
+export function exportVaultFile(key: CryptoKey): Promise<Blob>;
+export function exportVaultFile(key: CryptoKey, options: VaultExportOptions): Promise<Blob | undefined>;
+export async function exportVaultFile(key: CryptoKey, options: VaultExportOptions = {}) {
   const database = await db();
   try {
-    const tx = database.transaction(STORES);
-    const complete = done(tx);
-    const [meta, records, blobs] = await Promise.all(
-      STORES.map((s) => request(tx.objectStore(s).getAll())),
-    );
-    await complete;
-    return { meta, records, blobs };
-  } finally {
-    database.close();
-  }
-}
-async function hash(bytes: ArrayBuffer) {
-  return b64(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
-}
-async function validateContents(data: Snapshot, key: CryptoKey) {
-  const filesById = new Map(data.blobs.map((file) => [file.id, file.scope]));
-  for (const r of data.records) {
-    let value: { id: string; data?: unknown };
-    try {
-      value = JSON.parse(
-        new TextDecoder().decode(await decrypt(key, r.iv, r.payload)),
-      );
-      if (value.id !== r.id) throw new Error();
-    } catch {
-      throw new Error(
-        '备份中有文字记录无法解密或不完整。可能是旧版混入了其他保险库的数据；未修改当前设备。请回原设备核对并重新导出。',
-      );
-    }
-    if (r.scope === 'workspaces') {
-      const expectedScope = `workspace-files:${r.id.replace(/^workspace:/, '')}`;
-      const pending: unknown[] = [value.data];
-      while (pending.length) {
-        const item = pending.pop();
-        if (!item || typeof item !== 'object') continue;
-        if ('__prismFile' in item) {
-          const reference = item as { id?: unknown };
-          if (
-            typeof reference.id !== 'string' ||
-            filesById.get(reference.id) !== expectedScope
-          ) {
-            throw new Error(
-              '备份中的工坊队列缺少引用的原图、视频或水印文件。未修改当前设备，请回原设备重新导出完整备份。',
-            );
-          }
-        } else {
-          pending.push(...Object.values(item));
-        }
+    const meta = await getMeta(); if (!meta) throw new Error('没有可导出的保险库');
+    await verify(key, meta);
+    const [records, blobs] = await Promise.all([exportPlan(database, 'records'), exportPlan(database, 'blobs')]);
+    const fileScopes = new Map(blobs.map(row => [row.id, row.scope]));
+    const zip = new BackupZipWriter(options.write), entries: Record<string, unknown[]> = { records: [], blobs: [] };
+    let current = 0; const total = records.length + blobs.length;
+    for (const [kind, rows] of [['records', records], ['blobs', blobs]] as const) {
+      for (const [index, planned] of rows.entries()) {
+        options.assertSession?.(); options.onProgress?.({ stage: '正在校验并写入备份', current, total });
+        const row = await request(database.transaction(kind).objectStore(kind).get(planned.id)) as EncryptedBlobRecord;
+        if (!row || row.scope !== planned.scope || row.iv !== planned.revision) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
+        if (kind === 'records') await validateRecord(row, key, fileScopes); else await validateBlob(row, key);
+        const { payload, ...record } = row, path = `${kind}/${index}.bin`;
+        const sha256 = await hash(payload); await zip.add(path, new Uint8Array(payload));
+        entries[kind].push({ ...record, path, size: payload.byteLength, sha256 }); current++;
+        options.onProgress?.({ stage: '正在校验并写入备份', current, total });
       }
     }
-  }
-  for (const r of data.blobs) {
-    try {
-      await decrypt(key, r.iv, r.payload);
-      if (r.privateMeta)
-        JSON.parse(
-          new TextDecoder().decode(await openEnvelope(key, r.privateMeta)),
-        );
-    } catch {
-      throw new Error(
-        '备份中有图片或文件无法解密。未修改当前设备，请使用完整的原设备备份。',
-      );
-    }
-  }
+    options.assertSession?.();
+    const finalMeta = await getMeta();
+    if (JSON.stringify(finalMeta) !== JSON.stringify(meta)) throw new Error('导出期间保险库发生变化，请重新导出。');
+    const [finalRecords, finalBlobs] = await Promise.all([exportPlan(database, 'records'), exportPlan(database, 'blobs')]);
+    if (JSON.stringify(finalRecords) !== JSON.stringify(records) || JSON.stringify(finalBlobs) !== JSON.stringify(blobs)) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
+    const manifest = new TextEncoder().encode(JSON.stringify({ format: 'PRISM-VAULT', version: 2, exportedAt: new Date().toISOString(), meta: [meta], ...entries }));
+    await zip.add('manifest.json', manifest); await zip.add('manifest.sha256', new TextEncoder().encode(await hash(manifest.buffer)));
+    options.onProgress?.({ stage: '正在完成备份文件', current: total, total });
+    return await zip.finish();
+  } finally { database.close(); }
 }
-export async function exportVaultFile(key: CryptoKey) {
-  const data = await snapshot();
-  if (!data.meta[0]) throw new Error('没有可导出的保险库');
-  await verify(key, data.meta[0]);
-  await validateContents(data, key);
-  const zip = new JSZip();
-  const entries: Record<string, unknown[]> = { records: [], blobs: [] };
-  for (const kind of ['records', 'blobs'] as const)
-    for (let i = 0; i < data[kind].length; i++) {
-      const { payload, ...record } = data[kind][i];
-      const path = `${kind}/${i}.bin`;
-      zip.file(path, payload);
-      entries[kind].push({
-        ...record,
-        path,
-        size: payload.byteLength,
-        sha256: await hash(payload),
-      });
-    }
-  const manifest = JSON.stringify({
-    format: 'PRISM-VAULT',
-    version: 2,
-    exportedAt: new Date().toISOString(),
-    meta: data.meta,
-    ...entries,
-  });
-  zip.file('manifest.json', manifest);
-  zip.file(
-    'manifest.sha256',
-    await hash(buffer(new TextEncoder().encode(manifest))),
-  );
-  return new Blob(
-    [await zip.generateAsync({ type: 'arraybuffer', compression: 'STORE' })],
-    { type: 'application/zip' },
-  );
-}
-async function parseBackup(
-  file: File,
-): Promise<{ data: Snapshot; info: BackupInfo }> {
-  let parsed;
-  let zip: JSZip | undefined;
+
+type BackupReference = Omit<EncryptedBlobRecord, 'payload'> & { payload?: string; path?: string; size?: number; sha256?: string };
+type BackupSource = { meta: VaultMeta; records: BackupReference[]; blobs: BackupReference[]; info: BackupInfo; read: (entry: BackupReference) => Promise<EncryptedBlobRecord> };
+async function parseBackup(file: File): Promise<BackupSource> {
   try {
     const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
-    if (head[0] === 0x50 && head[1] === 0x4b) {
-      zip = await JSZip.loadAsync(await file.arrayBuffer(), {
-        checkCRC32: true,
-      });
-      const raw = await zip.file('manifest.json')?.async('string');
-      const digest = await zip.file('manifest.sha256')?.async('string');
-      if (
-        !raw ||
-        !digest ||
-        (await hash(buffer(new TextEncoder().encode(raw)))) !== digest
-      )
-        throw new Error('目录校验失败');
-      parsed = JSON.parse(raw);
+    const zip = head[0] === 0x50 && head[1] === 0x4b ? await openBackupZip(file) : undefined;
+    let parsed;
+    if (zip) {
+      const raw = await zip.read('manifest.json', 96 * 1024 * 1024), digest = new TextDecoder().decode(await zip.read('manifest.sha256', 1024));
+      if (await hash(raw) !== digest) throw new Error('目录校验失败');
+      parsed = JSON.parse(new TextDecoder().decode(raw));
     } else parsed = JSON.parse(await file.text());
-    if (
-      parsed.format !== 'PRISM-VAULT' ||
-      ![1, 2].includes(parsed.version) ||
-      (parsed.version === 2 && !zip)
-    )
-      throw new Error('不支持的版本');
-    if (
-      !Array.isArray(parsed.meta) ||
-      parsed.meta.length !== 1 ||
-      parsed.meta[0].key !== 'vault' ||
-      !Array.isArray(parsed.records) ||
-      !Array.isArray(parsed.blobs)
-    )
-      throw new Error('缺少必要数据');
-    const data: Snapshot = { meta: parsed.meta, records: [], blobs: [] };
+    if (parsed.format !== 'PRISM-VAULT' || ![1, 2].includes(parsed.version) || parsed.version === 2 && !zip) throw new Error('不支持的版本');
+    if (!Array.isArray(parsed.meta) || parsed.meta.length !== 1 || parsed.meta[0].key !== 'vault' || !Array.isArray(parsed.records) || !Array.isArray(parsed.blobs)) throw new Error('缺少必要数据');
     for (const kind of ['records', 'blobs'] as const) {
       const ids = new Set<string>();
-      for (const e of parsed[kind]) {
-        if (
-          typeof e.id !== 'string' ||
-          !e.id ||
-          ids.has(e.id) ||
-          typeof e.scope !== 'string' ||
-          !e.scope ||
-          typeof e.iv !== 'string' ||
-          unb64(e.iv).length !== 12
-        )
-          throw new Error('记录重复或缺少标识');
-        ids.add(e.id);
-        const payload = zip
-          ? await zip.file(e.path)?.async('arraybuffer')
-          : buffer(unb64(e.payload));
-        if (
-          !payload ||
-          payload.byteLength < 16 ||
-          (zip &&
-            (e.size !== payload.byteLength ||
-              e.sha256 !== (await hash(payload))))
-        )
-          throw new Error('文件不完整');
-        const { path: _path, sha256: _hash, size: _size, ...rest } = e;
-        data[kind].push({ ...rest, payload });
+      for (const entry of parsed[kind]) {
+        if (typeof entry.id !== 'string' || !entry.id || ids.has(entry.id) || typeof entry.scope !== 'string' || !entry.scope || typeof entry.iv !== 'string' || unb64(entry.iv).length !== 12) throw new Error('记录重复或缺少标识');
+        if (zip && (typeof entry.path !== 'string' || !Number.isSafeInteger(entry.size) || entry.size < 16 || typeof entry.sha256 !== 'string')) throw new Error('文件描述不完整');
+        ids.add(entry.id);
       }
     }
     return {
-      data,
-      info: {
-        version: parsed.version,
-        exportedAt: parsed.exportedAt || '',
-        records: data.records.length,
-        files: data.blobs.length,
-        bytes: file.size,
-        verified: Boolean(zip),
+      meta: parsed.meta[0], records: parsed.records, blobs: parsed.blobs,
+      info: { version: parsed.version, exportedAt: parsed.exportedAt || '', records: parsed.records.length, files: parsed.blobs.length, bytes: file.size, verified: Boolean(zip) },
+      async read(entry) {
+        const payload = zip ? await zip.read(entry.path!) : buffer(unb64(entry.payload!));
+        if (payload.byteLength < 16 || zip && (entry.size !== payload.byteLength || entry.sha256 !== await hash(payload))) throw new Error('备份结构或完整性校验失败，没有修改本机数据。文件不完整。');
+        const { path: _path, sha256: _hash, size: _size, payload: _payload, ...rest } = entry;
+        return { ...rest, payload };
       },
     };
-  } catch (reason) {
-    throw new Error(
-      `备份结构或完整性校验失败，没有修改本机数据。${reason instanceof Error ? reason.message : ''}`,
-    );
-  }
+  } catch (reason) { throw new Error(`备份结构或完整性校验失败，没有修改本机数据。${reason instanceof Error ? reason.message : ''}`); }
 }
 export async function inspectVaultFile(file: File) {
-  return (await parseBackup(file)).info;
+  const source = await parseBackup(file);
+  for (const entry of [...source.records, ...source.blobs]) await source.read(entry);
+  return source.info;
 }
-export async function importVaultFile(
-  file: File,
-  password: string,
-  options?: { recovery?: boolean; assertSession?: () => void },
-) {
-  const { data, info } = await parseBackup(file);
-  const meta = data.meta[0];
+export async function importVaultFile(file: File, password: string, options?: { recovery?: boolean; assertSession?: () => void }) {
+  const source = await parseBackup(file), meta = source.meta;
   let key: CryptoKey;
   if (options?.recovery) {
     if (!meta.recovery) throw new Error('该备份还没有恢复密钥，请使用原密码。');
-    try {
-      key = await rawKey(
-        await openEnvelope(
-          await rawKey(recoveryBytes(password)),
-          meta.recovery,
-        ),
-      );
-      await verify(key, meta);
-    } catch {
-      throw new Error('恢复密钥不匹配，没有修改本机数据。');
-    }
+    try { key = await rawKey(await openEnvelope(await rawKey(recoveryBytes(password)), meta.recovery)); await verify(key, meta); }
+    catch { throw new Error('恢复密钥不匹配，没有修改本机数据。'); }
   } else key = await passwordKey(password, meta);
-  await validateContents(data, key);
-  options?.assertSession?.();
-  const database = await db();
-  try {
-    options?.assertSession?.();
-    // Atomic replace. Validation and decryption finish before any old data is touched.
-    const tx = database.transaction(STORES, 'readwrite');
-    const complete = done(tx);
-    STORES.forEach((s) => tx.objectStore(s).clear());
-    data.meta.forEach((r) => tx.objectStore('meta').put(r));
-    data.records.forEach((r) => tx.objectStore('records').put(r));
-    data.blobs.forEach((r) => tx.objectStore('blobs').put(r));
+  const database = await db(), job = crypto.randomUUID();
+  const cleanup = async () => {
+    const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
+    const cursor = tx.objectStore('backup-staging').index('job').openKeyCursor(IDBKeyRange.only(job));
+    cursor.onsuccess = () => { const row = cursor.result; if (row) { tx.objectStore('backup-staging').delete(row.primaryKey); row.continue(); } };
     await complete;
-  } finally {
-    database.close();
-  }
-  return { key, info };
+  };
+  try {
+    const files = new Map(source.blobs.map(entry => [entry.id, entry.scope]));
+    // Authenticate and stage one file at a time. The live vault is untouched.
+    for (const kind of ['records', 'blobs'] as const) for (const [index, entry] of source[kind].entries()) {
+      options?.assertSession?.(); const record = await source.read(entry);
+      if (kind === 'records') await validateRecord(record, key, files); else await validateBlob(record, key);
+      const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
+      tx.objectStore('backup-staging').put({ id: `${job}:${kind}:${index}`, job, kind, value: record }); await complete;
+    }
+    options?.assertSession?.();
+    // Copy staged encrypted entries in one atomic transaction, with one put in flight.
+    const tx = database.transaction([...STORES, 'backup-staging'], 'readwrite'), complete = done(tx);
+    let cancellation: unknown;
+    STORES.forEach(store => tx.objectStore(store).clear()); tx.objectStore('meta').put(meta);
+    const cursor = tx.objectStore('backup-staging').index('job').openCursor(IDBKeyRange.only(job));
+    cursor.onsuccess = () => {
+      const row = cursor.result; if (!row) return;
+      try {
+        options?.assertSession?.();
+        const put = tx.objectStore(row.value.kind).put(row.value.value);
+        put.onsuccess = () => { row.delete(); row.continue(); };
+      } catch (reason) { cancellation = reason; tx.abort(); }
+    };
+    try { await complete; } catch (reason) { throw cancellation || reason; }
+    return { key, info: source.info };
+  } finally { await cleanup().catch(() => {}); database.close(); }
 }

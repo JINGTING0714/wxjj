@@ -3,12 +3,10 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useRef,
   useState,
   type PointerEvent,
   type ReactNode,
-  type TouchEvent,
 } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -42,182 +40,9 @@ export function MobileWorkspace({
   className?: string;
   onPanelClose?: () => void;
 }) {
-  const workspaceRef = useRef<HTMLDivElement>(null);
-  const swipe = useRef<{
-    pointerId: number;
-    startY: number;
-    lastY: number;
-    surface: HTMLElement;
-  } | null>(null);
-  const findHandleSurface = (x: number, y: number) => {
-    const root = workspaceRef.current;
-    if (!root) return null;
-    const activeSurfaces = Array.from(
-      root.querySelectorAll<HTMLElement>('[data-mobile-active="true"]'),
-    );
-    for (const handle of root.querySelectorAll<HTMLElement>(
-      '.mobile-workspace-drawer-handle',
-    )) {
-      const rect = handle.getBoundingClientRect();
-      const style = getComputedStyle(handle);
-      if (
-        style.visibility !== 'hidden' &&
-        style.display !== 'none' &&
-        x >= rect.left &&
-        x <= rect.right &&
-        y >= rect.top &&
-        y <= rect.bottom
-      )
-        return handle.parentElement;
-    }
-    // Some mobile browsers hit-test the preview underneath a transparent
-    // drawer handle. Accept the first active tray whose top edge is within a
-    // short touch slop, so the gesture still starts on the visible grab area.
-    for (const surface of activeSurfaces) {
-      const rect = surface.getBoundingClientRect();
-      if (
-        x >= rect.left &&
-        x <= rect.right &&
-        y >= rect.top - 160 &&
-        y <= rect.top + 64
-      )
-        return surface;
-    }
-    return null;
-  };
-  const resetSwipe = () => {
-    const current = swipe.current;
-    if (current) current.surface.style.removeProperty('--drawer-drag-y');
-    swipe.current = null;
-  };
-  const finishSwipe = (clientY: number, pointerId: number) => {
-    const current = swipe.current;
-    if (!current || current.pointerId !== pointerId) return;
-    const distance = (clientY || current.lastY) - current.startY;
-    resetSwipe();
-    if (distance >= 48) onPanelClose?.();
-  };
-  const startPointerSwipe = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-    const surface = findHandleSurface(event.clientX, event.clientY);
-    if (!surface) return;
-    swipe.current = {
-      pointerId: event.pointerId,
-      startY: event.clientY,
-      lastY: event.clientY,
-      surface,
-    };
-  };
-  const movePointerSwipe = (event: PointerEvent<HTMLDivElement>) => {
-    const current = swipe.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    current.lastY = event.clientY;
-    const distance = Math.max(0, event.clientY - current.startY);
-    current.surface.style.setProperty(
-      '--drawer-drag-y',
-      `${Math.min(distance, 180)}px`,
-    );
-    if (distance > 4) event.preventDefault();
-  };
-  const startTouchSwipe = (event: TouchEvent<HTMLDivElement>) => {
-    const touch = event.touches[0];
-    if (!touch) return;
-    const surface = findHandleSurface(touch.clientX, touch.clientY);
-    if (!surface) return;
-    swipe.current = {
-      pointerId: -1,
-      startY: touch.clientY,
-      lastY: touch.clientY,
-      surface,
-    };
-  };
-  const moveTouchSwipe = (event: TouchEvent<HTMLDivElement>) => {
-    const current = swipe.current;
-    const touch = event.touches[0];
-    if (!current || current.pointerId !== -1 || !touch) return;
-    current.lastY = touch.clientY;
-    const distance = Math.max(0, touch.clientY - current.startY);
-    current.surface.style.setProperty(
-      '--drawer-drag-y',
-      `${Math.min(distance, 180)}px`,
-    );
-    if (distance > 4) event.preventDefault();
-  };
-  useEffect(() => {
-    const root = workspaceRef.current;
-    if (!root) return;
-    const start = (event: globalThis.TouchEvent) => {
-      const touch = event.touches[0];
-      if (!touch) return;
-      const surface = findHandleSurface(touch.clientX, touch.clientY);
-      if (!surface) return;
-      swipe.current = {
-        pointerId: -1,
-        startY: touch.clientY,
-        lastY: touch.clientY,
-        surface,
-      };
-    };
-    const move = (event: globalThis.TouchEvent) => {
-      const current = swipe.current;
-      const touch = event.touches[0];
-      if (!current || current.pointerId !== -1 || !touch) return;
-      current.lastY = touch.clientY;
-      const distance = Math.max(0, touch.clientY - current.startY);
-      current.surface.style.setProperty(
-        '--drawer-drag-y',
-        `${Math.min(distance, 180)}px`,
-      );
-      if (distance > 4) event.preventDefault();
-    };
-    const end = (event: globalThis.TouchEvent) => {
-      const current = swipe.current;
-      if (!current || current.pointerId !== -1) return;
-      const touch = event.changedTouches[0];
-      const distance = (touch?.clientY || current.lastY) - current.startY;
-      resetSwipe();
-      if (distance >= 48) onPanelClose?.();
-    };
-    root.addEventListener('touchstart', start, {
-      capture: true,
-      passive: false,
-    });
-    root.addEventListener('touchmove', move, {
-      capture: true,
-      passive: false,
-    });
-    root.addEventListener('touchend', end, { capture: true });
-    root.addEventListener('touchcancel', resetSwipe, { capture: true });
-    return () => {
-      root.removeEventListener('touchstart', start, true);
-      root.removeEventListener('touchmove', move, true);
-      root.removeEventListener('touchend', end, true);
-      root.removeEventListener('touchcancel', resetSwipe, true);
-    };
-  }, [onPanelClose]);
   return (
     <MobileWorkspaceCloseContext.Provider value={onPanelClose}>
-      <div
-        className={cn('mobile-workspace', className)}
-        onPointerCancelCapture={(event) => {
-          if (swipe.current?.pointerId === event.pointerId) resetSwipe();
-        }}
-        onPointerDownCapture={startPointerSwipe}
-        onPointerMoveCapture={movePointerSwipe}
-        onPointerUpCapture={(event) =>
-          finishSwipe(event.clientY, event.pointerId)
-        }
-        onTouchCancelCapture={resetSwipe}
-        onTouchEndCapture={(event) => {
-          const touch = event.changedTouches[0];
-          if (touch) finishSwipe(touch.clientY, -1);
-        }}
-        onTouchMoveCapture={moveTouchSwipe}
-        onTouchStartCapture={startTouchSwipe}
-        ref={workspaceRef}
-      >
-        {children}
-      </div>
+      <div className={cn('mobile-workspace', className)}>{children}</div>
     </MobileWorkspaceCloseContext.Provider>
   );
 }
@@ -255,37 +80,6 @@ export function MobileWorkspaceDrawerHandle({
     reset();
     if (distance >= 48) close();
   };
-  const startTouch = (event: TouchEvent<HTMLButtonElement>) => {
-    const touch = event.touches[0];
-    const surface = event.currentTarget.parentElement;
-    if (!touch || !surface) return;
-    gesture.current = {
-      pointerId: -1,
-      startY: touch.clientY,
-      lastY: touch.clientY,
-      surface,
-    };
-  };
-  const moveTouch = (event: TouchEvent<HTMLButtonElement>) => {
-    const current = gesture.current;
-    const touch = event.touches[0];
-    if (!current || current.pointerId !== -1 || !touch) return;
-    const distance = Math.max(0, touch.clientY - current.startY);
-    current.lastY = touch.clientY;
-    if (distance > 4) event.preventDefault();
-    current.surface.style.setProperty(
-      '--drawer-drag-y',
-      `${Math.min(distance, 180)}px`,
-    );
-  };
-  const endTouch = (event: TouchEvent<HTMLButtonElement>) => {
-    const current = gesture.current;
-    const touch = event.changedTouches[0];
-    if (!current || current.pointerId !== -1 || !touch) return;
-    const distance = (touch?.clientY || current.lastY) - current.startY;
-    reset();
-    if (distance >= 48) close();
-  };
 
   return (
     <button
@@ -309,6 +103,7 @@ export function MobileWorkspaceDrawerHandle({
       onPointerMove={(event) => {
         const current = gesture.current;
         if (!current || current.pointerId !== event.pointerId) return;
+        event.preventDefault();
         const distance = Math.max(0, event.clientY - current.startY);
         current.lastY = event.clientY;
         current.surface.style.setProperty(
@@ -317,12 +112,6 @@ export function MobileWorkspaceDrawerHandle({
         );
       }}
       onPointerUp={finish}
-      onTouchCancel={() => {
-        if (gesture.current?.pointerId === -1) reset();
-      }}
-      onTouchEnd={endTouch}
-      onTouchMove={moveTouch}
-      onTouchStart={startTouch}
       type="button"
     >
       <i />

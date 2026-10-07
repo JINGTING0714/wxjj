@@ -22,6 +22,7 @@ import {
   writeVaultBatch,
   type BackupInfo,
   type VaultWrite,
+  type VaultExportOptions,
 } from '@/lib/local-vault';
 
 type VaultStatus = 'loading' | 'uninitialized' | 'locked' | 'unlocked';
@@ -48,7 +49,7 @@ type VaultContextValue = {
   deleteBlob: (id: string) => Promise<void>;
   loadBlobs: (scope: string) => ReturnType<typeof loadEncryptedBlobs>;
   writeBatch: (batch: VaultWrite) => Promise<void>;
-  exportBackup: () => Promise<Blob>;
+  exportBackup: (options?: VaultExportOptions) => Promise<Blob | undefined>;
   inspectBackup: (file: File) => Promise<BackupInfo>;
   importBackup: (
     file: File,
@@ -171,15 +172,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         check();
         return result;
       },
-      exportBackup: async () => {
+      exportBackup: async (options) => {
         if (live.current.frozen) throw new Error('已有备份任务正在进行');
         const { key, check } = access();
+        const token = live.current.session;
         setBusy(true);
         try {
           await checkpoint();
           check();
           live.current.frozen = true;
-          return await exportVaultFile(key);
+          return await exportVaultFile(key, { ...options, assertSession: () => {
+            if (live.current.session !== token || !live.current.key) throw new Error('保险库会话已结束，导出已取消；现有资料保留。');
+            options?.assertSession?.();
+          } });
         } finally {
           live.current.frozen = false;
           setBusy(false);
