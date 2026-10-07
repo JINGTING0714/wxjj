@@ -6,6 +6,8 @@ import { legacyFixture } from './legacy-fixture';
 import { defaultComposition } from '../lib/watermark-composition';
 import { pngFixture } from './png-fixtures';
 import { deepCleanPng } from '../lib/png-cleaner';
+import { syncProfileMoodboards } from '../lib/profile-moodboard-sync';
+import type { StoredLibraryAsset, CollectionRecord, StoredRecipe } from '../lib/prism-types';
 import {
   createVault,
   unlockVault,
@@ -27,6 +29,28 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+void test('emotion-only folders move with examples and recipe references; categories only exist for emotion records', async () => {
+  const key = await createVault('emotion-sync-password');
+  const folder: StoredLibraryAsset = { id: 'emotion-only', kind: 'profile', title: '福利p', secret: 'emoABC', profileCodes: [{ id: 'e', label: '情绪p', secret: 'emoABC', nature: 'emotion', note: '短码备注' }], author: '原作者', origin: '购买', acquisition: '付费购入', note: '文件夹备注', tags: ['N6P'], collection: 'modern' };
+  const other = { ...folder, id: 'final-only', title: '成品', collection: 'other', profileCodes: [{ ...folder.profileCodes![0], id: 'f', nature: 'final' as const }] };
+  await writeVaultBatch(key, { records: [
+    { scope: 'assets:profile', value: folder }, { scope: 'assets:profile', value: other },
+    { scope: 'collections:profile', value: { id: 'modern', name: '现代人' } }, { scope: 'collections:profile', value: { id: 'other', name: '无情绪' } },
+    { scope: 'collections:moodboard', value: { id: 'old-empty', name: '无情绪' } },
+    { scope: 'recipes', value: { id: 'r', title: '旧配方', profileIds: ['emotion-only::e'], moodboardIds: [], selectionOrder: [{ kind: 'profile', id: 'emotion-only::e' }], ratio: '3:4', note: '', tags: [] } },
+  ], blobs: [{ id: 'image', scope: 'profile-code-image:emotion-only:e', blob: new Blob(['example']), name: 'example.png' }] });
+  const vault = { loadRecords: <T>(scope: string) => loadEncryptedRecords<T>(key, scope), loadBlobs: (scope: string) => loadEncryptedBlobs(key, scope), writeBatch: (batch: Parameters<typeof writeVaultBatch>[1]) => writeVaultBatch(key, batch) };
+  await syncProfileMoodboards(vault);
+  const moods = await loadEncryptedRecords<StoredLibraryAsset>(key, 'assets:moodboard');
+  assert.equal(moods.length, 1); assert.equal(moods[0].title, '福利p情绪p'); assert.equal(moods[0].author, '原作者'); assert.equal(moods[0].note, '文件夹备注\n短码备注');
+  assert.equal((await loadEncryptedRecords<StoredLibraryAsset>(key, 'assets:profile')).length, 1);
+  assert.equal((await loadEncryptedRecords<StoredLibraryAsset>(key, 'assets:profile-moved'))[0].id, folder.id);
+  assert.deepEqual((await loadEncryptedRecords<CollectionRecord>(key, 'collections:moodboard')).map(category => category.name), ['现代人']);
+  assert.equal((await loadEncryptedBlobs(key, `asset-image:${moods[0].id}`))[0].name, 'example.png');
+  const recipe = (await loadEncryptedRecords<StoredRecipe>(key, 'recipes'))[0]; assert.deepEqual(recipe.profileIds, []); assert.deepEqual(recipe.moodboardIds, [moods[0].id]);
+  await syncProfileMoodboards(vault); assert.equal((await loadEncryptedRecords<StoredLibraryAsset>(key, 'assets:moodboard')).length, 1);
+});
 
 test('ledger receipts, undo, bilingual prompts, global recipe order and dynamic rules survive encrypted migration', async () => {
   const key=await createVault('p2-p4-backup-password');

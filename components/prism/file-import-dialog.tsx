@@ -462,7 +462,7 @@ export function FileImportDialog({
     setBusy(true);
     setError('');
     try {
-      if (kind === 'profile' && !batchProfileVersion) throw new Error('请选择这批 Profile 的 N6P / N7P 版本标签。不同版本请分批导入。');
+      if (kind === 'profile' && !batchProfileVersion && selected.some(({ row }) => profileNature(row.nature).nature !== 'emotion')) throw new Error('请选择这批 Profile 的 N6P / N7P 版本标签。不同版本请分批导入；纯情绪 P 会移入 Moodboard。');
       if (selected.some(({ row }) => !row.title.trim() || (row.kind === 'prompt' ? !Object.values(importedPromptLanguages(row)).some((value) => value.trim()) : !row.secret.trim())))
         throw new Error('有选中条目没有名称或内容，请补齐或取消选中。');
       if (
@@ -551,7 +551,7 @@ export function FileImportDialog({
           }
           if (kind === 'profile') {
             record.profileVersion = batchProfileVersion || 'unconfirmed';
-            record.tags = [...record.tags.filter(tag => !/^(?:N6P|N7P)$/i.test(tag)), batchProfileVersion];
+            record.tags = [...record.tags.filter(tag => !/^(?:N6P|N7P)$/i.test(tag)), ...(batchProfileVersion ? [batchProfileVersion] : [])];
             record.profileCodes = grouped.map((r) => ({
               id: r.id,
               label: r.title,

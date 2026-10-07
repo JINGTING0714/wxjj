@@ -17,7 +17,18 @@ import {
 import type { StoredLibraryAsset } from '../lib/prism-types';
 import { proposePromptRepair } from '../lib/prompt-repair';
 import { classifyPrompt } from '../lib/prompt-language';
+import { promptVariantRecords, splitPromptVariants } from '../lib/prompt-variants';
 (globalThis as any).DOMParser = DOMParser;
+void test('slight prompt variants stay separate while wrapped commands and bilingual counterparts stay together', () => {
+  const first = 'A cinematic portrait with a silver necklace and soft morning light --ar 3:4 --niji 7';
+  const second = 'A cinematic portrait with a gold necklace and soft morning light --ar 3:4 --niji 7';
+  assert.deepEqual(splitPromptVariants(`${first}\n\n${second}`), [first, second]);
+  assert.equal(splitPromptVariants('A cinematic portrait with a silver necklace,\nsoft morning light and a close up angle\n--ar 3:4\n--niji 7').length, 1);
+  const asset: StoredLibraryAsset = { id: 'variants', kind: 'prompt', title: '项链', secret: first, promptEnglish: first, promptChinese: '电影光线肖像，佩戴银项链，清晨柔光 --ar 3:4 --niji 7', author: '作者', origin: '购买', acquisition: '购买', note: '私人备注', tags: [], collection: 'unfiled' };
+  assert.equal(promptVariantRecords(asset).length, 1);
+  const versions = promptVariantRecords({ ...asset, promptEnglish: `${first}\n\n${second}`, promptChinese: `${asset.promptChinese}\n\n电影光线肖像，佩戴金项链，清晨柔光 --ar 3:4 --niji 7` });
+  assert.equal(versions.length, 2); assert.equal(versions[0].promptEnglish, first); assert.equal(versions[1].promptEnglish, second); assert.match(versions[1].promptChinese!, /金项链/); assert.equal(versions[1].note, asset.note);
+});
 test('unlabeled translation beside a recognized prompt header maps to Chinese, and image formulas are excluded', async () => {
   const csv = '编号,提示词,例图,其他\n44,"8K resolution, cinematic portrait, soft morning light","=DISPIMG(abc1234567890123456789012345)","8K分辨率，最高画质标准，写实插画，微俯视镜头，电影光线与柔和阴影 --ar 3:4"';
   const parsed = await parseAssetFile(new File([csv], '双语.csv'), 'prompt');

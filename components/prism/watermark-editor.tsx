@@ -347,6 +347,18 @@ export function WatermarkEditor({
     };
   }, []);
   const surface = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const [stageBounds, setStageBounds] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const node = stage.current;
+    if (!node) return;
+    const observer = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setStageBounds({ width: rect.width, height: rect.height });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   const hiddenLayerOpacity = useRef(new Map<string, number>());
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
@@ -691,6 +703,7 @@ export function WatermarkEditor({
         </label>
         <div
           className="watermark-stage dom-watermark-stage"
+          ref={stage}
           data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
         >
           {base && sourceUrl ? (
@@ -701,6 +714,8 @@ export function WatermarkEditor({
               style={
                 {
                   aspectRatio: `${base.w * canvas.canvasWidth}/${base.h * canvas.canvasHeight}`,
+                  width: stageBounds.width && stageBounds.height ? Math.min(stageBounds.width, stageBounds.height * (base.w * canvas.canvasWidth) / (base.h * canvas.canvasHeight)) : '90%',
+                  height: stageBounds.width && stageBounds.height ? Math.min(stageBounds.height, stageBounds.width / ((base.w * canvas.canvasWidth) / (base.h * canvas.canvasHeight))) : undefined,
                   '--watermark-ratio':
                     (base.w * canvas.canvasWidth) /
                     (base.h * canvas.canvasHeight),

@@ -46,20 +46,38 @@ export function mergeSources(
   return next;
 }
 
-/** Hash only same-sized files, one at a time, to find exact duplicate images. */
+const imageHashes = new WeakMap<File, Promise<string>>();
+const hexDigest = async (bytes: BufferSource) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+
+async function visibleImageHash(file: File) {
+  const byteHash = await hexDigest(await file.arrayBuffer());
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return byteHash;
+  const image = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  try {
+    if (image.width * image.height > 64_000_000) throw new Error('有图片超过 6400 万像素，无法完成严格去重。请缩小后再拼图。');
+    canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('浏览器无法核对图片内容，请重试。');
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    // RGB under fully transparent pixels does not change the visible image.
+    for (let index = 0; index < pixels.length; index += 4) if (!pixels[index + 3]) pixels[index] = pixels[index + 1] = pixels[index + 2] = 0;
+    return `${canvas.width}x${canvas.height}:${await hexDigest(pixels.buffer)}`;
+  } finally { image.close(); canvas.width = canvas.height = 0; }
+}
+
+/** Compare decoded pixels as well as files: metadata, names and PNG encoding
+ * can differ while the actual image is identical. Never merge similar art. */
 export async function duplicateSourceIndexes(sources: PipelineSource[]): Promise<number[]> {
-  const bySize = new Map<number, number[]>();
-  sources.forEach((source, index) => bySize.set(source.file.size, [...(bySize.get(source.file.size) || []), index]));
   const duplicate: number[] = [];
-  for (const indexes of bySize.values()) {
-    if (indexes.length < 2) continue;
-    const known = new Map<string, number>();
-    for (const index of indexes) {
-      const digest = await crypto.subtle.digest('SHA-256', await sources[index].file.arrayBuffer());
-      const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-      if (known.has(hash)) duplicate.push(index);
-      else known.set(hash, index);
-    }
+  const known = new Set<string>();
+  for (let index = 0; index < sources.length; index++) {
+    const file = sources[index].file;
+    let pending = imageHashes.get(file);
+    if (!pending) { pending = visibleImageHash(file); imageHashes.set(file, pending); void pending.catch(() => imageHashes.delete(file)); }
+    const hash = await pending;
+    if (known.has(hash)) duplicate.push(index); else known.add(hash);
   }
   return duplicate;
 }

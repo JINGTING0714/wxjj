@@ -10553,6 +10553,52 @@ html[data-theme='dark'] .date-time-fields input { color-scheme: dark; }
 .watermark-upload-list { min-height: 0; overflow: auto; display: grid; gap: 12px; }
 .watermark-upload-list article { display: grid; grid-template-columns: 90px minmax(0,1fr) minmax(0,1fr) auto; gap: 12px; align-items: center; }
 .watermark-upload-list .example-preview-trigger { height: 90px; width: 90px; }
+/* Review layouts keep the source beside editable candidates. */
+.sales-settings { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr) minmax(0,1fr); align-items: start; gap: 14px; }
+.date-time-fields.is-compact legend { padding: 0; font-size: 13px; line-height: 20px; margin: 0 0 5px; }
+.date-time-fields.is-compact label { gap: 0; }
+.date-time-fields.is-compact input { height: 40px; }
+.sales-settings > label { line-height: 20px; }
+.sales-settings > label > :is(input,select) { height: 40px; }
+.sales-review-workspace { display: grid; grid-template-columns: minmax(280px,.9fr) minmax(0,1.4fr); gap: 18px; align-items: start; margin-top: 16px; }
+.sales-review-original { position: sticky; top: 18px; min-width: 0; }
+.sales-review-results { min-width: 0; }
+.screenshot-review-viewer { display: grid; grid-template-rows: auto minmax(0,1fr) auto; gap: 8px; max-height: calc(100dvh - 60px); border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--background); }
+.screenshot-review-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.screenshot-review-tools strong { flex-basis: 100%; font-size: 14px; }
+.screenshot-review-scroll { overflow: auto; max-height: 65dvh; min-height: 0; }
+.screenshot-review-scroll .example-preview-trigger { height: auto; }
+.screenshot-review-scroll .example-preview-trigger > img { height: auto; object-fit: contain; }
+.screenshot-review-viewer small { color: var(--muted-foreground); font-size: 12px; }
+.sales-review-original .sales-screenshots { max-height: 180px; }
+.sales-review-original .sales-screenshots article { flex-basis: 125px; overflow: auto; }
+.sales-review-original .sales-screenshots .example-preview-trigger { height: 80px; }
+.sales-review-original .sales-screenshots span { overflow-wrap: anywhere; font-size: 11px; }
+.sales-review-results .sales-messages article { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+.sales-review-results .sales-messages article > strong { grid-column: 1; align-self: center; }
+.sales-review-results .sales-message-order { grid-column: 2; flex-wrap: wrap; gap: 4px; }
+.sales-review-results .sales-message-order button { font-size: 12px; padding: 5px 8px; }
+.sales-review-results .sales-messages article > :is(label,fieldset) { min-width: 0; }
+.sales-review-results .sales-messages article > label { line-height: 20px; }
+.sales-review-results .sales-messages textarea { height: 40px; min-height: 40px; }
+.sales-review-results .sales-messages article > label:last-child { grid-column: 1 / -1; }
+.ledger-transactions > article { padding: 20px 24px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; align-items: center; background: var(--card); }
+.ledger-transactions > article p { margin: 0; }
+label:has(> input[type=file])::after { content: '也可拖拽文件到这里'; font-size: 11px; color: var(--muted-foreground); font-weight: 400; }
+label.is-file-dragging { outline: 2px dashed var(--primary); outline-offset: 4px; background: var(--card); }
+.profile-version-group:not(:has(.profile-record-group)) { display: none; }
+@media (max-width: 1000px) {
+  .sales-review-workspace { grid-template-columns: minmax(220px,.8fr) minmax(0,1.2fr); }
+  .sales-review-results .sales-messages article { grid-template-columns: minmax(0,1fr); }
+  .sales-review-results .sales-messages article > strong, .sales-review-results .sales-message-order, .sales-review-results .sales-messages article > label:last-child { grid-column: 1; }
+}
+@media (max-width: 780px) {
+  .sales-settings { grid-template-columns: minmax(0,1fr); }
+  .sales-review-workspace { grid-template-columns: minmax(0,1fr); }
+  .sales-review-original { position: static; }
+  .screenshot-review-scroll { max-height: 36dvh; }
+  .ledger-transactions > article { padding: 16px; }
+}
 html[data-theme='dark'] :is(.mobile-workspace-tabs, .mobile-workspace-primary-action, .mobile-output-actions, .mobile-preview-actions) { background: var(--card); color: var(--foreground); border-color: var(--border); }
 html[data-theme='dark'] .mobile-workspace-tabs > button { color: var(--muted-foreground); }
 html[data-theme='dark'] .mobile-workspace-tabs > button.is-active { color: var(--foreground); background: var(--background); }

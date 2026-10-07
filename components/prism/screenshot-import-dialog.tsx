@@ -8,23 +8,13 @@ import type { CollectionRecord, StoredLibraryAsset } from '@/lib/prism-types';
 import { prismId } from '@/lib/prism-types';
 import { recognizeLocalImages } from '@/lib/local-ocr';
 import { draftsFromOcr, type ScreenshotPromptDraft } from '@/lib/prompt-screenshot';
+import { promptLanguages } from '@/lib/prompt-language';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
+import { useConfirmation } from './use-confirmation';
 
-function normalized(value: string) {
-  return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, ' ').trim();
-}
-
-function similarPrompt(candidate: string, known: string) {
-  const left = normalized(candidate), right = normalized(known);
-  if (!left || !right) return false;
-  if (left === right) return true;
-  if (Math.min(left.length, right.length) < 45 || Math.min(left.length, right.length) / Math.max(left.length, right.length) < .75) return false;
-  const shingles = (value: string) => new Set(Array.from({ length: Math.max(0, value.length - 2) }, (_, index) => value.slice(index, index + 3)));
-  const a = shingles(left), b = shingles(right);
-  let common = 0;
-  for (const fragment of a) if (b.has(fragment)) common++;
-  return 2 * common / (a.size + b.size) >= .83;
+function promptKey(prompt: { english?: string; chinese?: string; unconfirmed?: string }) {
+  return JSON.stringify([prompt.english, prompt.chinese, prompt.unconfirmed].map(value => (value || '').trim().replace(/\s+/g, ' ')));
 }
 
 export function ScreenshotImportDialog({
@@ -35,6 +25,7 @@ export function ScreenshotImportDialog({
   onImported: () => void;
 }) {
   const vault = useVault();
+  const confirmation = useConfirmation();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const urls = useFileUrls(files);
@@ -54,9 +45,7 @@ export function ScreenshotImportDialog({
     if (!open || vault.status !== 'unlocked') return;
     void vault.loadRecords<StoredLibraryAsset>('assets:prompt').then(setExisting).catch(() => setExisting([]));
   }, [open, vault]);
-  const known = useMemo(() => existing.flatMap((record) =>
-    [record.promptEnglish, record.promptChinese, record.secret].filter((value): value is string => !!value),
-  ), [existing]);
+  const known = useMemo(() => new Set(existing.map(record => promptKey(promptLanguages(record)))), [existing]);
   const patch = (id: string, change: Partial<ScreenshotPromptDraft>) =>
     setRows((current) => current.map((row) => row.id === id ? { ...row, ...change } : row));
   const moveFile = (index: number, delta: number) => {
@@ -93,6 +82,7 @@ export function ScreenshotImportDialog({
       setMessage(next.length
         ? `识别完成：${next.length} 条候选。每条需校对并勾选才会保存；模糊小图不会入库。`
         : '识别完成，但没有找到可确认的提示词。请检查截图清晰度、顺序，或点击“手动新增条目”录入；原截图仍保留，可删除后重传。');
+      if (next.length) confirmation.notify('已经为你整理好候选提示词。请对照原截图检查中英文、标点和参数，再勾选确认入库。聊天截图不会成为正式例图；分享前请保护好提示词和 P 值。', '请先校对，再安心入库');
     } catch (error) {
       setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动新增条目并对照截图录入。`);
     } finally {
@@ -125,7 +115,7 @@ export function ScreenshotImportDialog({
     let success = 0;
     let failed = 0;
     let skipped = 0;
-    const savedTexts = [...known];
+    const savedTexts = new Set(known);
     const createdCollections = new Map<string, string>();
     try {
       let destination = collection;
@@ -137,7 +127,7 @@ export function ScreenshotImportDialog({
         setNewCollection('');
       }
       for (const row of selected) {
-        const duplicate = [row.english, row.chinese].some((value) => value && savedTexts.some((knownValue) => similarPrompt(value, knownValue)));
+        const duplicate = savedTexts.has(promptKey(row));
         if (duplicate && !duplicates.has(row.id)) { skipped++; continue; }
         if (!row.title.trim() || !(row.english.trim() || row.chinese.trim() || row.unconfirmed.trim())) {
           failed++; continue;
@@ -167,7 +157,7 @@ export function ScreenshotImportDialog({
           await vault.saveRecord('assets:prompt', record);
           patch(row.id, { saved: true, include: false });
           setExisting((current) => [...current, record]);
-          savedTexts.push(...[record.promptEnglish, record.promptChinese].filter((value): value is string => !!value));
+          savedTexts.add(promptKey(row));
           success++;
         } catch { failed++; }
       }
@@ -176,11 +166,13 @@ export function ScreenshotImportDialog({
         window.dispatchEvent(new CustomEvent('prism:assets-changed'));
       }
       setMessage(`已保存 ${success} 条；跳过疑似重复 ${skipped} 条；未保存 ${failed} 条。请补充清晰例图，并删除设备上含私人提示词或 P 值的聊天截图；分享前再检查一次。`);
+      if (success) confirmation.notify('提示词已安全保存在本机。记得补充清晰例图，并删除不再需要的聊天截图；发图或截图给别人之前，请再检查一下提示词和 P 值有没有露出。', '入库完成');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '保存失败，候选条目仍保留，可重试。');
     } finally { setBusy(false); }
   };
   return <>
+    {confirmation.dialog}
     <Button disabled={vault.status !== 'unlocked'} onClick={() => setOpen(true)} variant="outline"><ScanText /> 从聊天截图导入</Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="screenshot-import-dialog">
@@ -199,7 +191,7 @@ export function ScreenshotImportDialog({
           <div className="screenshot-drafts">
             <div className="screenshot-batch-fields"><label>目标分类<select value={collection} onChange={(event) => setCollection(event.target.value)}><option value="unfiled">未分类</option>{collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>或新建分类<input value={newCollection} onChange={(event) => setNewCollection(event.target.value)} placeholder="输入新分类名称" /></label><label>整批作者（可留空）<input value={author} onChange={(event) => setAuthor(event.target.value)} /></label><label>整批来源<input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label>整批取得方式<input value={acquisition} onChange={(event) => setAcquisition(event.target.value)} /></label><label>整批标签（逗号分隔）<input value={tags} onChange={(event) => setTags(event.target.value)} /></label></div>
             {rows.map((row, index) => {
-              const duplicate = [row.english, row.chinese].some((value) => value && known.some((knownValue) => similarPrompt(value, knownValue)));
+              const duplicate = known.has(promptKey(row));
               return <article className="screenshot-draft" key={row.id}>
                 <div className="screenshot-draft-head"><label><input disabled={row.saved} type="checkbox" checked={row.include} onChange={(event) => patch(row.id, { include: event.target.checked })} />{row.saved ? '已保存' : '校对后保存此条'}</label><button onClick={() => setActiveScreenshot(row.screenshot)} type="button">第 {row.screenshot + 1} 张 · 约 {Math.round(row.top)} px</button><span>{Math.round(row.confidence)}% OCR 参考值</span></div>
                 <label>名称<input value={row.title} onChange={(event) => patch(row.id, { title: event.target.value })} /></label>
@@ -209,7 +201,7 @@ export function ScreenshotImportDialog({
                 <label>待确认原文<textarea aria-label="待确认原文" value={row.unconfirmed} onChange={(event) => patch(row.id, { unconfirmed: event.target.value })} /></label>
                 <label>使用说明 / 普通备注（只填你确认属于此条的内容）<textarea value={row.note} onChange={(event) => patch(row.id, { note: event.target.value })} /></label>
                 <details className="screenshot-row-details"><summary>本条作者、来源、取得方式与标签</summary><div className="screenshot-row-category"><label>作者<input value={row.author || ''} onChange={(event) => patch(row.id, { author: event.target.value })} placeholder="留空使用整批设置" /></label><label>来源<input value={row.origin || ''} onChange={(event) => patch(row.id, { origin: event.target.value })} placeholder="留空使用整批设置" /></label><label>取得方式<input value={row.acquisition || ''} onChange={(event) => patch(row.id, { acquisition: event.target.value })} placeholder="留空使用整批设置" /></label><label>标签<input value={row.tags || ''} onChange={(event) => patch(row.id, { tags: event.target.value })} placeholder="逗号分隔；留空使用整批设置" /></label></div></details>
-                {duplicate && <label className="import-warning"><input type="checkbox" checked={duplicates.has(row.id)} onChange={(event) => setDuplicates((current) => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next; })} />与现有词条相同或高度相似；确认仍要新增这一条</label>}
+                {duplicate && <label className="import-warning"><input type="checkbox" checked={duplicates.has(row.id)} onChange={(event) => setDuplicates((current) => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next; })} />与现有词条的中英文和原文完全相同；确认仍要新增这一条</label>}
                 <div className="screenshot-row-actions"><button type="button" onClick={() => mergeNext(index)} disabled={index === rows.length - 1 || row.saved}>合并下一条</button><button type="button" onClick={() => setRows((current) => [...current.slice(0, index + 1), { ...row, id: crypto.randomUUID(), title: `${row.title}（拆分）`, english: '', chinese: '', unconfirmed: '', note: '', include: false, saved: false }, ...current.slice(index + 1)])}>拆出新条目</button><button type="button" onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))} disabled={row.saved}>移除候选</button></div>
               </article>;
             })}

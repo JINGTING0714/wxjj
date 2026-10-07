@@ -51,6 +51,7 @@ import {
 import type { VaultWrite } from '@/lib/local-vault';
 import { formatProfileCode } from '@/lib/short-codes';
 import { useConfirmation } from './use-confirmation';
+import { syncProfileMoodboards } from '@/lib/profile-moodboard-sync';
 import {
   CollectionRail,
   CollectionDialog,
@@ -283,11 +284,11 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   const urls = useRef(new Set<string>());
   const live = useRef(true);
   const refresh = async () => {
+    await syncProfileMoodboards(vault);
     const [records, libs] = await Promise.all([
       vault.loadRecords<StoredLibraryAsset>('assets:profile'),
       vault.loadRecords<CollectionRecord>('collections:profile'),
     ]);
-    for (const record of records) await syncEmotionMoodboards(record, profileCodes(record), libs);
     const hydrated = await Promise.all(
       records.map(async (r) => ({
         ...r,
@@ -346,60 +347,13 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
     setError('');
     setEditor(true);
   };
-  async function syncEmotionMoodboards(record: StoredLibraryAsset, storedCodes: ProfileShortCode[], profileCollections = collections) {
-    const [moodboards, moodCollections] = await Promise.all([
-      vault.loadRecords<StoredLibraryAsset>('assets:moodboard'),
-      vault.loadRecords<CollectionRecord>('collections:moodboard'),
-    ]);
-    const desired = storedCodes.filter((code) => code.nature === 'emotion');
-    const linked = moodboards.filter((item) => item.derivedFromProfile?.folderId === record.id);
-    const moodCollectionName = profileCollections.find((item) => item.id === record.collection)?.name;
-    let moodCollection = moodCollectionName ? moodCollections.find((item) => item.name === moodCollectionName) : undefined;
-    if (moodCollectionName && !moodCollection) {
-      moodCollection = { id: crypto.randomUUID(), name: moodCollectionName };
-      await vault.saveRecord('collections:moodboard', moodCollection);
-    }
-    const desiredIds = new Set(desired.map((code) => code.id));
-    const stale = linked.filter((item) => !item.derivedFromProfile || !desiredIds.has(item.derivedFromProfile.codeId));
-    const deleteBlobs = (await Promise.all(stale.map((item) => vault.loadBlobs(`asset-image:${item.id}`)))).flat().map((blob) => blob.id);
-    const writes: VaultWrite = { records: [], blobs: [], deleteRecords: stale.map((item) => item.id), deleteBlobs };
-    for (const code of desired) {
-      const existing = linked.find((item) => item.derivedFromProfile?.codeId === code.id);
-      const id = existing?.id || crypto.randomUUID();
-      const now = new Date().toISOString();
-      const imageBlobs = await vault.loadBlobs(profileImageScope(record.id, code));
-      const fingerprint = JSON.stringify([record.title, moodCollection?.id || 'unfiled', record.author, record.origin, record.sourceUrl, record.acquisition, record.acquisitionOther, record.tags, record.note, code, imageBlobs.map(blob => blob.id)]);
-      if (existing?.emotionSyncFingerprint === fingerprint) continue;
-      const next: StoredLibraryAsset = {
-        ...existing, id, kind: 'moodboard',
-        title: `${record.title}情绪p${desired.length > 1 ? ` · ${code.label}` : ''}`,
-        secret: code.secret, author: record.author, origin: record.origin,
-        sourceUrl: record.sourceUrl, acquisition: record.acquisition,
-        acquisitionOther: record.acquisitionOther, note: code.note || record.note,
-        tags: [...new Set([...(record.tags || []).filter(tag => !/^(?:N6P|N7P)$/i.test(tag)), '自动同步·情绪P'])],
-        collection: moodCollection?.id || 'unfiled',
-        customFields: [...(code.customFields || []), { id: `derived-${record.id}-${code.id}`, label: '来源', value: `Profile ${record.title} · 情绪 P（自动同步）` }],
-        derivedFromProfile: { folderId: record.id, codeId: code.id },
-        emotionSyncFingerprint: fingerprint,
-        createdAt: existing?.createdAt || now, updatedAt: now,
-      };
-      const oldBlobs = existing ? await vault.loadBlobs(`asset-image:${id}`) : [];
-      writes.deleteBlobs!.push(...oldBlobs.map((blob) => blob.id));
-      writes.records!.push({ scope: 'assets:moodboard', value: next });
-      writes.blobs!.push(...imageBlobs.map((blob) => ({ id: crypto.randomUUID(), scope: `asset-image:${id}`, blob: blob.blob, name: blob.name })));
-    }
-    if (writes.records?.length || writes.deleteRecords?.length || writes.blobs?.length || writes.deleteBlobs?.length) {
-      await vault.writeBatch(writes);
-      window.dispatchEvent(new CustomEvent('prism:assets-changed'));
-    }
-  }
   const save = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     void run(async () => {
       if (!codes.length || codes.some((c) => !c.secret.trim()))
         throw new Error('每个 Profile 至少保留一个短码，短码内容不能为空。');
-      if (profileVersion === 'unconfirmed') throw new Error('请选择 N6P 或 N7P，再保存文件夹。');
+      if (profileVersion === 'unconfirmed' && !codes.every(code => code.nature === 'emotion')) throw new Error('请选择 N6P 或 N7P，再保存文件夹。');
       if (new Set(codes.map((c) => c.secret.trim())).size !== codes.length)
         throw new Error('同一 Profile 内有重复短码，请核对。');
       if (!(await confirmation.confirmShortCodes(codes.map((c) => c.secret))))
@@ -474,9 +428,10 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
               },
             });
       await vault.writeBatch(batch);
-      await syncEmotionMoodboards(record, storedCodes);
+      await syncProfileMoodboards(vault);
       await refresh();
       setEditor(false);
+      confirmation.notify(codes.every(code => code.nature === 'emotion') ? '这个文件夹只有情绪 P，已经移到对应的 Moodboard 库，短码、例图和资料都保留了。分享前记得检查 P 值是否隐藏。' : 'Profile 已保存，情绪 P 及例图也会按分类同步。短码和长码属于私人资料，分享截图前记得确认已隐藏。', '资料已保存好');
       window.dispatchEvent(new CustomEvent('prism:assets-changed'));
     });
   };
@@ -558,7 +513,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
         eyebrow="PROFILE FOLDERS"
         number="02"
         title="Profile 库"
-        description="一个文件夹保存长码，阶段与成品短码分别记录例图、性质和备注。"
+        description="按 N6P / N7P 管理文件夹与短码；情绪 P 同步分类，纯情绪 P 文件夹请到 Moodboard 库查看。"
         actions={
           <>
             <Button

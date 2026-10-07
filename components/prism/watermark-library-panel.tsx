@@ -417,7 +417,7 @@ export function WatermarkLibraryPanel({
                   <p>{watermark.tags.join(' / ') || '未添加标签'}</p>
                 </div>
               </div>
-              <details className="visual-record-details"><summary>查看来源与备注</summary><div className="record-secret">
+              <div className="record-secret">
                 <p>
                   <strong>{watermark.author}</strong> · {watermark.origin}
                 </p>
@@ -443,7 +443,6 @@ export function WatermarkLibraryPanel({
                 <p>{watermark.note || '暂无私人备注。'}</p>
                 <CustomFieldList fields={watermark.customFields} />
               </div>
-              </details>
               <div className="row-actions">
                 <button
                   type="button"

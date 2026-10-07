@@ -1,5 +1,6 @@
 import { classifyImportedPromptText } from './prompt-language';
 import type { StoredLibraryAsset } from './prism-types';
+import { splitPromptVariants } from './prompt-variants';
 
 const promptShape = (text: string) =>
   !/^(?:my\s|personal\b|notes?\s*[:：]|usage\b|use\s|instructions?\b|copyright\b|purchase\b)/i.test(
@@ -46,7 +47,7 @@ export function proposePromptRepair(
   const noteMapped = movedNotes.map(classifyImportedPromptText);
   mapped.push(...noteMapped.map((value) => ({ ...value, unconfirmed: '' })));
   const unique = (values: string[]) =>
-    [...new Set(values.filter(Boolean))].join('\n');
+    [...new Set(values.filter(Boolean).flatMap(splitPromptVariants))].join('\n\n');
   const promptEnglish = unique(mapped.map((value) => value.english));
   const promptChinese = unique(mapped.map((value) => value.chinese));
   const promptUnconfirmed = unique(mapped.map((value) => value.unconfirmed));

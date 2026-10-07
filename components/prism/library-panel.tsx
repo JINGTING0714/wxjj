@@ -29,6 +29,8 @@ import { FileImportDialog } from './file-import-dialog';
 import { ScreenshotImportDialog } from './screenshot-import-dialog';
 import { PromptRepairDialog } from './prompt-repair-dialog';
 import { proposePromptRepair } from '@/lib/prompt-repair';
+import { syncProfileMoodboards } from '@/lib/profile-moodboard-sync';
+import { syncPromptVariants } from '@/lib/prompt-variant-sync';
 import { ProfileLibraryPanel } from './profile-library-panel';
 import {
   CustomFieldList,
@@ -226,6 +228,7 @@ function SimpleLibraryPanel({
       setCollections([]);
       return;
     }
+    if (kind === 'moodboard') await syncProfileMoodboards(vault);
     const [records, storedCollections] = await Promise.all([
       vault.loadRecords<StoredLibraryAsset>(`assets:${kind}`),
       vault.loadRecords<CollectionRecord>(`collections:${kind}`),
@@ -240,6 +243,11 @@ function SimpleLibraryPanel({
         ]) });
         for (const entry of repairs) records[records.findIndex(record => record.id === entry.record.id)] = entry.repair!;
         setRepairStatus(`已在本机自动整理 ${repairs.length} 条双语字段；原始内容保留为加密副本。`);
+      }
+      const split = await syncPromptVariants(vault);
+      if (split) {
+        records.splice(0, records.length, ...await vault.loadRecords<StoredLibraryAsset>('assets:prompt'));
+        setRepairStatus(`已将 ${split} 条混合提示词拆成独立版本；每个版本可单独复制，原文保留为加密记录。`);
       }
     }
     const hydrated = await Promise.all(
@@ -428,10 +436,11 @@ function SimpleLibraryPanel({
         images: [...existingImages, ...added],
       };
       setAssets((current) =>
-        editingAsset
+        editingAsset && current.some(asset => asset.id === id)
           ? current.map((asset) => (asset.id === id ? hydrated : asset))
           : [hydrated, ...current],
       );
+      if (kind === 'prompt') await refresh();
       setAssetDialog(false);
       window.dispatchEvent(new CustomEvent('prism:assets-changed'));
     } catch (reason) {
@@ -667,7 +676,7 @@ function SimpleLibraryPanel({
                 <div className="record-secret-actions">
                   {<button onClick={() => toggleReveal(asset.id)} type="button">
                     {isRevealed ? <EyeOff /> : <Eye />}{' '}
-                    {isRevealed ? '隐藏内容' : kind === 'prompt' ? '显示提示词' : '显示详情'}
+                    {isRevealed ? '隐藏内容' : kind === 'prompt' ? '显示提示词' : '显示短码'}
                   </button>}
                   {(kind !== 'prompt' || promptLanguages(asset).english) && <button
                     onClick={() => void copyText(
@@ -686,7 +695,7 @@ function SimpleLibraryPanel({
                   </button>}
                   {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>}{promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待核对原文</button>}</>}
                 </div>
-                {(kind === 'prompt' || isRevealed) && <p>
+                {<p>
                   <strong>{asset.author}</strong>
                   <span>·</span>
                   {asset.origin}
@@ -695,7 +704,7 @@ function SimpleLibraryPanel({
                     ? asset.acquisitionOther || '其他'
                     : asset.acquisition}
                 </p>}
-                {(kind === 'prompt' || isRevealed) && safeSourceUrl(asset.sourceUrl) && (
+                {safeSourceUrl(asset.sourceUrl) && (
                   <a
                     className="source-link"
                     href={safeSourceUrl(asset.sourceUrl)}
@@ -707,14 +716,14 @@ function SimpleLibraryPanel({
                 )}
               </div>
               <div className="record-note">
-                {(kind === 'prompt' || isRevealed) && <p>{asset.note || '暂无私人备注。'}</p>}
+                {<p>{asset.note || '暂无私人备注。'}</p>}
                 {asset.stageNote && (
                   <p>
                     <strong>阶段说明：</strong>
                     {asset.stageNote}
                   </p>
                 )}
-                {(kind === 'prompt' || isRevealed) && <CustomFieldList fields={asset.customFields} />}
+                {<CustomFieldList fields={asset.customFields} />}
               </div>
               <div className="row-actions">
                 <button
@@ -749,7 +758,7 @@ function SimpleLibraryPanel({
         <DialogContent className="asset-dialog asset-dialog-wide">
           <DialogHeader>
             <DialogTitle>
-              {editingAsset ? '编辑' : '添加'}
+              {editingAsset && assets.some(asset => asset.id === editingAsset.id) ? '编辑' : '添加'}
               {copy.noun}
             </DialogTitle>
             <DialogDescription>
@@ -973,6 +982,17 @@ function SimpleLibraryPanel({
             </p>
           )}
           <DialogFooter>
+            {kind === 'prompt' && editingAsset && assets.some(asset => asset.id === editingAsset.id) && <Button type="button" variant="outline" onClick={async () => {
+              const original = editingAsset;
+              const form = new FormData(document.getElementById('asset-form') as HTMLFormElement);
+              const pending = newImageFiles;
+              const kept = new Set(existingImages.map(image => image.id));
+              const images = await vault.loadBlobs(`asset-image:${original.id}`);
+              setEditingAsset({ ...original, id: prismId('prompt-version'), title: `${String(form.get('title') || original.title)} · 新版本`, promptFamilyId: original.promptFamilyId || original.id, promptVariantLabel: '新版本', promptEnglish: String(form.get('promptEnglish') || ''), promptChinese: String(form.get('promptChinese') || ''), promptUnconfirmed: String(form.get('promptUnconfirmed') || ''), note: String(form.get('note') || ''), customFields: normalizeCustomFields(customFields), createdAt: undefined, images: [] });
+              setExistingImages([]); setRemovedImageIds([]);
+              setNewImageFiles([...images.filter(image => kept.has(image.id)).map(image => new File([image.blob], image.name, { type: image.blob.type })), ...pending]);
+              setFormError('这是独立的新版本。请修改动作、配饰或词文后保存，原版本会保留。');
+            }}>新增独立版本</Button>}
             <Button onClick={() => setAssetDialog(false)} variant="ghost">
               取消
             </Button>

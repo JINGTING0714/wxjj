@@ -440,6 +440,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
         const duplicate = await duplicateSourceIndexes(state.sources);
         if (duplicate.length) {
           setError(`发现 ${duplicate.length} 张内容完全相同的重复图片（队列位置 ${duplicate.slice(0, 10).map((index) => index + 1).join('、')}）。请先移除重复项；一个号码只对应一张有效图片。`);
+          confirmation.notify('发现内容完全相同的图片，请先移除重复项再拼图。去重会核对实际像素，改名或更换 PNG 文件编码也不会绕过检查。相似但不同的作品会保留。', '先检查重复图片');
           return;
         }
       } catch (reason) {
@@ -703,6 +704,11 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
       {workspace.saveError && (
         <p className="error-banner">{workspace.saveError}</p>
       )}
+      {error.includes('重复图片') && <Button variant="outline" disabled={processing} onClick={async () => {
+        const duplicate = await duplicateSourceIndexes(state.sources);
+        if (!duplicate.length || !(await confirmation.ask(`移除 ${duplicate.length} 张完全重复的队列图片，保留各自第一次出现的图片？原图库文件不受影响。`, '整理重复图片', '保留第一张，移除重复项'))) return;
+        const removed = new Set(duplicate); setState(current => ({ ...current, sources: current.sources.filter((_, index) => !removed.has(index)), job: null, lastGenerated: null })); setError('');
+      }}>移除完全重复图 · 保留第一张</Button>}
       <div className="collage-batch-toolbar"><label>当前批次<select aria-label="拼图批次" value={state.activeBatchId} disabled={processing} onChange={(event) => switchBatch(event.target.value)}>{rememberBatch(state).map((batch) => <option key={batch.id} value={batch.id}>{batch.title} · {batch.sources.length} 张</option>)}</select></label><Button variant="outline" disabled={processing} onClick={() => { const id = crypto.randomUUID(); setState((current) => ({ ...current, batches: [...rememberBatch(current), { id, title: `手动批次 ${current.batches.length + 1}`, sources: [] }], activeBatchId: id, sources: [], lastGenerated: null, job: null })); }}>新建批次</Button><div className="sale-round-entry"><strong>拼图完成后 → 售图核对</strong><Button disabled={!state.lastGenerated || processing || !workspace.ready} onClick={() => void createSaleRound()}>创建售图场次</Button></div></div>
       <MobileWorkspace
         className="collage-mobile-workspace"

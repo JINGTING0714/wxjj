@@ -20,3 +20,8 @@ void test('chat headers, thumbnails and wrapped parameters produce one candidate
   assert.match(rows[1].chinese, /--stylize 850/);
   assert.ok(rows.every(row => !row.chinese.includes('云卷云舒')));
 });
+void test('two action variants in one chat message produce separate draft cards', () => {
+  const text = '版本一：电影光线肖像，抬手整理银色项链，暖色背景 --ar 3:4 --niji 7\n版本二：电影光线肖像，抬手扶眼镜，暖色背景 --ar 3:4 --niji 7';
+  const rows = draftsFromOcr([{ text, blocks: [] }]);
+  assert.equal(rows.length, 2); assert.match(rows[0].chinese, /项链/); assert.match(rows[1].chinese, /眼镜/); assert.ok(!rows[0].chinese.includes('眼镜'));
+});

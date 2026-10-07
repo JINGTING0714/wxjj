@@ -364,6 +364,7 @@ function NavItem({
 
 export default function Home() {
   const vault = useVault();
+  useEffect(() => { let clean: (() => void) | undefined; let stopped = false; void import('@/lib/file-drop').then(module => { if (!stopped) clean = module.installFileDrop(); }); return () => { stopped = true; clean?.(); }; }, []);
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
   const flowDrag = useRef({ startX: 0, left: 0, down: false, moved: false });

@@ -1,4 +1,5 @@
 import type { OcrPage } from './local-ocr';
+import { isPromptVariantMarker, promptVariantMarkerContent, splitPromptVariants } from './prompt-variants';
 
 export type ScreenshotPromptDraft = {
   id: string;
@@ -61,7 +62,8 @@ function makeDraft(
   const unconfirmed: string[] = [];
   const notes: string[] = [];
   const hasChinesePrompt = lines.some((line) => hasHan(line));
-  for (const original of lines) {
+  for (const [index, original] of lines.entries()) {
+    if (isPromptVariantMarker(original)) { (hasHan(promptVariantMarkerContent(original) || lines[index + 1] || '') ? chinese : english).push(original); continue; }
     const line = original.replace(chineseLabel, '').replace(englishLabel, '').trim();
     if (!line) continue;
     if (usage.test(line) && !parameter.test(line)) {
@@ -74,10 +76,11 @@ function makeDraft(
       else english.push(line);
     } else unconfirmed.push(line);
   }
-  const joined = (values: string[]) => values.join(' ').replace(/--\s+(?=[A-Za-z])/g, '--').replace(/\s+([,.;:!?])/g, '$1').trim();
+  const joined = (values: string[]) => values.join(' ').replace(/--\s+(?=[A-Za-z])/g, '--').replace(/(?<=\S)--(?=(?:ar|chaos|raw|profile|stylize|weird|niji|sref|seed|no|v)\b)/gi, ' --').replace(/\s+([,.;:!?])/g, '$1').trim();
+  const versions = (values: string[]) => splitPromptVariants(values.join('\n')).map(value => joined(value.split('\n'))).join('\n\n');
   const result = {
-    english: joined(english),
-    chinese: joined(chinese),
+    english: versions(english),
+    chinese: versions(chinese).replace(/(?<=\p{Script=Han})[ \t]+(?=\p{Script=Han})/gu, ''),
     unconfirmed: joined(unconfirmed),
     note: joined(notes),
   };
@@ -114,7 +117,7 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
         flush(); lineIndex++; continue;
       }
       if (chatDecoration.test(raw) || raw.length < 3) { lineIndex++; continue; }
-      if (promptLine(raw)) {
+      if (promptLine(raw) || isPromptVariantMarker(raw)) {
         if (!active) {
           const block = page.blocks.find((item) => item.text.includes(raw));
           active = { lines: [], screenshot, top: block?.top ?? lineIndex, confidence: block?.confidence ?? 0 };
@@ -127,5 +130,10 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
     }
     flush();
   });
-  return drafts;
+  return drafts.flatMap(draft => {
+    const english = splitPromptVariants(draft.english), chinese = splitPromptVariants(draft.chinese), unconfirmed = splitPromptVariants(draft.unconfirmed);
+    const count = Math.max(english.length, chinese.length, unconfirmed.length);
+    if (count === 1) return [draft];
+    return Array.from({ length: count }, (_, index) => ({ ...draft, id: crypto.randomUUID(), title: `${draft.title} · 版本 ${index + 1}`, english: english[index] || '', chinese: chinese[index] || '', unconfirmed: unconfirmed[index] || '' }));
+  });
 }

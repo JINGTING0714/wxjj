@@ -28,6 +28,7 @@ export async function recognizeLocalImages(
     },
   });
   try {
+    let preciseAvailable = true;
     const pages: OcrPage[] = [];
     for (let index = 0; index < files.length; index++) {
       onProgress?.(`正在识别第 ${index + 1} / ${files.length} 张截图`);
@@ -104,6 +105,26 @@ export async function recognizeLocalImages(
         const lines = (result.data.blocks || []).flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines));
         for (const line of lines) {
           const text = line.text.trim();
+          if (mode === 'prompt' && preciseAvailable && text.length >= 5) {
+            const lineCanvas = document.createElement('canvas');
+            const top = region.top + line.bbox.y0 / scale;
+            const height = (line.bbox.y1 - line.bbox.y0) / scale;
+            const contentLeft = Math.max(0, left + line.bbox.x0 / scale - 2);
+            const contentRight = Math.min(canvas.width, left + line.bbox.x1 / scale + 2);
+            lineCanvas.width = Math.ceil(contentRight - contentLeft); lineCanvas.height = Math.ceil(height + 8);
+            const lineContext = lineCanvas.getContext('2d');
+            if (lineContext) {
+              lineContext.fillStyle = `rgb(${background},${background},${background})`; lineContext.fillRect(0, 0, lineCanvas.width, lineCanvas.height);
+              lineContext.drawImage(canvas, contentLeft, top, contentRight - contentLeft, height, 0, 4, lineCanvas.width, height);
+              try {
+                onProgress?.(`第 ${index + 1} 张 · 正在逐行精细识别文字和标点`);
+                const { preciseText } = await import('./precise-ocr');
+                const precise = await preciseText(lineCanvas);
+                if (precise.text.trim() && precise.confidence >= 80) { line.text = precise.text.trim(); line.confidence = precise.confidence; lineCanvas.width = lineCanvas.height = 0; continue; }
+              } catch { preciseAvailable = false; }
+            }
+            lineCanvas.width = lineCanvas.height = 0;
+          }
           const numeric = mode === 'sales' && /^[\d\s.,，。/、;；]+$/.test(text) && !/^20\d{2}/.test(text);
           const latin = mode === 'prompt' && !/\p{Script=Han}/u.test(text) && /[A-Za-z]/.test(text);
           if (!numeric && !latin) continue;

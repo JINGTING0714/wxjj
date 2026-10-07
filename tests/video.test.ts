@@ -65,7 +65,7 @@ test('ordinary video avoids full canvas reconstruction; transforms and alpha ret
   assert.equal(simple.direct, true);
   assert.ok(!simple.args.includes('under.png'));
   assert.ok(!simple.args.includes('-loop'));
-  assert.ok(simple.args.includes('fast'));
+  assert.ok(simple.args.includes('veryfast'));
   assert.equal(simple.args[simple.args.indexOf('-crf') + 1], '10');
   for (const key of ['scaleX', 'scaleY'] as const) {
     const stretched = { ...c, source: { ...c.source, [key]: 1.2 } };

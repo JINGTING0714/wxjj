@@ -45,6 +45,7 @@ export async function nativeWatermarkVideo(
     ALL_FORMATS,
     Conversion,
     canEncodeVideo,
+    VideoSample,
   } = await import('mediabunny');
   signal.throwIfAborted();
   const input = new Input({
@@ -135,8 +136,14 @@ export async function nativeWatermarkVideo(
                   g.height,
                 );
                 context.restore();
+                if (canvas.width > under.width) context.drawImage(canvas, under.width - 1, 0, 1, under.height, under.width, 0, canvas.width - under.width, under.height);
+                if (canvas.height > under.height) context.drawImage(canvas, 0, under.height - 1, canvas.width, 1, 0, under.height, canvas.width, canvas.height - under.height);
                 context.drawImage(over, 0, 0);
-                return canvas;
+                // Snapshot each completed RGBA frame. Some browser GPU drivers
+                // return a blank canvas when a live surface is handed straight
+                // to VideoFrame before its pending drawing has completed.
+                const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+                return new VideoSample(pixels.data, { format: 'RGBA', codedWidth: canvas.width, codedHeight: canvas.height, timestamp: sample.timestamp, duration: sample.duration });
               },
             },
       audio: { codec: 'aac' },

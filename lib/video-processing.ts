@@ -10,6 +10,8 @@ import {
   compositionSize,
   resolveComposition,
   preserveSourceResolution,
+  fitCompositionToContent,
+  layerBounds,
   type WatermarkComposition,
 } from './watermark-composition';
 import {
@@ -177,13 +179,20 @@ export async function watermarkVideo(
       layers.map((layer) => loadImage(layer.file)),
     );
     {
-      const fitted = fitImageComposition(
+      let fitted = fitImageComposition(
         video.videoWidth,
         video.videoHeight,
         layers,
         decoded,
         c,
       );
+      if (c.source.rotation % 360 === 0 && c.source.opacity === 1) {
+        const previous = compositionSize(video.videoWidth, video.videoHeight, c);
+        const bounds = layerBounds(c.source, { width: video.videoWidth, height: video.videoHeight }, video.videoWidth, previous.width, previous.height)!;
+        const sourceFrame = fitCompositionToContent(video.videoWidth, video.videoHeight, [], [], c);
+        const target = compositionSize(video.videoWidth, video.videoHeight, sourceFrame.composition);
+        fitted = { composition: sourceFrame.composition, layers: layers.map(layer => ({ ...layer, x: (layer.x * previous.width - Math.floor(bounds.left + 1e-7)) / target.width, y: (layer.y * previous.height - Math.floor(bounds.top + 1e-7)) / target.height })) };
+      }
       const normalized = preserveSourceResolution(fitted.layers, fitted.composition);
       c = normalized.composition;
       layers = normalized.layers;
@@ -259,7 +268,7 @@ export async function watermarkVideo(
       );
     // Browser video decoders can discard WebM alpha even when flattening onto
     // a solid canvas. Such sources need the alpha-aware compatibility decoder.
-    if (options.quality !== 'source' && !plan.alpha && !sourceHasTransparency) {
+    if ((options.preferBrowser || options.quality !== 'source') && !plan.alpha && !sourceHasTransparency) {
       try {
         const fast = await nativeWatermarkVideo(
           file,

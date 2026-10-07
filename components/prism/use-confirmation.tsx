@@ -16,6 +16,7 @@ export function useConfirmation() {
     message: string;
     title: string;
     label: string;
+    notice?: boolean;
   } | null>(null);
   const resolver = useRef<((answer: boolean) => void) | null>(null);
   const finish = (answer: boolean) => {
@@ -39,6 +40,10 @@ export function useConfirmation() {
     });
   return {
     ask,
+    notify: (message: string, title = '温馨提醒') => {
+      resolver.current?.(false); resolver.current = null;
+      setQuestion({ message, title, label: '我知道了', notice: true });
+    },
     confirmShortCodes: async (values: string[]) => {
       const count = longShortCodes(values).length;
       return (
@@ -66,13 +71,13 @@ export function useConfirmation() {
             {question?.message}
           </DialogDescription>
           <DialogFooter>
-            <Button
+            {!question?.notice && <Button
               type="button"
               variant="outline"
               onClick={() => finish(false)}
             >
               取消
-            </Button>
+            </Button>}
             <Button type="button" onClick={() => finish(true)}>
               {question?.label || '确认'}
             </Button>

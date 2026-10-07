@@ -9,6 +9,7 @@ import {
 export type VideoExportOptions = {
   format: 'auto' | 'mp4' | 'webm-alpha';
   quality: 'source' | 'high' | 'ultra';
+  preferBrowser?: boolean;
 };
 export const defaultVideoExport: VideoExportOptions = {
   format: 'auto',
@@ -92,7 +93,7 @@ export function videoExportPlan(
     !Object.values(c.source.crop).some(Boolean);
   const finalFormat = alpha
     ? ',format=yuva420p,setsar=1'
-    : ',pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p,setsar=1';
+    : `,pad=ceil(iw/2)*2:ceil(ih/2)*2:color=black,fillborders=right=${size.width % 2}:bottom=${size.height % 2}:mode=smear,format=yuv420p,setsar=1`;
   // Output dimensions describe square canvas pixels. In particular the 1x1
   // timing layer must not leave its own aspect ratio in the encoded metadata.
   const filter = direct
@@ -194,7 +195,7 @@ export function videoExportPlan(
             '-crf',
             crf,
             '-preset',
-            'fast',
+            'veryfast',
             '-pix_fmt',
             'yuv420p',
             '-movflags',

@@ -400,12 +400,13 @@ export function VideoWatermarkPanel() {
                   }
                   value={(state.exportOptions || defaultVideoExport).quality}
                 >
-                  <option value="source">原像素 · 最高保真（较慢）</option>
+                  <option value="source">原像素 · 最高保真</option>
                   <option value="high">高清</option>
                   <option value="ultra">更高质量 · 文件更大</option>
                 </select>
               </label>
             </div>
+            <label className="check-line"><input type="checkbox" aria-label="优先浏览器加速" checked={!!state.exportOptions?.preferBrowser} onChange={event => setState(current => ({ ...current, exportOptions: { ...(current.exportOptions || defaultVideoExport), preferBrowser: event.target.checked } }))} />优先浏览器加速 · 保留原像素，失败时自动兼容处理</label>
             <button
               className="mobile-output-settings-summary mobile-workspace-only"
               onClick={() => setOutputSettingsOpen(true)}
@@ -639,6 +640,7 @@ export function VideoWatermarkPanel() {
               <option value="ultra">更高质量 · 文件更大</option>
             </select>
           </label>
+          <label className="check-line"><input type="checkbox" aria-label="手机端优先浏览器加速" checked={!!state.exportOptions?.preferBrowser} onChange={event => setState(current => ({ ...current, exportOptions: { ...(current.exportOptions || defaultVideoExport), preferBrowser: event.target.checked } }))} />优先浏览器加速 · 保留原像素</label>
         </div>
       </MobileWorkspaceSheet>
       <MobileWorkspaceSheet

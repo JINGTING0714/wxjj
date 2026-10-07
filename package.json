@@ -36,6 +36,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "1.31.0",
     "mediabunny": "1.56.1",
+    "onnxruntime-web": "1.30.0",
     "pdfjs-dist": "^6.3.289",
     "react": "19.2.6",
     "react-day-picker": "9.8.1",
@@ -52,6 +53,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
+    "@gutenye/ocr-models": "1.4.2",
     "@openai/sites-vite-plugin": "0.2.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
