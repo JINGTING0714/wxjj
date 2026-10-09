@@ -10685,11 +10685,30 @@ label:has(> input[type=file])::after { color: inherit; opacity: .95; font-size: 
 .image-download-files span { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
 .image-download-files [data-slot='button'] { flex: none; min-height: 40px; }
 .download-status { padding: 10px; border: 1px solid var(--border); background: var(--background); }
+.screenshot-draft-list { grid-template-columns: minmax(0,1fr); }
+.screenshot-draft-list > div, .screenshot-draft { min-width: 0; max-width: 100%; }
+.screenshot-draft { grid-template-columns: minmax(0,1fr); }
+.screenshot-draft label { min-width: 0; max-width: 100%; }
+.screenshot-draft textarea { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; max-width: 100%; box-sizing: border-box; }
+.screenshot-preview-tools { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; background: var(--card); color: var(--foreground); padding: 6px; }
+.screenshot-preview-tools strong { flex-basis: 100%; }
+.screenshot-preview .example-preview-trigger { display: block; width: 100%; height: auto; }
+.screenshot-preview .example-preview-trigger img { width: 100%; height: auto; object-fit: contain; }
+[data-slot='button'][data-variant='default']:not(:disabled) { background: var(--primary) !important; color: var(--primary-foreground) !important; }
+[data-slot='button'][data-variant='default'] :is(span,strong,small) { color: inherit !important; }
 [data-slot='button'][data-variant='outline'], [data-slot='button'][data-variant='ghost'] { color: var(--foreground); }
 [data-slot='button'][data-variant='default'] { color: var(--primary-foreground); }
-[data-slot='button']:disabled { opacity: 1; background: var(--muted); color: var(--muted-foreground); border-color: var(--border); box-shadow: none; }
+[data-slot='button']:disabled { opacity: 1; background: var(--muted); color: var(--foreground); border-color: var(--border); box-shadow: none; }
 
 @media (max-width: 780px) {
+  .app-shell.editor-active .watermark-video-workspace:not([hidden]) { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: hidden; }
+  .app-shell.editor-active .mobile-workspace :is(.transform-layer-list > article,.collage-drop,.source-file-list,.workspace-detail-summary,.number-style-grid,.collage-quick-fields,.preview-edit-tools > div) { background: var(--card) !important; color: var(--foreground) !important; border-color: var(--border) !important; }
+  .app-shell.editor-active .mobile-workspace :is(.layer-select,.layer-order-actions button,.collage-drop,.workspace-detail-summary,.preview-edit-tools button) { background: var(--background) !important; color: var(--foreground) !important; border-color: var(--border) !important; }
+  .app-shell.editor-active .mobile-workspace .layer-select strong { color: inherit !important; }
+  .app-shell.editor-active .mobile-workspace .collage-preview-frame .preview-heading :is(p,span) { color: #f7f3fc !important; }
+  .watermark-input-panel[data-touch-handles='move'] :is(.transform-handle,.rotation-handle,.stretch-handle) { display: none !important; pointer-events: none !important; }
+  .watermark-input-panel[data-touch-handles='transform'] .stretch-handle { display: none !important; pointer-events: none !important; }
+  .watermark-input-panel .locked-layer-unlock { display: none !important; }
   .app-shell:not(.editor-active) { padding-bottom: calc(180px + env(safe-area-inset-bottom)); }
   .app-shell:not(.editor-active) .content-frame:not([hidden]) { height: auto; min-height: 0; overflow: visible; }
   .app-shell:not(.editor-active) .studio-page { overflow: visible; }
@@ -10753,7 +10772,8 @@ label:has(> input[type=file])::after { color: inherit; opacity: .95; font-size: 
   .app-shell.editor-active .workshop-tabs { flex: none; margin: 0; padding: 6px 10px; background: var(--card); }
   .app-shell.editor-active .video-workshop:not([hidden]) { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: hidden; }
   .app-shell.editor-active .video-workshop > .workshop-fieldset { display: flex; flex: 1 1 0; min-height: 0; }
-  .app-shell.editor-active .video-workshop > p { display: none; }
+  .app-shell.editor-active .video-workshop > h2, .app-shell.editor-active .video-workshop > p:not(.error-banner) { display: none !important; }
+  .app-shell.editor-active .video-workshop > .error-banner { display: block; flex: none; max-height: 80px; overflow: auto; }
   .app-shell.editor-active .collage-batch-toolbar { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 10px; margin: 0; }
   .app-shell.editor-active .collage-batch-toolbar > label { display: flex; align-items: center; flex: 1; min-width: 0; gap: 5px; font-size: 12px; }
   .app-shell.editor-active .collage-batch-toolbar .sale-round-entry { display: none; }
@@ -10805,4 +10825,27 @@ label:has(> input[type=file])::after { color: inherit; opacity: .95; font-size: 
   .png-cleaner-workspace .mobile-workspace-primary-action { position: relative; bottom: auto; margin: 12px 0 0; padding: 10px !important; background: var(--card); }
   .png-cleaner-workspace :is(h2,h3,strong,label) { color: var(--foreground); }
   .png-cleaner-workspace .png-cleaner-drop { color: var(--foreground); }
+}
+
+@media (max-width: 780px) {
+  .screenshot-import-dialog .screenshot-import-grid[data-review='true'] { display: grid !important; grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(90px,.42fr) minmax(140px,.58fr); height: max(260px,calc(var(--prism-viewport-height,100dvh) - 160px)); min-height: 0; gap: 10px; position: relative; background: var(--card); }
+  .screenshot-import-dialog .screenshot-import-grid[data-review='true'] > .screenshot-preview { height: 100%; min-height: 0; max-height: none; overflow: auto; }
+  .screenshot-import-dialog .screenshot-preview { touch-action: pan-x pan-y; }
+  .screenshot-import-dialog .screenshot-import-grid[data-review='true'] > .screenshot-drafts { min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-y; }
+  .screenshot-preview > strong { display: block; position: sticky; top: 0; z-index: 1; background: var(--card); color: var(--foreground); padding: 6px; }
+  .sales-review-workspace { display: grid; grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(85px,.45fr) minmax(130px,.55fr); height: max(240px,calc(var(--prism-viewport-height,100dvh) - 115px)); align-items: stretch; position: relative; gap: 10px; }
+  .sales-review-workspace > .sales-review-original { position: relative; top: auto; display: flex; flex-direction: column; min-height: 0; overflow: auto; background: var(--card); }
+  .sales-review-original .screenshot-review-viewer { flex: 1 1 0; min-height: 0; max-height: none; overflow: hidden; }
+  .sales-review-original .screenshot-review-scroll { max-height: none; height: 100%; min-height: 0; overscroll-behavior: contain; touch-action: pan-y; }
+  .sales-review-original .sales-screenshots { flex: none; max-height: 70px; margin: 4px 0 0; }
+  .sales-review-original .sales-screenshots .example-preview-trigger { display: none; }
+  .sales-review-original .sales-screenshots article { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; flex-basis: 200px; }
+  .sales-review-original .sales-screenshots article span { display: none; }
+  .sales-review-workspace > .sales-review-results { min-height: 0; max-height: none; height: 100%; overflow: auto; overscroll-behavior: contain; touch-action: pan-y; background: var(--card); }
+  .sales-review-workspace:has(:is(input,textarea,select):focus) :is(.sales-screenshots,.screenshot-review-tools strong,.screenshot-review-viewer > small) { display: none; }
+  .app-shell .mobile-workspace label.mini-file, .app-shell .mobile-workspace label.mini-file :is(span,strong,small,svg) { color: var(--primary-foreground) !important; }
+  .app-shell .mobile-workspace [data-slot='button'][data-variant='default']:not(:disabled) { color: var(--primary-foreground) !important; background: var(--primary) !important; }
+  .app-shell .mobile-workspace [data-slot='button'][data-variant='default']:not(:disabled) :is(span,strong,small) { color: var(--primary-foreground) !important; }
+  .app-shell.editor-active .mobile-preview-mode-bar { display: flex; flex: none; gap: 6px; flex-wrap: wrap; padding: 0 0 6px; }
+  .app-shell.editor-active :is(.mobile-preview-mode-bar,.mobile-editor-topbar) [data-slot='button'][data-variant='outline'] { background: #211b27 !important; color: #f7f3fc !important; border-color: #62566f; }
 }

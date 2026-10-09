@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Upload,
 } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { SectionHead } from '@/components/prism/studio-shared';
 import { useVault } from '@/components/prism/vault-provider';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +36,14 @@ export function SecurityPanel() {
   const [notice, setNotice] = useState('');
   const [lastBackup, setLastBackup] = useState('');
   const [exportProgress, setExportProgress] = useState('');
+  const [importProgress, setImportProgress] = useState('');
+  const [importSeconds, setImportSeconds] = useState(0);
+  const importController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!importController.current) return;
+    const start = Date.now(), timer = setInterval(() => setImportSeconds(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [!!importProgress]);
   const [readyBackup, setReadyBackup] = useState<{ blob: Blob; name: string } | null>(null);
   const [backup, setBackup] = useState<File>();
   const [info, setInfo] = useState<BackupInfo>();
@@ -297,13 +305,18 @@ export function SecurityPanel() {
                   className="vault-password-form restore-form"
                   onSubmit={(e) => {
                     e.preventDefault();
+                    const submittedPassword = String(new FormData(e.currentTarget).get('prism-backup-password') ?? backupPassword);
                     void run(async () => {
                       if (vault.status !== 'uninitialized' && !replace)
                         throw new Error('请先确认完整恢复会替换本机保险库');
+                      const controller = new AbortController(); importController.current = controller;
+                      setImportSeconds(0); setImportProgress('正在准备恢复…');
+                      try {
                       const result = await vault.importBackup(
                         backup,
-                        backupPassword,
+                        submittedPassword,
                         useRecovery,
+                        { signal: controller.signal, onProgress: progress => setImportProgress(`${progress.stage} · ${progress.current} / ${progress.total} 项`) },
                       );
                       setBackup(undefined);
                       setInfo(undefined);
@@ -312,6 +325,7 @@ export function SecurityPanel() {
                       setNotice(
                         `完整恢复成功，已自动解锁：${result.records} 条记录、${result.files} 个文件。库分类、图片与已保存设置已恢复。`,
                       );
+                      } finally { importController.current = null; setImportProgress(''); }
                     });
                   }}
                 >
@@ -321,9 +335,7 @@ export function SecurityPanel() {
                     {info.records} 条加密记录 · {info.files} 个文件 ·{' '}
                     {(info.bytes / 1024 / 1024).toFixed(2)} MB
                     <br />
-                    {info.verified
-                      ? '文件完整性校验已通过'
-                      : '旧版备份：继续后将逐项验证解密'}
+                    {info.verified ? '文件完整性校验已通过' : '目录已读取。开始恢复后将逐项校验完整内容；原图和视频保持原样。'}
                     {info.exportedAt &&
                       ` · ${new Date(info.exportedAt).toLocaleString()}`}
                   </p>
@@ -365,6 +377,7 @@ export function SecurityPanel() {
                   <Button disabled={busy} type="submit">
                     {busy ? '正在验证全部内容…' : '验证并完整恢复'}
                   </Button>
+                  {importProgress && <div className="backup-progress" role="status"><strong>{importProgress}</strong><p>已用 {importSeconds} 秒。大备份会分项处理，请保持页面打开；完成前当前资料保留。</p><Button variant="outline" type="button" onClick={() => { importController.current?.abort(); setImportProgress('正在取消，保留当前保险库…'); }}>取消恢复</Button></div>}
                 </form>
               )}
             </article>

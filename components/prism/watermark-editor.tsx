@@ -224,7 +224,7 @@ export function WatermarkEditor({
   const wasVisible = useRef(false);
   const [active, setActive] = useState('');
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [mobileTouchEditing, setMobileTouchEditing] = useState(false);
+  const [mobileTransformHandles, setMobileTransformHandles] = useState(false);
   const [mobilePreviewFullscreen, setMobilePreviewFullscreen] = useState(false);
   useEffect(() => { setMobilePreviewFullscreen(false); }, [mobilePanel]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -296,7 +296,7 @@ export function WatermarkEditor({
   }, [composition, layers, source]);
   // Direct manipulation is a mode, not a drawer. Closing the action tray must
   // never turn off the canvas gesture the user just enabled.
-  const mobileDirectEditing = mobileTouchEditing;
+  const mobileDirectEditing = true;
   useEffect(() => {
     if (!mobilePreviewFullscreen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -554,7 +554,7 @@ export function WatermarkEditor({
       py: event.clientY,
       angle: Math.atan2(event.clientY - cy, event.clientX - cx),
       distance: Math.max(1, Math.hypot(event.clientX - cx, event.clientY - cy)),
-      mode: (event.target as HTMLElement).dataset.action || 'move',
+      mode: event.pointerType === 'touch' && !mobileTransformHandles ? 'move' : (event.target as HTMLElement).dataset.action || 'move',
       element: event.currentTarget,
       next: {},
       layer,
@@ -678,9 +678,11 @@ export function WatermarkEditor({
       <section
         className={`watermark-input-panel mobile-workspace-preview ${mobilePreviewFullscreen ? 'is-mobile-fullscreen' : ''}`}
         data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
+        data-touch-handles={mobileTransformHandles ? 'transform' : 'move'}
         data-fullscreen={mobilePreviewFullscreen ? 'true' : 'false'}
       >
         <h3>第一张样本 · 自由摆放</h3>
+        {base && <div className="mobile-preview-mode-bar mobile-workspace-only" role="toolbar" aria-label="预览操作方式"><Button size="sm" variant={mobileTransformHandles ? 'outline' : 'default'} onClick={() => setMobileTransformHandles(false)}>移动水印</Button><Button size="sm" variant={mobileTransformHandles ? 'default' : 'outline'} onClick={() => setMobileTransformHandles(true)}>缩放 / 旋转</Button><Button size="sm" variant="outline" onClick={() => setMobilePreviewFullscreen(value => !value)}>{mobilePreviewFullscreen ? '退出全屏' : '放大预览'}</Button></div>}
         <div className="mobile-editor-topbar mobile-workspace-only">
           <Button
             aria-label="退出沉浸编辑"
@@ -709,6 +711,16 @@ export function WatermarkEditor({
           className="watermark-stage dom-watermark-stage"
           ref={stage}
           data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
+          onPointerDown={event => {
+            if (event.pointerType !== 'touch' || mobileTransformHandles || !selected || selected.locked || selected.id === SOURCE_LAYER_ID) return;
+            if (event.target instanceof Element && event.target.closest('.watermark-dom-layer:not(.is-locked)')) return;
+            // A selected tiny watermark can be moved by dragging the preview,
+            // without needing to land a finger on its few visible pixels.
+            begin(event, selected);
+          }}
+          onPointerMove={event => { if (drag.current?.element === event.currentTarget) move(event); }}
+          onPointerUp={event => { if (drag.current?.element === event.currentTarget) end(event); }}
+          onPointerCancel={event => { if (drag.current?.element === event.currentTarget) end(event); }}
         >
           {base && sourceUrl ? (
             <div
@@ -977,13 +989,13 @@ export function WatermarkEditor({
             </Button>
             <Button
               disabled={disabled || !base}
-              onClick={() => setMobileTouchEditing((editing) => !editing)}
+              onClick={() => setMobileTransformHandles((show) => !show)}
               size="sm"
               type="button"
-              variant={mobileDirectEditing ? 'default' : 'outline'}
+              variant={mobileTransformHandles ? 'default' : 'outline'}
             >
-              {mobileDirectEditing ? <Check /> : <Move />}
-              {mobileDirectEditing ? '完成移动' : '移动 / 缩放'}
+              {mobileTransformHandles ? <Check /> : <Move />}
+              {mobileTransformHandles ? '返回移动' : '缩放 / 旋转'}
             </Button>
             <Button
               aria-label={mobilePreviewFullscreen ? '退出全屏预览' : '全屏预览'}
@@ -998,9 +1010,7 @@ export function WatermarkEditor({
             </Button>
           </div>
           <span>
-            {mobileDirectEditing
-              ? '直接拖动图层；四角缩放，顶部圆点旋转。'
-              : '点击“移动 / 缩放”后可直接操作预览。'}
+            {mobileTransformHandles ? '四角等比缩放，顶部旋转；完成后返回移动，避免误拉伸。' : '直接拖动水印即可移动。需要改大小时，再点“缩放 / 旋转”。'}
           </span>
         </div>
         <output className="watermark-alignment-status">

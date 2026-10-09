@@ -382,6 +382,8 @@ export default function Home() {
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
   const visitedLibraries = useRef(new Set<ViewId>());
+  const librarySession = useRef(vault.session);
+  if (librarySession.current !== vault.session) { visitedLibraries.current.clear(); librarySession.current = vault.session; }
   visitedLibraries.current.add(activeView);
   const flowDrag = useRef({ startX: 0, left: 0, down: false, moved: false });
   const globalQuery = '';
@@ -759,7 +761,7 @@ export default function Home() {
                 className="content-frame studio-frame"
                 hidden={activeView !== 'gallery'}
               >
-                <GalleryPanel onOpenCollage={() => setActiveView('collage')} />
+                {visitedLibraries.current.has('gallery') && <GalleryPanel onOpenCollage={() => setActiveView('collage')} />}
               </div>
               <div
                 className="content-frame studio-frame"

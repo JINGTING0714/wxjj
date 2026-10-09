@@ -25,7 +25,7 @@ import { VideoEngineSession } from './video-engine';
 import { nativeWatermarkVideo, videoMayHaveAlpha } from './video-native';
 import { videoProgressDetail } from './video-progress';
 
-async function openVideo(file: File, signal?: AbortSignal) {
+async function openVideo(file: File, signal?: AbortSignal, requireDuration = true) {
   signal?.throwIfAborted();
   const video = document.createElement('video');
   const url = URL.createObjectURL(file);
@@ -72,20 +72,22 @@ async function openVideo(file: File, signal?: AbortSignal) {
       };
       video.src = url;
     });
-    if (
-      !video.videoWidth ||
-      !video.videoHeight ||
-      !Number.isFinite(video.duration)
-    )
+    let duration = video.duration;
+    if (requireDuration && !Number.isFinite(duration)) {
+      const { Input, BlobSource, ALL_FORMATS } = await import('mediabunny');
+      const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+      try { duration = await input.computeDuration(); signal?.throwIfAborted(); } finally { input.dispose(); }
+    }
+    if (!video.videoWidth || !video.videoHeight || (requireDuration && (!Number.isFinite(duration) || duration <= 0)))
       throw new Error('视频尺寸或时长无法读取');
-    return { video, dispose };
+    return { video, dispose, duration };
   } catch (e) {
     dispose();
     throw e;
   }
 }
 export async function videoFirstFrame(file: File) {
-  const { video, dispose } = await openVideo(file);
+  const { video, dispose } = await openVideo(file, undefined, false);
   try {
     const canvas = document.createElement('canvas');
     const scale = Math.min(
@@ -124,7 +126,7 @@ export async function watermarkVideo(
     throw new Error(
       '本地视频单文件上限为 512 MB；请先分段，避免浏览器内存不足。',
     );
-  const { video, dispose } = await openVideo(file, signal);
+  const { video, dispose, duration } = await openVideo(file, signal);
   const engine = batchEngine ?? new VideoEngineSession();
   let ffmpeg: FFmpeg | undefined;
   const abort = () => engine.dispose();
@@ -134,7 +136,6 @@ export async function watermarkVideo(
     phase = '准备视频',
     encodingStarted = 0,
     encodingPhase = '';
-  const duration = video.duration;
   const emit = () =>
     notify(
       lastValue,
@@ -239,7 +240,7 @@ export async function watermarkVideo(
     const plan = videoExportPlan(
       video.videoWidth,
       video.videoHeight,
-      video.duration,
+      duration,
       c,
       options,
       hasTransparency,

@@ -57,7 +57,7 @@ export function messagesFromOcr(pages: OcrPage[]): SaleMessage[] {
       if (!isDate && !/^20\d{5,}$/.test(body) && numericMessage.test(body) && numbers.length) {
         const inlineBuyer = plausibleBuyer(body);
         const text = body.replace(/^[^\d]*/, '').trim() || body;
-        messages.push({ id: crypto.randomUUID(), screenshot, order, buyer: inlineBuyer || buyer, time, text, ocrConfidence: Math.min(headerConfidence, geometry?.confidence ?? 0) });
+        messages.push({ id: crypto.randomUUID(), screenshot, order, buyer: inlineBuyer || buyer, time, text, ocrConfidence: Math.min(headerConfidence, geometry?.confidence ?? 0), ocrTop: geometry?.top });
       } else if (!dated && !timeOnly.test(raw) && !isDate && !/\d/.test(raw) && !/^(?:微信|聊天记录|昨天|今天|群聊的聊天记录)$/i.test(raw)) {
         const nextBuyer = plausibleBuyer(raw);
         if (nextBuyer) buyer = nextBuyer;

@@ -970,7 +970,7 @@ export function WatermarkPanel({
             ))}
         </div>
       </div>
-      <div hidden={state.tab !== 'video'}>
+      <div className="watermark-video-workspace" hidden={state.tab !== 'video'}>
         <VideoWatermarkPanel />
       </div>
     </div>

@@ -19,7 +19,7 @@ type EncryptedRecord = {
   id: string;
   scope: string;
   iv: string;
-  payload: ArrayBuffer;
+  payload: ArrayBuffer | Blob;
   updatedAt: string;
 };
 type EncryptedBlobRecord = EncryptedRecord & {
@@ -177,11 +177,11 @@ async function encrypt(key: CryptoKey, bytes: ArrayBuffer) {
     payload: await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes),
   };
 }
-async function decrypt(key: CryptoKey, iv: string, bytes: ArrayBuffer) {
+async function decrypt(key: CryptoKey, iv: string, bytes: ArrayBuffer | Blob) {
   return crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: buffer(unb64(iv)) },
     key,
-    bytes,
+    bytes instanceof Blob ? await bytes.arrayBuffer() : bytes,
   );
 }
 async function envelope(key: CryptoKey, bytes: ArrayBuffer): Promise<Envelope> {
@@ -452,7 +452,11 @@ export async function loadEncryptedBlobs(
   scope: string,
 ): Promise<DecryptedBlob[]> {
   const result: DecryptedBlob[] = [];
-  for (const r of await loadScope<EncryptedBlobRecord>('blobs', scope)) {
+  const database = await db();
+  try {
+  const ids = await request(database.transaction('blobs').objectStore('blobs').index('scope').getAllKeys(scope));
+  for (const id of ids) {
+    const r = await request(database.transaction('blobs').objectStore('blobs').get(id)) as EncryptedBlobRecord;
     const meta = r.privateMeta
       ? JSON.parse(
           new TextDecoder().decode(await openEnvelope(key, r.privateMeta)),
@@ -468,6 +472,7 @@ export async function loadEncryptedBlobs(
       updatedAt: r.updatedAt,
     });
   }
+  } finally { database.close(); }
   return result;
 }
 export type BackupProgress = { stage: string; current: number; total: number };
@@ -476,7 +481,7 @@ export type VaultExportOptions = {
   onProgress?: (progress: BackupProgress) => void;
   assertSession?: () => void;
 };
-async function hash(bytes: ArrayBuffer) { return b64(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))); }
+async function hash(bytes: ArrayBuffer | Blob) { return b64(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes instanceof Blob ? await bytes.arrayBuffer() : bytes))); }
 async function validateRecord(record: EncryptedRecord, key: CryptoKey, files: Map<string, string>) {
   let value: { id: string; data?: unknown };
   try {
@@ -533,7 +538,8 @@ export async function exportVaultFile(key: CryptoKey, options: VaultExportOption
         const row = await request(database.transaction(kind).objectStore(kind).get(planned.id)) as EncryptedBlobRecord;
         if (!row || row.scope !== planned.scope || row.iv !== planned.revision) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
         if (kind === 'records') await validateRecord(row, key, fileScopes); else await validateBlob(row, key);
-        const { payload, ...record } = row, path = `${kind}/${index}.bin`;
+        const { payload: stored, ...record } = row, path = `${kind}/${index}.bin`;
+        const payload = stored instanceof Blob ? await stored.arrayBuffer() : stored;
         const sha256 = await hash(payload); await zip.add(path, new Uint8Array(payload));
         entries[kind].push({ ...record, path, size: payload.byteLength, sha256 }); current++;
         options.onProgress?.({ stage: '正在校验并写入备份', current, total });
@@ -585,19 +591,35 @@ async function parseBackup(file: File): Promise<BackupSource> {
     };
   } catch (reason) { throw new Error(`备份结构或完整性校验失败，没有修改本机数据。${reason instanceof Error ? reason.message : ''}`); }
 }
-export async function inspectVaultFile(file: File) {
+export async function inspectVaultFile(file: File, options?: { metadataOnly?: boolean }) {
   const source = await parseBackup(file);
+  if (options?.metadataOnly) return { ...source.info, verified: false };
   for (const entry of [...source.records, ...source.blobs]) await source.read(entry);
   return source.info;
 }
-export async function importVaultFile(file: File, password: string, options?: { recovery?: boolean; assertSession?: () => void }) {
+export type VaultImportOptions = { recovery?: boolean; assertSession?: () => void; onProgress?: (progress: BackupProgress) => void; signal?: AbortSignal };
+export async function checkRestoreSpace(bytes: number, estimate: { quota?: number; usage?: number }) {
+  if (estimate.quota === undefined || estimate.usage === undefined) return;
+  const available = Math.max(0, estimate.quota - estimate.usage), required = bytes * 1.1 + Math.min(64 * 1024 * 1024, Math.max(1024 * 1024, bytes * .05));
+  if (available < required) throw new Error(`手机或浏览器可用网站存储空间不足：约 ${(available / 1024 ** 3).toFixed(2)} GB 可用，本次恢复需约 ${(required / 1024 ** 3).toFixed(2)} GB 暂存空间。请保留当前保险库，先释放设备上的其他文件，或换有足够空间的浏览器、设备导入。`);
+}
+export async function importVaultFile(file: File, password: string, options?: VaultImportOptions) {
+  const check = () => { if (options?.signal?.aborted) throw new Error('已取消恢复，当前保险库保留。'); options?.assertSession?.(); };
+  check(); options?.onProgress?.({ stage: '正在读取备份目录', current: 0, total: 1 });
   const source = await parseBackup(file), meta = source.meta;
+  check(); options?.onProgress?.({ stage: '正在验证密码', current: 0, total: 1 });
   let key: CryptoKey;
   if (options?.recovery) {
     if (!meta.recovery) throw new Error('该备份还没有恢复密钥，请使用原密码。');
     try { key = await rawKey(await openEnvelope(await rawKey(recoveryBytes(password)), meta.recovery)); await verify(key, meta); }
     catch { throw new Error('恢复密钥不匹配，没有修改本机数据。'); }
   } else key = await passwordKey(password, meta);
+  check();
+  if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
+    const estimate = await navigator.storage.estimate().catch(() => ({}));
+    await checkRestoreSpace(file.size, estimate);
+    check();
+  }
   const database = await db(true), job = crypto.randomUUID();
   const cleanup = async () => {
     const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
@@ -608,13 +630,18 @@ export async function importVaultFile(file: File, password: string, options?: { 
   try {
     const files = new Map(source.blobs.map(entry => [entry.id, entry.scope]));
     // Authenticate and stage one file at a time. The live vault is untouched.
+    let current = 0; const total = source.records.length + source.blobs.length;
     for (const kind of ['records', 'blobs'] as const) for (const [index, entry] of source[kind].entries()) {
-      options?.assertSession?.(); const record = await source.read(entry);
+      check(); options?.onProgress?.({ stage: '正在校验并暂存', current, total }); const record = await source.read(entry);
       if (kind === 'records') await validateRecord(record, key, files); else await validateBlob(record, key);
+      check();
       const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
-      tx.objectStore('backup-staging').put({ id: `${job}:${kind}:${index}`, job, kind, value: record }); await complete;
+      // Blob handles keep the final atomic transaction from buffering gigabytes of ArrayBuffers.
+      const value = kind === 'blobs' ? { ...record, payload: new Blob([record.payload]) } : record;
+      tx.objectStore('backup-staging').put({ id: `${job}:${kind}:${index}`, job, kind, value }); await complete;
+      current++; options?.onProgress?.({ stage: '正在校验并暂存', current, total });
     }
-    options?.assertSession?.();
+    check(); options?.onProgress?.({ stage: '正在完成恢复', current: 0, total });
     // Copy staged encrypted entries in one atomic transaction, with one put in flight.
     const tx = database.transaction([...STORES, 'backup-staging'], 'readwrite'), complete = done(tx);
     let cancellation: unknown;
@@ -623,12 +650,16 @@ export async function importVaultFile(file: File, password: string, options?: { 
     cursor.onsuccess = () => {
       const row = cursor.result; if (!row) return;
       try {
-        options?.assertSession?.();
+        check();
         const put = tx.objectStore(row.value.kind).put(row.value.value);
         put.onsuccess = () => { row.delete(); row.continue(); };
       } catch (reason) { cancellation = reason; tx.abort(); }
     };
     try { await complete; } catch (reason) { throw cancellation || reason; }
+    options?.onProgress?.({ stage: '恢复完成', current: total, total });
     return { key, info: source.info };
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === 'QuotaExceededError') throw new Error('浏览器存储空间不足，恢复已停止。当前保险库保留，请先释放设备上的其他文件，或换有足够空间的浏览器、设备导入。');
+    throw reason;
   } finally { await cleanup().catch(() => {}); database.close(); }
 }

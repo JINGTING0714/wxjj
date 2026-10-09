@@ -13,6 +13,7 @@ import { promptLanguages } from '@/lib/prompt-language';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
 import { useConfirmation } from './use-confirmation';
+import { ExampleImage } from './example-image';
 
 function promptKey(prompt: { english?: string; chinese?: string; unconfirmed?: string }) {
   return JSON.stringify([prompt.english, prompt.chinese, prompt.unconfirmed].map(value => (value || '').trim().replace(/\s+/g, ' ')));
@@ -42,6 +43,14 @@ export function ScreenshotImportDialog({
   const [duplicates, setDuplicates] = useState<Set<string>>(new Set());
   const [existing, setExisting] = useState<StoredLibraryAsset[]>([]);
   const [activeScreenshot, setActiveScreenshot] = useState(0);
+  const [reviewTop, setReviewTop] = useState(0);
+  const [originalZoom, setOriginalZoom] = useState(1);
+  const originalPreview = useRef<HTMLDivElement>(null);
+  const alignOriginal = useCallback(() => {
+    const panel = originalPreview.current, image = panel?.querySelector('img');
+    if (panel && image?.naturalHeight) panel.scrollTop = Math.max(0, reviewTop * image.getBoundingClientRect().height / image.naturalHeight - 36);
+  }, [reviewTop, originalZoom]);
+  useEffect(alignOriginal, [alignOriginal, activeScreenshot]);
   useEffect(() => {
     if (!open || vault.status !== 'unlocked') return;
     void vault.loadRecords<StoredLibraryAsset>('assets:prompt').then(setExisting).catch(() => setExisting([]));
@@ -78,6 +87,7 @@ export function ScreenshotImportDialog({
       const pages = await recognizeLocalImages(files, setMessage);
       const next = draftsFromOcr(pages);
       setRows(next);
+      if (next[0]) { setActiveScreenshot(next[0].screenshot); setReviewTop(next[0].top); }
       setMessage(next.length
         ? `识别完成：${next.length} 条候选。每条需校对并勾选才会保存；模糊小图不会入库。`
         : '识别完成，但没有找到可确认的提示词。请检查截图清晰度、顺序，或点击“手动新增条目”录入；原截图仍保留，可删除后重传。');
@@ -185,8 +195,8 @@ export function ScreenshotImportDialog({
         </div>
         {!!files.length && <SortableList className="screenshot-order" aria-label="截图顺序" disabled={busy} onMove={reorderFiles}>{files.map((file, index) => <div key={`${file.name}-${index}`}><SortHandle disabled={busy} /><button type="button" onClick={() => setActiveScreenshot(index)}>{index + 1}. {file.name}</button><button disabled={index === 0 || busy} onClick={() => moveFile(index, -1)} type="button">上移</button><button disabled={index === files.length - 1 || busy} onClick={() => moveFile(index, 1)} type="button">下移</button><button disabled={busy} onClick={() => removeFile(index)} type="button">删除</button></div>)}</SortableList>}
         {message && <output className="import-warning">{message}</output>}
-        <div className="screenshot-import-grid">
-          <div className="screenshot-preview" data-file-drop-target="prompt-chat-images" tabIndex={0}><strong>原截图 · 第 {activeScreenshot + 1} 张</strong>{urls[activeScreenshot] ? <img alt={`待校对的第 ${activeScreenshot + 1} 张聊天截图`} src={urls[activeScreenshot]} /> : <p>拖入截图或在这里按 Ctrl+V 粘贴图片，再对照原图校对。</p>}</div>
+        <div className="screenshot-import-grid" data-review={rows.length ? 'true' : 'false'}>
+          <div ref={originalPreview} onLoadCapture={alignOriginal} className="screenshot-preview" data-file-drop-target="prompt-chat-images" tabIndex={0}><div className="screenshot-preview-tools"><strong>原截图 · 第 {activeScreenshot + 1} 张 · 同步复核</strong><Button size="sm" variant="outline" disabled={originalZoom <= 1} onClick={() => setOriginalZoom(value => Math.max(1,value - .5))}>缩小原图</Button><Button size="sm" variant="outline" disabled={originalZoom >= 4} onClick={() => setOriginalZoom(value => Math.min(4,value + .5))}>放大原图</Button></div>{urls[activeScreenshot] ? <div style={{ width: `${originalZoom * 100}%` }}><ExampleImage alt={`待校对的第 ${activeScreenshot + 1} 张聊天截图`} src={urls[activeScreenshot]} /></div> : <p>拖入截图或在这里按 Ctrl+V 粘贴图片，再对照原图校对。</p>}</div>
           <div className="screenshot-drafts">
             <div className="screenshot-batch-fields"><label>目标分类<select value={collection} onChange={(event) => setCollection(event.target.value)}><option value="unfiled">未分类</option>{collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>或新建分类<input value={newCollection} onChange={(event) => setNewCollection(event.target.value)} placeholder="输入新分类名称" /></label><label>整批作者（可留空）<input value={author} onChange={(event) => setAuthor(event.target.value)} /></label><label>整批来源<input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label>整批取得方式<input value={acquisition} onChange={(event) => setAcquisition(event.target.value)} /></label><label>整批标签（逗号分隔）<input value={tags} onChange={(event) => setTags(event.target.value)} /></label></div>
             <div className="screenshot-import-toolbar">
@@ -195,7 +205,7 @@ export function ScreenshotImportDialog({
             </div>
             <p className="privacy-hint">填写整批信息后开始识别，再依次向下校对。拖动条目左上角可调整位置。</p>
             <SortableList className="screenshot-draft-list" disabled={busy} onMove={(from, to) => setRows(current => moveListItem(current, from, to))}>
-              {rows.map((row, index) => <div key={row.id}><ScreenshotDraftCard row={row} index={index} last={index === rows.length - 1} collections={collections} duplicate={known.has(promptKey(row))} allowDuplicate={duplicates.has(row.id)} actions={draftActions} /></div>)}
+              {rows.map((row, index) => <div key={row.id} onFocusCapture={() => { setActiveScreenshot(row.screenshot); setReviewTop(row.top); }}><ScreenshotDraftCard row={row} index={index} last={index === rows.length - 1} collections={collections} duplicate={known.has(promptKey(row))} allowDuplicate={duplicates.has(row.id)} actions={draftActions} /></div>)}
             </SortableList>
             {!!rows.length && <div className="screenshot-bulk-check">
               <Button disabled={busy} variant="outline" onClick={() => { setRows(current => current.map(row => row.saved ? row : { ...row, include: true })); setMessage('已勾选全部待保存条目，请确认已对照原图完成校对。'); }}>全部勾选校对</Button>
@@ -205,7 +215,7 @@ export function ScreenshotImportDialog({
             </div>}
           </div>
         </div>
-        <div className="screenshot-import-footer"><span>仅勾选且校对过的条目入库；模糊小图不会成为例图。</span><Button disabled={busy || !rows.some((row) => row.include && !row.saved)} onClick={() => void save()}>保存已确认条目</Button></div>
+        <div className="screenshot-import-footer"><span>仅勾选且校对过的条目入库；模糊小图不会成为例图。</span><Button variant="outline" disabled={busy} onClick={() => setOpen(false)}>关闭导入窗口</Button><Button disabled={busy || !rows.some((row) => row.include && !row.saved)} onClick={() => void save()}>保存已确认条目</Button></div>
       </DialogContent>
     </Dialog>
   </>;

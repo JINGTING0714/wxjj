@@ -111,27 +111,43 @@ export async function recognizeLocalImages(
             if (words.length !== line.words.length) line.text = words.map(word => word.text).join(' ');
           }
           const text = line.text.trim();
-          if (preciseAvailable && text.length >= 5 && (mode === 'prompt' || (line.confidence < 90 && /\p{Script=Han}/u.test(text)))) {
+          const numericCandidate = mode === 'sales' && /^[\d\s.,，。/、;；]+$/.test(text) && !/^20\d{2}/.test(text);
+          if (preciseAvailable && !numericCandidate && text.length >= 2 && (mode === 'prompt' || line.confidence < 95)) {
             const lineCanvas = document.createElement('canvas');
             const top = region.top + line.bbox.y0 / scale;
             const height = (line.bbox.y1 - line.bbox.y0) / scale;
-            const contentLeft = Math.max(0, left + line.bbox.x0 / scale - 2);
             const clock = text.match(/\d{1,2}:\d{2}(?::\d{2})?/)?.[0];
             const clockWord = mode === 'sales' && clock ? line.words.find(word => /\d{1,2}:\d{2}/.test(word.text)) : undefined;
+            const contentLeft = clockWord ? left : Math.max(0, left + line.bbox.x0 / scale - 4);
             const contentRight = Math.min(canvas.width, clockWord ? left + clockWord.bbox.x0 / scale - 4 : left + line.bbox.x1 / scale + 2);
-            lineCanvas.width = Math.ceil(contentRight - contentLeft); lineCanvas.height = Math.ceil(height + 8);
+            lineCanvas.width = Math.ceil(contentRight - contentLeft); lineCanvas.height = Math.ceil(height + 4);
             const lineContext = lineCanvas.getContext('2d');
             if (lineContext) {
               lineContext.fillStyle = `rgb(${background},${background},${background})`; lineContext.fillRect(0, 0, lineCanvas.width, lineCanvas.height);
-              lineContext.drawImage(canvas, contentLeft, top, contentRight - contentLeft, height, 0, 4, lineCanvas.width, height);
+              lineContext.drawImage(canvas, contentLeft, top, contentRight - contentLeft, height, 0, 2, lineCanvas.width, height);
               try {
                 onProgress?.(`第 ${index + 1} 张 · 正在逐行精细识别文字和标点`);
                 const { preciseText } = await import('./precise-ocr');
-                const precise = await preciseText(lineCanvas);
+                let precise = await preciseText(lineCanvas);
+                // Retry genuinely uncertain rows with normalized polarity and contrast.
+                // This helps gray chat text and punctuation on dark phone screenshots.
+                if (precise.confidence < 95) {
+                  const normalized = lineContext.getImageData(0, 0, lineCanvas.width, lineCanvas.height);
+                  for (let offset = 0; offset < normalized.data.length; offset += 4) {
+                    const luminance = (normalized.data[offset] + normalized.data[offset + 1] + normalized.data[offset + 2]) / 3;
+                    const gray = dark ? 255 - Math.max(0, Math.min(255, (luminance - background - 4) * 1.8)) : Math.max(0, Math.min(255, (luminance - 128) * 1.3 + 128));
+                    normalized.data[offset] = normalized.data[offset + 1] = normalized.data[offset + 2] = gray; normalized.data[offset + 3] = 255;
+                  }
+                  lineContext.putImageData(normalized, 0, 0);
+                  const retry = await preciseText(lineCanvas);
+                  if (retry.confidence > precise.confidence) precise = retry;
+                }
                 if (clockWord && clock && /[\p{L}\p{Script=Han}]/u.test(precise.text)) precise.text = `${precise.text.trim()} ${clock}`;
                 const keepsClock = mode !== 'sales' || !clock || precise.text.includes(clock);
-                if (precise.text.trim() && precise.confidence >= 80 && keepsClock) { line.text = precise.text.trim(); line.confidence = precise.confidence; lineCanvas.width = lineCanvas.height = 0; continue; }
-              } catch { preciseAvailable = false; }
+                const numericRow = mode === 'sales' && /^[\d\s.,，。/、;；]+$/.test(text);
+                const preservesNumbers = !numericRow || precise.text.replace(/\D/g, '') === text.replace(/\D/g, '');
+                if (precise.text.trim() && precise.confidence >= (mode === 'sales' ? Math.max(80, line.confidence) : 80) && keepsClock && preservesNumbers) { line.text = precise.text.trim(); line.confidence = precise.confidence; lineCanvas.width = lineCanvas.height = 0; continue; }
+              } catch (reason) { preciseAvailable = false; onProgress?.(`精细识别暂不可用，正在继续基础识别；结果需仔细校对。${reason instanceof Error ? reason.message : ''}`); }
             }
             lineCanvas.width = lineCanvas.height = 0;
           }
@@ -140,16 +156,28 @@ export async function recognizeLocalImages(
           if (!numeric && !latin) continue;
           const rowCanvas = document.createElement('canvas');
           const pad = 12;
-          rowCanvas.width = cut.width; rowCanvas.height = line.bbox.y1 - line.bbox.y0 + pad * 2;
+          rowCanvas.width = line.bbox.x1 - line.bbox.x0 + pad * 2; rowCanvas.height = line.bbox.y1 - line.bbox.y0 + pad * 2;
           const rowContext = rowCanvas.getContext('2d');
           if (!rowContext) continue;
           rowContext.fillStyle = 'white'; rowContext.fillRect(0, 0, rowCanvas.width, rowCanvas.height);
-          rowContext.drawImage(cut, 0, line.bbox.y0, cut.width, line.bbox.y1 - line.bbox.y0, 0, pad, cut.width, line.bbox.y1 - line.bbox.y0);
+          rowContext.drawImage(cut, line.bbox.x0, line.bbox.y0, line.bbox.x1 - line.bbox.x0, line.bbox.y1 - line.bbox.y0, pad, pad, line.bbox.x1 - line.bbox.x0, line.bbox.y1 - line.bbox.y0);
           await worker.reinitialize('eng');
           await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE, tessedit_char_whitelist: numeric ? '0123456789.,/; ' : '', preserve_interword_spaces: '1' });
           const refined = await worker.recognize(rowCanvas.toDataURL('image/png'));
-          const preservesNumbers = !numeric || (refined.data.text.match(/\d+/g)?.length === text.match(/\d+/g)?.length);
+          const preservesNumbers = !numeric || (refined.data.text.match(/\d+/g)?.length === text.match(/\d+/g)?.length) || refined.data.text.replace(/\D/g, '') === text.replace(/\D/g, '');
           if (refined.data.text.trim() && preservesNumbers) { line.text = refined.data.text.trim(); line.confidence = refined.data.confidence; }
+          if (numeric && preciseAvailable) {
+            try {
+              const { preciseText } = await import('./precise-ocr');
+              const candidate = await preciseText(rowCanvas);
+              // The number specialist establishes the digits. A second model may
+              // improve separators and confidence, but may not change those digits
+              // or merge already separated claims into one number.
+              const sameDigits = candidate.text.replace(/\D/g, '') === line.text.replace(/\D/g, '');
+              const keepsGroups = (candidate.text.match(/\d+/g)?.length || 0) >= (line.text.match(/\d+/g)?.length || 0);
+              if (sameDigits && keepsGroups && /^[\d\s.,，。/、;；]+$/.test(candidate.text.trim()) && candidate.confidence > line.confidence) { line.text = candidate.text.trim(); line.confidence = candidate.confidence; }
+            } catch { preciseAvailable = false; }
+          }
           rowCanvas.width = rowCanvas.height = 0;
         }
         blocks.push(...lines.filter(line => line.text.trim()).map(line => ({ text: line.text.trim(), confidence: line.confidence, top: region.top + line.bbox.y0 / scale, bottom: region.top + line.bbox.y1 / scale, left: left + line.bbox.x0 / scale, right: left + line.bbox.x1 / scale })));

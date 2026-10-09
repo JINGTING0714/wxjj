@@ -76,7 +76,7 @@ function makeDraft(
       else english.push(line);
     } else unconfirmed.push(line);
   }
-  const joined = (values: string[]) => values.join(' ').replace(/--\s+(?=[A-Za-z])/g, '--').replace(/(?<=\S)--(?=(?:ar|chaos|raw|profile|stylize|weird|niji|sref|seed|no|v)\b)/gi, ' --').replace(/\s+([,.;:!?])/g, '$1').trim();
+  const joined = (values: string[]) => values.join(' ').replace(/--\s+(?=[A-Za-z])/g, '--').replace(/--(ar|chaos|stylize|weird|niji|seed|sw|cw|iw|quality|stop|q|v)(?=\d)/gi, '--$1 ').replace(/(?<=\S)--(?=(?:ar|chaos|raw|profile|stylize|weird|niji|sref|seed|no|v)\b)/gi, ' --').replace(/(--ar\s+\d+)\s*[:：]\s*(\d+)/gi, '$1:$2').replace(/\s+([,.;:!?])/g, '$1').trim();
   const versions = (values: string[]) => splitPromptVariants(values.join('\n')).map(value => joined(value.split('\n'))).join('\n\n');
   const result = {
     english: versions(english),

@@ -21,6 +21,7 @@ import {
   inspectVaultFile,
   createRecoveryKey,
   resetVaultPassword,
+  checkRestoreSpace,
 } from '../lib/local-vault';
 
 async function clear() {
@@ -31,6 +32,22 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+void test('large restore checks quota explicitly and metadata selection does not read all payloads', async () => {
+  await assert.rejects(checkRestoreSpace(6 * 1024 ** 3, { quota: 8 * 1024 ** 3, usage: 4 * 1024 ** 3 }), /存储空间不足/);
+  await checkRestoreSpace(6 * 1024 ** 3, { quota: 20 * 1024 ** 3, usage: 2 * 1024 ** 3 });
+  await checkRestoreSpace(6 * 1024 ** 3, {});
+  const key = await createVault('metadata-first-password');
+  await writeVaultBatch(key, { records: [{ scope: 'test', value: { id: 'keep', note: '保留原库' } }] });
+  const zip = await JSZip.loadAsync(await (await exportVaultFile(key)).arrayBuffer());
+  const data = await zip.file('records/0.bin')!.async('uint8array'); data[0] ^= 1;
+  zip.file('records/0.bin', data);
+  const changed = new File([await zip.generateAsync({ type: 'arraybuffer', compression: 'STORE' })], 'changed.prism');
+  const info = await inspectVaultFile(changed, { metadataOnly: true }); assert.equal(info.verified, false); assert.equal(info.records, 1);
+  await assert.rejects(inspectVaultFile(changed), /校验失败/);
+  await assert.rejects(importVaultFile(changed, 'metadata-first-password'), /校验失败/);
+  assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '保留原库');
+});
 
 void test('existing schema v1 unlock and export do not upgrade or scan files, even with an old tab open', async () => {
   const oldConnection = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -87,12 +104,12 @@ void test('failed output and interrupted staged restore preserve the live vault'
   await assert.rejects(exportVaultFile(key, { write: async () => { throw new Error('disk full'); } }), /disk full/);
   assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '不要丢失');
   const backup = new File([await exportVaultFile(key)], 'safe.prism');
-  let checks = 0;
-  await assert.rejects(importVaultFile(backup, 'failure-safe-password', { assertSession: () => { if (++checks >= 2) throw new Error('cancelled staging'); } }), /cancelled staging/);
+  const controller = new AbortController();
+  await assert.rejects(importVaultFile(backup, 'failure-safe-password', { signal: controller.signal, onProgress: status => { if (status.stage === '正在校验并暂存' && status.current === 1) controller.abort(); } }), /已取消恢复/);
   assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '不要丢失');
   assert.equal(await (await loadEncryptedBlobs(key, 'test-image'))[0].blob.text(), 'original');
-  checks = 0;
-  await assert.rejects(importVaultFile(backup, 'failure-safe-password', { assertSession: () => { if (++checks >= 4) throw new Error('cancelled commit'); } }), /cancelled commit/);
+  let committing = false;
+  await assert.rejects(importVaultFile(backup, 'failure-safe-password', { onProgress: status => { if (status.stage === '正在完成恢复') committing = true; }, assertSession: () => { if (committing) throw new Error('cancelled commit'); } }), /cancelled commit/);
   assert.equal((await loadEncryptedRecords<{ note: string }>(key, 'test'))[0].note, '不要丢失');
   assert.equal(await (await loadEncryptedBlobs(key, 'test-image'))[0].blob.text(), 'original');
 });

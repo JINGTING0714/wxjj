@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { draftsFromOcr } from '../lib/prompt-screenshot';
 
+void test('OCR joins numeric flag values without changing prompt wording or profile codes', () => {
+  const text = '中文：安静的林间人像，柔和的自然光影--chaos25 --ar 9：16 --profile abc123 --niji7';
+  const rows = draftsFromOcr([{ text, blocks: [] }]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].chinese, '安静的林间人像，柔和的自然光影 --chaos 25 --ar 9:16 --profile abc123 --niji 7');
+});
+
 void test('a mixed OCR chat bubble produces separate English and Chinese fields', () => {
   const text = 'A dreamy mountain landscape, soft cinematic light --ar 16:9\n中文：梦幻山景，柔和的电影光线';
   const rows = draftsFromOcr([{ text, blocks: [{ text, confidence: 87, top: 10, bottom: 100 }] }]);

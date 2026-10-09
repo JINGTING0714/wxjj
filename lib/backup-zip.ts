@@ -61,7 +61,10 @@ type ZipEntry = { name: string; size: number; packed: number; offset: number; me
 export async function openBackupZip(file: Blob) {
   const read = async (start: number, length: number) => {
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(length) || start < 0 || length < 0 || start + length > file.size) throw new Error('备份文件范围不完整');
-    return new Uint8Array(await file.slice(start, start + length).arrayBuffer());
+    return new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('读取备份文件超时。请先把完整文件保存到设备本地，再重新选择；当前保险库保留。')), 120000);
+      file.slice(start, start + length).arrayBuffer().then(bytes => { clearTimeout(timer); resolve(new Uint8Array(bytes)); }, reason => { clearTimeout(timer); reject(reason); });
+    });
   };
   const tailStart = Math.max(0, file.size - 65557), tail = await read(tailStart, file.size - tailStart), tailView = new DataView(tail.buffer);
   let eocd = -1;

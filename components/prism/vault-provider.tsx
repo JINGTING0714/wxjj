@@ -23,6 +23,7 @@ import {
   type BackupInfo,
   type VaultWrite,
   type VaultExportOptions,
+  type VaultImportOptions,
 } from '@/lib/local-vault';
 
 type VaultStatus = 'loading' | 'uninitialized' | 'locked' | 'unlocked';
@@ -55,6 +56,7 @@ type VaultContextValue = {
     file: File,
     password: string,
     recovery?: boolean,
+    options?: Pick<VaultImportOptions, 'onProgress' | 'signal'>,
   ) => Promise<BackupInfo>;
   generateRecovery: (password: string) => Promise<string>;
   recover: (code: string, password: string) => Promise<void>;
@@ -190,8 +192,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           setBusy(false);
         }
       },
-      inspectBackup: inspectVaultFile,
-      importBackup: async (file, password, recovery) => {
+      inspectBackup: file => inspectVaultFile(file, { metadataOnly: true }),
+      importBackup: async (file, password, recovery, options) => {
         if (live.current.frozen) throw new Error('请等待当前备份任务结束');
         setBusy(true);
         const token = live.current.session;
@@ -199,6 +201,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           await checkpoint();
           live.current.frozen = true;
           const result = await importVaultFile(file, password, {
+            ...options,
             recovery,
             assertSession: () => {
               if (live.current.session !== token)

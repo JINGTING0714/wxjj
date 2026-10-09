@@ -13,13 +13,17 @@ async function preciseText(pixels: ImageData, path: string) {
   }
   const { Tensor } = await import('onnxruntime-web/wasm');
   const model = await prepared;
-  const height = 48, width = Math.max(32, Math.ceil(pixels.width / pixels.height * height / 32) * 32);
+  const height = 48, resizedWidth = Math.max(1, Math.min(4096, Math.ceil(pixels.width / pixels.height * height)));
+  const width = Math.max(32, Math.ceil(resizedWidth / 32) * 32);
   const resized = new OffscreenCanvas(width, height);
   const context = resized.getContext('2d', { willReadFrequently: true });
   if (!context) throw new Error('无法读取截图像素');
   const source = new OffscreenCanvas(pixels.width, pixels.height);
   source.getContext('2d')!.putImageData(pixels, 0, 0);
-  context.drawImage(source, 0, 0, width, height);
+  // Preserve glyph proportions and pad the tensor; stretching to a multiple
+  // of 32 changes narrow punctuation and small Chinese strokes.
+  context.fillStyle = 'rgb(128,128,128)'; context.fillRect(0, 0, width, height);
+  context.drawImage(source, 0, 0, resizedWidth, height);
   const image = context.getImageData(0, 0, width, height).data;
   const input = new Float32Array(3 * width * height), plane = width * height;
   for (let index = 0; index < plane; index++) for (let channel = 0; channel < 3; channel++) input[channel * plane + index] = (image[index * 4 + 2 - channel] / 255 - .5) / .5;
@@ -34,6 +38,7 @@ async function preciseText(pixels: ImageData, path: string) {
     previous = best;
   }
   resized.width = resized.height = 0;
+  source.width = source.height = 0;
   return { text, confidence: characters ? total / characters * 100 : 0 };
 }
 let chain = Promise.resolve();
@@ -44,4 +49,3 @@ self.addEventListener('message', (event: MessageEvent<{ id: number; pixels: Imag
     catch (reason) { self.postMessage({ id, error: reason instanceof Error ? reason.message : '精细识别失败' }); }
   });
 });
-

@@ -9,6 +9,7 @@ export type SaleMessage = {
   text: string;
   ignored?: boolean;
   ocrConfidence?: number;
+  ocrTop?: number;
 };
 
 export type SaleAssignment = {
