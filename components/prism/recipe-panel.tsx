@@ -314,7 +314,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
 
   useEffect(() => {
     const hide = () => setRevealed(new Set());
-    const refresh = () => setRefreshTick((value) => value + 1);
+    const refresh = (event: Event) => { if ((event as CustomEvent<{ kind?: string }>).detail?.kind !== 'prompt') setRefreshTick((value) => value + 1); };
     window.addEventListener('prism:hide-secrets', hide);
     window.addEventListener('prism:assets-changed', refresh);
     return () => {

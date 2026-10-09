@@ -440,9 +440,19 @@ async function loadScope<T>(store: string, scope: string) {
 export async function loadEncryptedRecords<T>(
   key: CryptoKey,
   scope: string,
+  ids?: readonly string[],
 ): Promise<T[]> {
+  let records: EncryptedRecord[];
+  if (ids) {
+    const database = await db();
+    try {
+      const store = database.transaction('records').objectStore('records');
+      records = (await Promise.all([...new Set(ids)].map(id => request(store.get(id)))))
+        .filter((record): record is EncryptedRecord => !!record && record.scope === scope);
+    } finally { database.close(); }
+  } else records = await loadScope<EncryptedRecord>('records', scope);
   return Promise.all(
-    (await loadScope<EncryptedRecord>('records', scope)).map(async (r) =>
+    records.map(async (r) =>
       JSON.parse(new TextDecoder().decode(await decrypt(key, r.iv, r.payload))),
     ),
   );

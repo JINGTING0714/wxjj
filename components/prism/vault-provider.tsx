@@ -40,7 +40,7 @@ type VaultContextValue = {
     value: T,
   ) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
-  loadRecords: <T>(scope: string) => Promise<T[]>;
+  loadRecords: <T>(scope: string, ids?: readonly string[]) => Promise<T[]>;
   saveBlob: (
     scope: string,
     blob: Blob,
@@ -157,9 +157,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       saveRecord: async (scope, record) =>
         write({ records: [{ scope, value: record }] }),
       deleteRecord: async (id) => write({ deleteRecords: [id] }),
-      loadRecords: async <T,>(scope: string) => {
+      loadRecords: async <T,>(scope: string, ids?: readonly string[]) => {
         const { key, check } = access();
-        const result = await loadEncryptedRecords<T>(key, scope);
+        const result = await loadEncryptedRecords<T>(key, scope, ids);
         check();
         return result;
       },

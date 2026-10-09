@@ -1,6 +1,6 @@
 'use client';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useTransition, type FormEvent } from 'react';
 import { copyText } from '@/lib/clipboard';
 import {
   Copy,
@@ -272,6 +272,8 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [active, setActive] = useState('all');
   const [query, setQuery] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expanding, startExpand] = useTransition();
   const [error, setError] = useState('');
   const [editor, setEditor] = useState(false);
   const [editing, setEditing] = useState<Folder | null>(null);
@@ -500,6 +502,8 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
           .includes(search)),
   );
   const selection = useSelection(visible.map((f) => f.id));
+  const expandAll = () => startExpand(() => setExpandedFolders(current => new Set([...current, ...visible.map(folder => folder.id)])));
+  const collapseAll = () => startExpand(() => setExpandedFolders(current => { const next = new Set(current); visible.forEach(folder => next.delete(folder.id)); return next; }));
   return (
     <div className="studio-page profile-page">
       {confirmation.dialog}
@@ -564,6 +568,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
         count={visible.length}
       />
       <RecordHead middle="Profile / 来源" />
+      <div className="profile-expand-actions"><Button variant="outline" disabled={!visible.length || expanding} onClick={expandAll}>{expanding ? '正在展开…' : '一键全部展开'}</Button><Button variant="outline" disabled={!visible.some(folder => expandedFolders.has(folder.id)) || expanding} onClick={collapseAll}>全部收起</Button><span>当前结果 {visible.length} 个文件夹</span></div>
       <BulkActions
         selection={selection}
         disabled={busy}
@@ -585,7 +590,7 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
         {(['N6P', 'N7P', 'unconfirmed'] as const).map(version => <section className="profile-version-group" key={version}>
           <h2>{version === 'unconfirmed' ? '旧资料 · 请编辑选择 N6P / N7P' : version}<small>{visible.filter(folder => resolveProfileVersion(folder) === version).length} 个文件夹</small></h2>
         {visible.filter(folder => resolveProfileVersion(folder) === version).map((folder) => (
-          <details className="profile-record-group" key={folder.id}>
+          <details className="profile-record-group" key={folder.id} open={expandedFolders.has(folder.id)} onToggle={event => { const open = event.currentTarget.open; setExpandedFolders(current => { if (current.has(folder.id) === open) return current; const next = new Set(current); open ? next.add(folder.id) : next.delete(folder.id); return next; }); }}>
             <summary className="profile-folder-summary"><span><strong>{folder.title}</strong> · {folder.codes.length} 个短码 · {collections.find((item) => item.id === folder.collection)?.name || '未分类'}</span><span className="profile-folder-tools" onClick={(event) => event.stopPropagation()}><ProfileCopyDialog title={folder.title} codes={folder.codes} /><Button type="button" variant="outline" onClick={() => open(folder)}>编辑 / 排序</Button></span></summary>
             {folder.codes.map((code, index) => (
               <article className="record-row" key={code.id}>

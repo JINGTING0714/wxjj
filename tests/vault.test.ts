@@ -33,6 +33,23 @@ async function clear() {
 }
 beforeEach(clear);
 
+void test('selected record reads are bounded to requested IDs and scope for batch moves', async () => {
+  const key = await createVault('selected-record-password');
+  await writeVaultBatch(key, { records: [
+    { scope: 'assets:prompt', value: { id: 'p-one', secret: '完整词文一', collection: 'source' } },
+    { scope: 'assets:prompt', value: { id: 'p-two', secret: '完整词文二', collection: 'source' } },
+    { scope: 'assets:profile', value: { id: 'profile-only', secret: '保留其他范围' } },
+  ] });
+  const rows = await loadEncryptedRecords<{ id: string; secret: string; collection: string }>(key, 'assets:prompt', ['p-two', 'profile-only', 'missing', 'p-two']);
+  assert.deepEqual(rows.map(row => row.id), ['p-two']);
+  await writeVaultBatch(key, { records: rows.map(row => ({ scope: 'assets:prompt', value: { ...row, collection: 'target' } })) });
+  const all = await loadEncryptedRecords<{ id: string; secret: string; collection: string }>(key, 'assets:prompt');
+  assert.equal(all.find(row => row.id === 'p-one')?.collection, 'source');
+  assert.equal(all.find(row => row.id === 'p-two')?.collection, 'target');
+  assert.equal(all.find(row => row.id === 'p-two')?.secret, '完整词文二');
+  assert.deepEqual(await loadEncryptedRecords(key, 'assets:prompt', []), []);
+});
+
 void test('large restore checks quota explicitly and metadata selection does not read all payloads', async () => {
   await assert.rejects(checkRestoreSpace(6 * 1024 ** 3, { quota: 8 * 1024 ** 3, usage: 4 * 1024 ** 3 }), /存储空间不足/);
   await checkRestoreSpace(6 * 1024 ** 3, { quota: 20 * 1024 ** 3, usage: 2 * 1024 ** 3 });

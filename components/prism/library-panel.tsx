@@ -24,7 +24,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { FileImportDialog } from './file-import-dialog';
 import { ScreenshotImportDialog } from './screenshot-import-dialog';
@@ -195,6 +195,16 @@ function SimpleLibraryPanel({
   const [localQuery, setLocalQuery] = useState('');
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [assetDialog, setAssetDialog] = useState(false);
+  const editorFormId = useId();
+  const [saving, setSaving] = useState(false);
+  const savingNow = useRef(false);
+  const refreshGeneration = useRef(0);
+  const [libraryNotice, setLibraryNotice] = useState('');
+  const [movingIds, setMovingIds] = useState<string[] | null>(null);
+  const [moveTarget, setMoveTarget] = useState('');
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState('');
+  const moveNow = useRef(false);
   const [editingAsset, setEditingAsset] = useState<LibraryAsset | null>(null);
   const [collectionDialog, setCollectionDialog] = useState<{
     id?: string;
@@ -210,6 +220,7 @@ function SimpleLibraryPanel({
   const [repairStatus, setRepairStatus] = useState('');
   const [exampleFamily, setExampleFamily] = useState<LibraryAsset[]>([]);
   const imageUrls = useRef(new Map<string, string>());
+  const searchTexts = useRef(new WeakMap<LibraryAsset, string>());
   const createdUrls = useRef(new Set<string>());
   const imageUrl = (blob: Blob, key?: string) => {
     if (key && imageUrls.current.has(key)) return imageUrls.current.get(key)!;
@@ -233,6 +244,7 @@ function SimpleLibraryPanel({
   );
 
   const refresh = async () => {
+    const generation = ++refreshGeneration.current;
     if (vault.status !== 'unlocked') {
       setAssets(
         demoAssets
@@ -247,10 +259,12 @@ function SimpleLibraryPanel({
       vault.loadRecords<StoredLibraryAsset>(`assets:${kind}`),
       vault.loadRecords<CollectionRecord>(`collections:${kind}`),
     ]);
+    if (generation !== refreshGeneration.current) return;
     if (kind === 'prompt') {
       const repairs = records.filter(record => !record.promptAutoRepairDisabled).map(record => ({ record, repair: proposePromptRepair(record) })).filter(entry => entry.repair);
       if (repairs.length) {
         const savedHistory = new Set((await vault.loadRecords<{ id: string }>('prompt-repair-history')).map(entry => entry.id));
+        if (generation !== refreshGeneration.current) return;
         await vault.writeBatch({ records: repairs.flatMap(({ record, repair }) => [
           ...(!savedHistory.has(`prompt-language-v3:${record.id}`) ? [{ scope: 'prompt-repair-history', value: { id: `prompt-language-v3:${record.id}`, original: record, repairedAt: new Date().toISOString() } }] : []),
           { scope: 'assets:prompt', value: repair! },
@@ -258,12 +272,14 @@ function SimpleLibraryPanel({
         for (const entry of repairs) records[records.findIndex(record => record.id === entry.record.id)] = entry.repair!;
         setRepairStatus(`已在本机自动整理 ${repairs.length} 条双语字段；原始内容保留为加密副本。`);
       }
+      if (generation !== refreshGeneration.current) return;
       const split = await syncPromptVariants(vault);
       if (split) {
         records.splice(0, records.length, ...await vault.loadRecords<StoredLibraryAsset>('assets:prompt'));
         setRepairStatus(`已将 ${split} 条混合提示词拆成独立版本；每个版本可单独复制，原文保留为加密记录。`);
       }
     }
+    if (generation !== refreshGeneration.current) return;
     const hydrated = await Promise.all(
       records.map(async (record) => {
         const blobs = await vault.loadBlobs(`asset-image:${record.id}`);
@@ -279,6 +295,7 @@ function SimpleLibraryPanel({
         } satisfies LibraryAsset;
       }),
     );
+    if (generation !== refreshGeneration.current) return;
     setAssets(
       hydrated.sort((a, b) =>
         (b.updatedAt || '').localeCompare(a.updatedAt || ''),
@@ -301,13 +318,17 @@ function SimpleLibraryPanel({
     return () => window.removeEventListener('prism:hide-secrets', hide);
   }, []);
   useEffect(() => {
-    const changed = () => { if (vault.status === 'unlocked' && kind === 'moodboard') void refresh().catch(error => setFormError(String(error))); };
+    const changed = (event: Event) => { if ((event as CustomEvent<{ kind?: AssetKind }>).detail?.kind === 'prompt') return; if (vault.status === 'unlocked' && kind === 'moodboard') void refresh().catch(error => setFormError(String(error))); };
     window.addEventListener('prism:assets-changed', changed);
     return () => window.removeEventListener('prism:assets-changed', changed);
   }, [kind, vault.status]);
 
   const query = useDeferredValue(`${globalQuery} ${localQuery}`.trim().toLocaleLowerCase());
-  const searchIndex = useMemo(() => new Map(assets.map(asset => [asset.id, [asset.title, ...Object.values(promptLanguages(asset)), asset.author, asset.origin, asset.acquisition, asset.acquisitionOther, asset.stageType, asset.stageTypeOther, asset.stageNote, asset.note, ...asset.tags, ...(asset.customFields || []).flatMap(field => [field.label, field.value])].join(' ').toLocaleLowerCase()])), [assets]);
+  const searchIndex = useMemo(() => new Map(assets.map(asset => {
+    let text = searchTexts.current.get(asset);
+    if (text === undefined) { text = [asset.title, ...Object.values(promptLanguages(asset)), asset.author, asset.origin, asset.acquisition, asset.acquisitionOther, asset.stageType, asset.stageTypeOther, asset.stageNote, asset.note, ...asset.tags, ...(asset.customFields || []).flatMap(field => [field.label, field.value])].join(' ').toLocaleLowerCase(); searchTexts.current.set(asset, text); }
+    return [asset.id, text];
+  })), [assets]);
   const filtered = useMemo(
     () =>
       assets.filter((asset) => {
@@ -352,6 +373,7 @@ function SimpleLibraryPanel({
 
   const submitAsset = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (savingNow.current) return;
     setFormError('');
     if (vault.status !== 'unlocked') {
       setFormError('请先在“安全与备份”中创建或解锁本机保险库。');
@@ -409,6 +431,10 @@ function SimpleLibraryPanel({
       createdAt: editingAsset?.createdAt || now,
       updatedAt: now,
     };
+    const previousLanguages = editingAsset && kind === 'prompt' ? promptLanguages(editingAsset) : null;
+    const contentChanged = kind === 'prompt' && (!previousLanguages || previousLanguages.english !== languages.promptEnglish || previousLanguages.chinese !== languages.promptChinese || previousLanguages.unconfirmed !== languages.promptUnconfirmed);
+    if (kind === 'prompt' && editingAsset && !contentChanged) Object.assign(record, { secret: editingAsset.secret, promptEnglish: editingAsset.promptEnglish, promptChinese: editingAsset.promptChinese, promptUnconfirmed: editingAsset.promptUnconfirmed });
+    savingNow.current = true; setSaving(true); refreshGeneration.current++;
     try {
       const added = newImageFiles.map((file) => ({
         id: crypto.randomUUID(),
@@ -435,12 +461,35 @@ function SimpleLibraryPanel({
           ? current.map((asset) => (asset.id === id ? hydrated : asset))
           : [hydrated, ...current],
       );
-      if (kind === 'prompt') await refresh();
       setAssetDialog(false);
-      window.dispatchEvent(new CustomEvent('prism:assets-changed'));
+      if (editingAsset && editingAsset.collection !== record.collection) { setActiveCollection(record.collection); selection.clear(); }
+      setLibraryNotice(`已保存“${record.title}”，归入${collections.find(item => item.id === record.collection)?.name || '未分类'}。`);
+      if (contentChanged) void refresh().catch(reason => setFormError(`已保存，列表整理暂未完成：${reason instanceof Error ? reason.message : '请重试刷新'}。`));
+      window.dispatchEvent(new CustomEvent('prism:assets-changed', { detail: { kind } }));
     } catch (reason) {
       setFormError(reason instanceof Error ? reason.message : '资产保存失败');
-    }
+    } finally { savingNow.current = false; setSaving(false); }
+  };
+
+  const moveSelected = async () => {
+    if (!movingIds || !moveTarget || moveNow.current) return;
+    moveNow.current = true; setMoveBusy(true); setMoveError(''); refreshGeneration.current++;
+    try {
+      const [records, latestCollections] = await Promise.all([
+        vault.loadRecords<StoredLibraryAsset>('assets:prompt', movingIds),
+        vault.loadRecords<CollectionRecord>('collections:prompt'),
+      ]);
+      if (records.length !== movingIds.length) throw new Error('部分提示词已经变动，请关闭此窗口后重新选择。');
+      if (moveTarget !== 'unfiled' && !latestCollections.some(item => item.id === moveTarget)) throw new Error('目标库已经变动，请重新选择。');
+      const now = new Date().toISOString(), changed = records.filter(record => record.collection !== moveTarget).map(record => ({ ...record, collection: moveTarget, updatedAt: now }));
+      if (changed.length) await vault.writeBatch({ records: changed.map(value => ({ scope: 'assets:prompt', value })) });
+      const byId = new Map(changed.map(record => [record.id, record]));
+      setAssets(current => current.map(asset => byId.has(asset.id) ? { ...byId.get(asset.id)!, tags: byId.get(asset.id)!.tags || [], customFields: byId.get(asset.id)!.customFields || [], images: asset.images } : asset));
+      setCollections(latestCollections); setActiveCollection(moveTarget); selection.clear(); setMovingIds(null);
+      setLibraryNotice(changed.length ? `已将 ${changed.length} 条提示词移入${latestCollections.find(item => item.id === moveTarget)?.name || '未分类'}。` : '所选提示词已经在目标库中。');
+      window.dispatchEvent(new CustomEvent('prism:assets-changed', { detail: { kind } }));
+    } catch (reason) { setMoveError(reason instanceof Error ? reason.message : '移动失败，请重试。'); }
+    finally { moveNow.current = false; setMoveBusy(false); }
   };
 
   const deleteAsset = async (asset: LibraryAsset) => {
@@ -457,7 +506,7 @@ function SimpleLibraryPanel({
         deleteBlobs: asset.images.map((image) => image.id),
       });
       setAssets((current) => current.filter((item) => item.id !== asset.id));
-      window.dispatchEvent(new CustomEvent('prism:assets-changed'));
+      window.dispatchEvent(new CustomEvent('prism:assets-changed', { detail: { kind } }));
     } catch (reason) {
       setFormError(reason instanceof Error ? reason.message : '删除资产失败');
     }
@@ -600,15 +649,9 @@ function SimpleLibraryPanel({
         </div>
       </div>
 
-      <div className="record-list">
-        <div className="record-head">
-          <span>例图 / 资产</span>
-          <span>{copy.noun} / 来源</span>
-          <span>备注 / 自定义信息</span>
-          <span>操作</span>
-        </div>
         <BulkActions
           selection={selection}
+          disabled={saving || moveBusy || vault.busy}
           onDelete={async (ids) => {
             await vault.writeBatch({
               deleteRecords: ids,
@@ -617,9 +660,18 @@ function SimpleLibraryPanel({
                 .flatMap((a) => a.images.map((i) => i.id)),
             });
             setAssets((current) => current.filter((a) => !ids.includes(a.id)));
-            window.dispatchEvent(new CustomEvent('prism:assets-changed'));
+            window.dispatchEvent(new CustomEvent('prism:assets-changed', { detail: { kind } }));
           }}
         />
+        {kind === 'prompt' && filtered.length > 0 && <div className="library-move-actions"><Button variant="outline" disabled={!selection.selected.size || saving || moveBusy || vault.busy} onClick={() => { setMovingIds([...selection.selected]); setMoveTarget(''); setMoveError(''); }}>移动所选提示词（{selection.selected.size}）</Button></div>}
+        {libraryNotice && <p className="library-action-notice" role="status">{libraryNotice}</p>}
+      <div className="record-list">
+        <div className="record-head">
+          <span>例图 / 资产</span>
+          <span>{copy.noun} / 来源</span>
+          <span>备注 / 自定义信息</span>
+          <span>操作</span>
+        </div>
         {filtered.map((asset) => {
           const isRevealed = revealed.has(asset.id);
           const RecordContainer = 'div';
@@ -751,7 +803,7 @@ function SimpleLibraryPanel({
       </div>
 
       {!!exampleFamily.length && <PromptExampleAssignment family={exampleFamily} onClose={() => setExampleFamily([])} onSaved={() => void refresh()} />}
-      <Dialog onOpenChange={setAssetDialog} open={assetDialog}>
+      <Dialog onOpenChange={open => { if (!saving) setAssetDialog(open); }} open={assetDialog}>
         <DialogContent className="asset-dialog asset-dialog-wide">
           <DialogHeader>
             <DialogTitle>
@@ -764,7 +816,7 @@ function SimpleLibraryPanel({
           </DialogHeader>
           <form
             className="editor-form"
-            id="asset-form"
+            id={editorFormId}
             key={editingAsset?.id || 'new'}
             onSubmit={submitAsset}
           >
@@ -785,6 +837,7 @@ function SimpleLibraryPanel({
                   (activeCollection === 'all' ? 'unfiled' : activeCollection)
                 }
                 name="collection"
+                aria-label="归属库"
               >
                 <option value="unfiled">未分类</option>
                 {collections.map((collection) => (
@@ -982,21 +1035,23 @@ function SimpleLibraryPanel({
           <DialogFooter>
             {kind === 'prompt' && editingAsset && assets.some(asset => asset.id === editingAsset.id) && <Button type="button" variant="outline" onClick={async () => {
               const original = editingAsset;
-              const form = new FormData(document.getElementById('asset-form') as HTMLFormElement);
+              const form = new FormData(document.getElementById(editorFormId) as HTMLFormElement);
               setEditingAsset({ ...original, id: prismId('prompt-version'), title: `${String(form.get('title') || original.title)} · 新版本`, promptFamilyId: original.promptFamilyId || original.id, promptVariantLabel: '新版本', promptExamplePoolScope: undefined, promptExampleReviewRequired: false, promptEnglish: String(form.get('promptEnglish') || ''), promptChinese: String(form.get('promptChinese') || ''), promptUnconfirmed: String(form.get('promptUnconfirmed') || ''), note: String(form.get('note') || ''), customFields: normalizeCustomFields(customFields), createdAt: undefined, images: [] });
               setExistingImages([]); setRemovedImageIds([]);
               setNewImageFiles([]);
               setFormError('这是独立的新版本。请修改词文并上传这个版本对应的例图，原版本会保留。');
             }}>新增独立版本</Button>}
-            <Button onClick={() => setAssetDialog(false)} variant="ghost">
+            <Button disabled={saving} onClick={() => setAssetDialog(false)} variant="ghost">
               取消
             </Button>
-            <Button form="asset-form" type="submit">
-              <LockKeyhole /> 加密保存
+            <Button disabled={saving || vault.busy} form={editorFormId} type="submit">
+              <LockKeyhole /> {saving ? '正在保存…' : '加密保存'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!movingIds} onOpenChange={open => { if (!open && !moveBusy) setMovingIds(null); }}><DialogContent className="library-move-dialog"><DialogHeader><DialogTitle>移动 {movingIds?.length || 0} 条提示词</DialogTitle><DialogDescription>选择目标库，将所选提示词连同原有信息和例图一起归入。</DialogDescription></DialogHeader><label>目标库<select aria-label="目标库" disabled={moveBusy} value={moveTarget} onChange={event => setMoveTarget(event.target.value)}><option value="">请选择目标库</option><option value="unfiled">未分类</option>{collections.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{moveError && <p role="alert" className="dialog-error">{moveError}</p>}<DialogFooter><Button variant="outline" disabled={moveBusy} onClick={() => setMovingIds(null)}>取消</Button><Button disabled={!moveTarget || moveBusy || vault.busy} onClick={() => void moveSelected()}>{moveBusy ? '正在移动…' : '确认移动'}</Button></DialogFooter></DialogContent></Dialog>
 
       <Dialog
         onOpenChange={(open) => !open && setCollectionDialog(null)}
