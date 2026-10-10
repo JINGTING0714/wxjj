@@ -1,4 +1,7 @@
 'use client';
+import {MobileReview} from './mobile-review';
+import {useMobile} from './use-mobile';
+
 
 import { useEffect, useMemo, useState } from 'react';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
@@ -248,8 +251,22 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
     window.dispatchEvent(new CustomEvent('prism:send-to-collage', { detail: remaining.filter((item) => item.file).map((item) => ({ id: item.sourceId, file: item.file! })) }));
     onOpenCollage();
   };
+  const renderMessage = (entry:SaleMessage, index:number) => <article key={entry.id} onFocusCapture={() => { setReviewScreenshot(entry.screenshot); setReviewTop(entry.ocrTop); }}>
+          <strong>消息 {index + 1} · 第 {entry.screenshot + 1} 张</strong>
+          <div className="sales-message-order"><SortHandle disabled={busy} /><button disabled={index === 0} type="button" onClick={() => moveMessage(index, -1)}>上移</button><button disabled={index === orderedMessages.length - 1} type="button" onClick={() => moveMessage(index, 1)}>下移</button><button type="button" onClick={() => void removeMessage(entry)}>删除消息</button></div>
+          {entry.ocrConfidence !== undefined && entry.ocrConfidence < 90 && <p className="sales-ocr-warning">OCR 参考值 {Math.round(entry.ocrConfidence)}%，低于 90%。请仔细对照原图检查昵称、时间和号码。</p>}
+          <label>对应截图<select aria-label="对应截图" value={entry.screenshot} onChange={(event) => patchMessage(entry.id, { screenshot: Number(event.target.value) })}>{active.screenshots.map((file, screen) => <option key={`${file.name}-${screen}`} value={screen}>第 {screen + 1} 张</option>)}</select></label>
+          <label>昵称<input value={entry.buyer} onChange={(event) => patchMessage(entry.id, { buyer: event.target.value })} /></label>
+          <DateTimeFields compact label="消息时间" value={entry.time} onChange={value => patchMessage(entry.id, { time: value })} />
+          <label>号码原文<textarea aria-label="号码原文" value={entry.text} onChange={(event) => patchMessage(entry.id, { text: event.target.value })} /></label>
+          <label><input type="checkbox" checked={!!entry.ignored} onChange={(event) => patchMessage(entry.id, { ignored: event.target.checked })} />重复截图中的同一消息／不参与</label>
+        </article>;
+  const mobile=useMobile();
+  const [reviewOpen,setReviewOpen]=useState(false),[reviewIndex,setReviewIndex]=useState(0);
+  const currentReviewIndex=Math.max(0,Math.min(reviewIndex,orderedMessages.length-1)),reviewEntry=orderedMessages[currentReviewIndex];
   return <div className="studio-page sales-page" data-sale-step={step}>
     {confirmation.dialog}
+    {mobile&&reviewEntry&&<MobileReview open={reviewOpen} onClose={()=>setReviewOpen(false)} title="同步复核购买消息" index={currentReviewIndex} count={orderedMessages.length} onIndex={setReviewIndex} original={<ScreenshotReview compact url={screenshotUrls[reviewEntry.screenshot]} title={`原图第 ${reviewEntry.screenshot+1} 张`} focusTop={reviewEntry.ocrTop}/>}>{renderMessage(reviewEntry,currentReviewIndex)}</MobileReview>}
     <Dialog open={!!supplement} onOpenChange={open => { if (!open) setSupplement(null); }}>
       <DialogContent className="sale-supplement-dialog">
         <DialogHeader><DialogTitle>补录购买消息</DialogTitle></DialogHeader>
@@ -274,6 +291,7 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         <h2>1. 截图顺序与消息校对</h2>
         <p>按聊天真实先后顺序上传；缺图必须补齐才可核对交付。重叠的同一条消息请只保留一次。</p>
         <label className="mini-file">上传成绩单截图<input id="sales-chat-images" disabled={busy} type="file" accept="image/*" multiple onChange={(event) => { const added = Array.from(event.target.files || []); patchRound(active.id, (round) => ({ ...round, screenshots: [...round.screenshots, ...added], complete: false, assignments: [] })); event.target.value = ''; }} /></label>
+        {mobile&&orderedMessages.length>0&&<Button className="mobile-review-launch" onClick={()=>setReviewOpen(true)}>开始同步复核 · 原图和结果并排</Button>}
         <div className="sales-review-workspace"><aside className="sales-review-original" data-file-drop-target="sales-chat-images" tabIndex={0}>
         {!screenshotUrls.length && <button type="button" className="sales-empty-preview" onClick={() => document.getElementById('sales-chat-images')?.click()}>拖入聊天截图，或按 Ctrl+V 粘贴图片<br /><small>也可以点击选择截图；上传后在这里对照原图。</small></button>}
         {screenshotUrls.length > 0 && <ScreenshotReview focusTop={reviewTop} key={`${active.id}:${Math.min(reviewScreenshot, screenshotUrls.length - 1)}`} url={screenshotUrls[Math.min(reviewScreenshot, screenshotUrls.length - 1)]} title={`原聊天截图 · 第 ${Math.min(reviewScreenshot + 1, screenshotUrls.length)} 张`} />}
@@ -282,16 +300,7 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         <div className="sales-actions"><Button disabled={!active.screenshots.length || busy} onClick={() => void recognize()}>{busy ? '识别中…' : '本机识别号码候选'}</Button><Button onClick={addMessage} variant="outline">补录漏识别的购买消息</Button></div>
         <p className="privacy-hint">识别漏掉购买者、时间或号码时，可补录截图中的那一条购买消息；这里不会发送聊天消息。点击或编辑消息会切换左侧对应截图。</p>
         {removedMessage?.roundId === active.id && <Button variant="outline" onClick={() => { patchRound(active.id, round => ({ ...round, complete: false, assignments: [], messages: [...round.messages, removedMessage.entry] })); setRemovedMessage(null); }}>撤销删除消息</Button>}
-        <SortableList className="sales-messages" disabled={busy} onMove={reorderMessages}>{orderedMessages.map((entry, index) => <article key={entry.id} onFocusCapture={() => { setReviewScreenshot(entry.screenshot); setReviewTop(entry.ocrTop); }}>
-          <strong>消息 {index + 1} · 第 {entry.screenshot + 1} 张</strong>
-          <div className="sales-message-order"><SortHandle disabled={busy} /><button disabled={index === 0} type="button" onClick={() => moveMessage(index, -1)}>上移</button><button disabled={index === orderedMessages.length - 1} type="button" onClick={() => moveMessage(index, 1)}>下移</button><button type="button" onClick={() => void removeMessage(entry)}>删除消息</button></div>
-          {entry.ocrConfidence !== undefined && entry.ocrConfidence < 90 && <p className="sales-ocr-warning">OCR 参考值 {Math.round(entry.ocrConfidence)}%，低于 90%。请仔细对照原图检查昵称、时间和号码。</p>}
-          <label>对应截图<select aria-label="对应截图" value={entry.screenshot} onChange={(event) => patchMessage(entry.id, { screenshot: Number(event.target.value) })}>{active.screenshots.map((file, screen) => <option key={`${file.name}-${screen}`} value={screen}>第 {screen + 1} 张</option>)}</select></label>
-          <label>昵称<input value={entry.buyer} onChange={(event) => patchMessage(entry.id, { buyer: event.target.value })} /></label>
-          <DateTimeFields compact label="消息时间" value={entry.time} onChange={value => patchMessage(entry.id, { time: value })} />
-          <label>号码原文<textarea aria-label="号码原文" value={entry.text} onChange={(event) => patchMessage(entry.id, { text: event.target.value })} /></label>
-          <label><input type="checkbox" checked={!!entry.ignored} onChange={(event) => patchMessage(entry.id, { ignored: event.target.checked })} />重复截图中的同一消息／不参与</label>
-        </article>)}</SortableList>
+        <SortableList className="sales-messages" disabled={busy} onMove={reorderMessages}>{orderedMessages.map(renderMessage)}</SortableList>
         <label className="sales-complete"><input type="checkbox" checked={active.complete} onChange={async event => { const checked = event.target.checked; if (checked && !(await confirmation.ask('请确认：所有聊天截图已补齐，顺序、昵称、时分秒和号码已逐条核对；重叠消息只参与一次。这样才能安心生成交付清单。', '确认人工复核完成', '已复核，继续'))) return; patchRound(active.id, round => ({ ...round, complete: checked, assignments: [] })); }} />我已核对全部截图、顺序、昵称、时间和号码；没有缺图或漏消息</label>
         <Button disabled={!result || !active.screenshots.length || !active.messages.length || busy} onClick={calculate}>生成核对结果</Button>
         </div></div>

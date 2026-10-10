@@ -16,61 +16,14 @@ export async function superResolve(
 ) {
   const size = enhancementSize(width, height, mode);
   progress(0.01, '加载本机超分辨率模型');
-  let ort: typeof import('onnxruntime-web/wasm');
-  const response = await fetch(`${path}realesr-animevideov3.onnx`).catch(() => {
-    throw new Error(
-      '超分辨率模型暂时无法下载，请检查网络后重试；也可以先用原图打水印。',
-    );
-  });
-  if (!response.ok) throw new Error('超分辨率模型加载失败，请检查网络后重试。');
-  const model = await response.arrayBuffer();
-  const digest = Array.from(
-    new Uint8Array(await crypto.subtle.digest('SHA-256', model)),
-    (byte) => byte.toString(16).padStart(2, '0'),
-  ).join('');
-  if (
-    digest !==
-    '9471c57a9a5d2b7ff66806c65edeb230709d2efc7df4f3561a75614b58d9384b'
-  )
-    throw new Error('超分辨率模型校验失败，请刷新后重试。');
-  let session: import('onnxruntime-web').InferenceSession,
-    accelerated = false;
-  const adapter = await (
-    navigator as Navigator & {
-      gpu?: { requestAdapter: () => Promise<unknown> };
-    }
-  ).gpu
-    ?.requestAdapter()
-    .catch(() => null);
-  try {
-    if (!adapter) throw new Error('GPU unavailable');
-    ort = await import('onnxruntime-web/webgpu');
-    ort.env.wasm.wasmPaths = path;
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.proxy = false;
-    ort.env.webgpu.adapter = adapter as typeof ort.env.webgpu.adapter;
-    session = await ort.InferenceSession.create(model, {
-      executionProviders: ['webgpu'],
-      graphOptimizationLevel: 'all',
-    });
-    accelerated = true;
-  } catch {
-    ort = await import('onnxruntime-web/wasm');
-    ort.env.wasm.wasmPaths = path;
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.proxy = false;
-    session = await ort.InferenceSession.create(model, {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-    });
-  }
+  const { ort, session, accelerated } = await prepareEngine(path);
   const tone = enhancePixels(data, width, height, {
       ...settings,
       sharpen: settings.sharpen * 0.5,
     }),
     output = new Uint8ClampedArray(size.width * size.height * 4),
-    tiles = resolutionTiles(width, height);
-  try {
+    tiles = resolutionTiles(width, height, accelerated ? 192 : 128);
+  {
     for (let index = 0; index < tiles.length; index++) {
       const tile = tiles[index],
         plane = tile.inputWidth * tile.inputHeight,
@@ -164,7 +117,76 @@ export async function superResolve(
       );
     }
     return { data: output, width: size.width, height: size.height };
-  } finally {
-    await session.release();
   }
+}
+
+let prepared:
+  | Promise<{
+      ort: typeof import('onnxruntime-web/wasm');
+      session: import('onnxruntime-web').InferenceSession;
+      accelerated: boolean;
+    }>
+  | undefined;
+function prepareEngine(path: string) {
+  if (!prepared) {
+    prepared = (async () => {
+      let ort: typeof import('onnxruntime-web/wasm');
+      const response = await fetch(`${path}realesr-animevideov3.onnx`).catch(
+        () => {
+          throw new Error(
+            '超分辨率模型暂时无法下载，请检查网络后重试；也可以先用原图打水印。',
+          );
+        },
+      );
+      if (!response.ok)
+        throw new Error('超分辨率模型加载失败，请检查网络后重试。');
+      const model = await response.arrayBuffer();
+      const digest = Array.from(
+        new Uint8Array(await crypto.subtle.digest('SHA-256', model)),
+        (byte) => byte.toString(16).padStart(2, '0'),
+      ).join('');
+      if (
+        digest !==
+        '9471c57a9a5d2b7ff66806c65edeb230709d2efc7df4f3561a75614b58d9384b'
+      )
+        throw new Error('超分辨率模型校验失败，请刷新后重试。');
+      let session: import('onnxruntime-web').InferenceSession,
+        accelerated = false;
+      const adapter = await (
+        navigator as Navigator & {
+          gpu?: { requestAdapter: () => Promise<unknown> };
+        }
+      ).gpu
+        ?.requestAdapter()
+        .catch(() => null);
+      try {
+        if (!adapter) throw new Error('GPU unavailable');
+        ort = await import('onnxruntime-web/webgpu');
+        ort.env.wasm.wasmPaths = path;
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.proxy = false;
+        ort.env.webgpu.adapter = adapter as typeof ort.env.webgpu.adapter;
+        session = await ort.InferenceSession.create(model, {
+          executionProviders: ['webgpu'],
+          graphOptimizationLevel: 'all',
+        });
+        accelerated = true;
+      } catch {
+        ort = await import('onnxruntime-web/wasm');
+        ort.env.wasm.wasmPaths = path;
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.proxy = false;
+        session = await ort.InferenceSession.create(model, {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'all',
+        });
+      }
+
+      return { ort, session, accelerated };
+    })();
+    void prepared.catch(() => {
+      prepared = undefined;
+    });
+  }
+  return prepared;
 }

@@ -575,6 +575,11 @@ function SimpleLibraryPanel({
   const selection = useSelection(
     filtered.filter((a) => !a.id.startsWith('demo-')).map((a) => a.id),
   );
+  const [recordPage,setRecordPage]=useState(0);
+  const pageSize=60;
+  const currentPage=Math.min(recordPage,Math.max(0,Math.ceil(filtered.length/pageSize)-1));
+  useEffect(()=>setRecordPage(0),[activeCollection,query]);
+  const pageControls=filtered.length>pageSize&&<nav className="library-pagination" aria-label="资料分页"><Button variant="outline" disabled={currentPage===0} onClick={()=>setRecordPage(currentPage-1)}>上一页</Button><span>第 {currentPage+1} / {Math.ceil(filtered.length/pageSize)} 页 · 共 {filtered.length} 条</span><Button variant="outline" disabled={(currentPage+1)*pageSize>=filtered.length} onClick={()=>setRecordPage(currentPage+1)}>下一页</Button></nav>;
   return (
     <div className={`studio-page ${kind === 'moodboard' ? 'visual-library-page' : ''}`}>
       {confirmation.dialog}
@@ -665,6 +670,7 @@ function SimpleLibraryPanel({
         />
         {kind === 'prompt' && filtered.length > 0 && <div className="library-move-actions"><Button variant="outline" disabled={!selection.selected.size || saving || moveBusy || vault.busy} onClick={() => { setMovingIds([...selection.selected]); setMoveTarget(''); setMoveError(''); }}>移动所选提示词（{selection.selected.size}）</Button></div>}
         {libraryNotice && <p className="library-action-notice" role="status">{libraryNotice}</p>}
+      {pageControls}
       <div className="record-list">
         <div className="record-head">
           <span>例图 / 资产</span>
@@ -672,7 +678,7 @@ function SimpleLibraryPanel({
           <span>备注 / 自定义信息</span>
           <span>操作</span>
         </div>
-        {filtered.map((asset) => {
+        {filtered.slice(currentPage*pageSize,(currentPage+1)*pageSize).map((asset) => {
           const isRevealed = revealed.has(asset.id);
           const RecordContainer = 'div';
           const visibleValue = isRevealed
@@ -802,6 +808,7 @@ function SimpleLibraryPanel({
         )}
       </div>
 
+      {pageControls}
       {!!exampleFamily.length && <PromptExampleAssignment family={exampleFamily} onClose={() => setExampleFamily([])} onSaved={() => void refresh()} />}
       <Dialog onOpenChange={open => { if (!saving) setAssetDialog(open); }} open={assetDialog}>
         <DialogContent className="asset-dialog asset-dialog-wide">

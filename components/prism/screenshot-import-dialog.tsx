@@ -1,4 +1,8 @@
 'use client';
+import {MobileReview} from './mobile-review';
+import {ScreenshotReview} from './screenshot-review';
+import {useMobile} from './use-mobile';
+
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
@@ -26,6 +30,8 @@ export function ScreenshotImportDialog({
   collections: CollectionRecord[];
   onImported: () => void;
 }) {
+  const mobile=useMobile();
+  const [reviewOpen,setReviewOpen]=useState(false),[reviewIndex,setReviewIndex]=useState(0);
   const vault = useVault();
   const confirmation = useConfirmation();
   const [open, setOpen] = useState(false);
@@ -33,6 +39,7 @@ export function ScreenshotImportDialog({
   const urls = useFileUrls(files);
   const [rows, setRows] = useState<ScreenshotPromptDraft[]>([]);
   const [busy, setBusy] = useState(false);
+  const [quality,setQuality]=useState<'balanced'|'precise'>('balanced');
   const [message, setMessage] = useState('');
   const [collection, setCollection] = useState('unfiled');
   const [newCollection, setNewCollection] = useState('');
@@ -84,7 +91,7 @@ export function ScreenshotImportDialog({
     setBusy(true);
     setMessage('正在本机加载英文和中文识别模型…');
     try {
-      const pages = await recognizeLocalImages(files, setMessage);
+      const pages = await recognizeLocalImages(files, setMessage, 'prompt', quality);
       const next = draftsFromOcr(pages);
       setRows(next);
       if (next[0]) { setActiveScreenshot(next[0].screenshot); setReviewTop(next[0].top); }
@@ -182,8 +189,10 @@ export function ScreenshotImportDialog({
       setMessage(error instanceof Error ? error.message : '保存失败，候选条目仍保留，可重试。');
     } finally { setBusy(false); }
   };
+  const currentReviewIndex=Math.max(0,Math.min(reviewIndex,rows.length-1)),reviewEntry=rows[currentReviewIndex];
   return <>
     {confirmation.dialog}
+    {mobile&&reviewEntry&&<MobileReview open={reviewOpen} onClose={()=>setReviewOpen(false)} title="同步复核提示词" index={currentReviewIndex} count={rows.length} onIndex={setReviewIndex} original={<ScreenshotReview compact url={urls[reviewEntry.screenshot]} title={`原图第 ${reviewEntry.screenshot+1} 张`} focusTop={reviewEntry.top}/>}><ScreenshotDraftCard row={reviewEntry} index={currentReviewIndex} last={currentReviewIndex===rows.length-1} collections={collections} duplicate={known.has(promptKey(reviewEntry))} allowDuplicate={duplicates.has(reviewEntry.id)} actions={draftActions}/></MobileReview>}
     <Button disabled={vault.status !== 'unlocked'} onClick={() => setOpen(true)} variant="outline"><ScanText /> 从聊天截图导入</Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="screenshot-import-dialog" data-file-drop-target="prompt-chat-images">
@@ -195,11 +204,13 @@ export function ScreenshotImportDialog({
         </div>
         {!!files.length && <SortableList className="screenshot-order" aria-label="截图顺序" disabled={busy} onMove={reorderFiles}>{files.map((file, index) => <div key={`${file.name}-${index}`}><SortHandle disabled={busy} /><button type="button" onClick={() => setActiveScreenshot(index)}>{index + 1}. {file.name}</button><button disabled={index === 0 || busy} onClick={() => moveFile(index, -1)} type="button">上移</button><button disabled={index === files.length - 1 || busy} onClick={() => moveFile(index, 1)} type="button">下移</button><button disabled={busy} onClick={() => removeFile(index)} type="button">删除</button></div>)}</SortableList>}
         {message && <output className="import-warning">{message}</output>}
+        {mobile&&rows.length>0&&<Button className="mobile-review-launch" onClick={()=>setReviewOpen(true)}>开始同步复核 · 原图和结果并排</Button>}
         <div className="screenshot-import-grid" data-review={rows.length ? 'true' : 'false'}>
           <div ref={originalPreview} onLoadCapture={alignOriginal} className="screenshot-preview" data-file-drop-target="prompt-chat-images" tabIndex={0}><div className="screenshot-preview-tools"><strong>原截图 · 第 {activeScreenshot + 1} 张 · 同步复核</strong><Button size="sm" variant="outline" disabled={originalZoom <= 1} onClick={() => setOriginalZoom(value => Math.max(1,value - .5))}>缩小原图</Button><Button size="sm" variant="outline" disabled={originalZoom >= 4} onClick={() => setOriginalZoom(value => Math.min(4,value + .5))}>放大原图</Button></div>{urls[activeScreenshot] ? <div style={{ width: `${originalZoom * 100}%` }}><ExampleImage alt={`待校对的第 ${activeScreenshot + 1} 张聊天截图`} src={urls[activeScreenshot]} /></div> : <p>拖入截图或在这里按 Ctrl+V 粘贴图片，再对照原图校对。</p>}</div>
           <div className="screenshot-drafts">
             <div className="screenshot-batch-fields"><label>目标分类<select value={collection} onChange={(event) => setCollection(event.target.value)}><option value="unfiled">未分类</option>{collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>或新建分类<input value={newCollection} onChange={(event) => setNewCollection(event.target.value)} placeholder="输入新分类名称" /></label><label>整批作者（可留空）<input value={author} onChange={(event) => setAuthor(event.target.value)} /></label><label>整批来源<input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label>整批取得方式<input value={acquisition} onChange={(event) => setAcquisition(event.target.value)} /></label><label>整批标签（逗号分隔）<input value={tags} onChange={(event) => setTags(event.target.value)} /></label></div>
             <div className="screenshot-import-toolbar">
+              <label>识别方式<select aria-label="截图识别方式" disabled={busy} value={quality} onChange={event=>setQuality(event.target.value as 'balanced'|'precise')}><option value="balanced">智能识别 · 清晰区域优先提速</option><option value="precise">精细识别 · 小字与模糊截图</option></select></label>
               <Button disabled={!files.length || busy} onClick={() => void recognize()}>{busy ? '正在处理…' : '本机识别'}</Button>
               <Button disabled={busy} onClick={add} variant="outline">手动新增条目</Button>
             </div>
@@ -228,7 +239,7 @@ const ScreenshotDraftCard = memo(function ScreenshotDraftCard({ row, index, last
   const { patch, setActiveScreenshot, setDuplicates, mergeNext, setRows } = actions.current;
   return <article className="screenshot-draft" key={row.id}>
                 <div className="screenshot-draft-head"><SortHandle disabled={row.saved} /><button onClick={() => setActiveScreenshot(row.screenshot)} type="button">第 {row.screenshot + 1} 张 · 约 {Math.round(row.top)} px</button><span>{Math.round(row.confidence)}% OCR 参考值</span></div>
-                {row.confidence < 90 && <p className="import-warning" role="note">OCR 参考值低于 90%，请仔细对照原图检查字词、标点和参数。参考值较高的内容也需要校对。</p>}
+                {(row.confidence < 90 || !!row.uncertainLines) && <p className="import-warning" role="note">本条包含低于 90% 的识别行，请对照原图检查字词、标点和参数。{row.uncertainLines ? ` 共 ${row.uncertainLines} 行，最低 ${Math.round(row.minimumConfidence || 0)}%。` : ""}</p>}
                 <label>名称<input value={row.title} onChange={(event) => patch(row.id, { title: event.target.value })} /></label>
                 <div className="screenshot-row-category"><label>本条分类<select value={row.collectionId || ''} onChange={(event) => patch(row.id, { collectionId: event.target.value })}><option value="">使用上方批量分类</option><option value="unfiled">未分类</option>{collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>或为本条新建分类<input value={row.newCollection || ''} onChange={(event) => patch(row.id, { newCollection: event.target.value })} placeholder="留空则使用所选分类" /></label></div>
                 <label>英文 Prompt<textarea aria-label="英文 Prompt" value={row.english} onChange={(event) => patch(row.id, { english: event.target.value })} spellCheck={false} /></label>

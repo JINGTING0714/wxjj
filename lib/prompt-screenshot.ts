@@ -6,6 +6,8 @@ export type ScreenshotPromptDraft = {
   screenshot: number;
   top: number;
   confidence: number;
+  uncertainLines?: number;
+  minimumConfidence?: number;
   title: string;
   english: string;
   chinese: string;
@@ -52,7 +54,7 @@ function promptLine(value: string) {
 }
 
 function makeDraft(
-  segment: { lines: string[]; screenshot: number; top: number; confidence: number },
+  segment: { lines: string[]; screenshot: number; top: number; confidence: number; uncertainLines?:number; minimumConfidence?:number },
   index: number,
 ): ScreenshotPromptDraft | null {
   const lines = segment.lines.map(cleanLine).filter(Boolean);
@@ -87,7 +89,7 @@ function makeDraft(
   if (!result.english && !result.chinese && !result.unconfirmed && !result.note) return null;
   return {
     id: crypto.randomUUID(), screenshot: segment.screenshot, top: segment.top,
-    confidence: segment.confidence, title: `提示词 ${index + 1}`,
+    confidence: segment.confidence, uncertainLines:segment.uncertainLines, minimumConfidence:segment.minimumConfidence, title: `提示词 ${index + 1}`,
     ...result, include: false, saved: false,
   };
 }
@@ -104,7 +106,7 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
     for (const block of page.blocks) for (const line of block.text.split(/\r?\n/)) {
       const key = cleanLine(line); const matches = positions.get(key) || []; matches.push(block); positions.set(key, matches);
     }
-    let active: { lines: string[]; screenshot: number; top: number; confidence: number } | null = null;
+    let active: { lines: string[]; screenshot: number; top: number; confidence: number; weight:number; uncertainLines:number; minimumConfidence:number } | null = null;
     let lineIndex = 0;
     let previousBottom = 0;
     const flush = () => {
@@ -115,6 +117,9 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
     };
     for (const raw of source) {
       const geometry = positions.get(raw)?.shift();
+      // Illustrated chat attachments can produce zero-confidence mixed glyphs.
+      // Keep them in the raw OCR page, but do not turn that noise into a prompt.
+      if(geometry && geometry.confidence<20 && !parameter.test(raw) && !englishLine(raw) && (raw.match(/\p{Script=Han}/gu)?.length||0)/Math.max(1,raw.length)<.6){lineIndex++;continue;}
       if (active && geometry && geometry.top - previousBottom > Math.max(42, (geometry.bottom - geometry.top) * 2.5) && !chineseLabel.test(raw) && !usage.test(raw)) flush();
       if (geometry) previousBottom = geometry.bottom;
       if (dateLine.test(raw) || /^(?:微信|聊天记录|群聊的聊天记录)/i.test(raw)) {
@@ -124,9 +129,9 @@ export function draftsFromOcr(pages: OcrPage[]): ScreenshotPromptDraft[] {
       if (promptLine(raw) || isPromptVariantMarker(raw)) {
         if (!active) {
           const block = geometry;
-          active = { lines: [], screenshot, top: block?.top ?? lineIndex, confidence: block?.confidence ?? 0 };
+          active = { lines: [], screenshot, top: block?.top ?? lineIndex, confidence: 0, weight:0, uncertainLines:0, minimumConfidence:100 };
         }
-        if (geometry) active.confidence = Math.min(active.confidence, geometry.confidence);
+        if (geometry) {const weight=Math.max(1,raw.trim().length);active.confidence=(active.confidence*active.weight+geometry.confidence*weight)/(active.weight+weight);active.weight+=weight;active.minimumConfidence=Math.min(active.minimumConfidence,geometry.confidence);if(geometry.confidence<90)active.uncertainLines++;}
         active.lines.push(raw);
       } else if (active && usage.test(raw)) active.lines.push(raw);
       else if (active && hasHan(raw) && raw.length >= 8) active.lines.push(raw);

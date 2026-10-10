@@ -2,6 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { draftsFromOcr } from '../lib/prompt-screenshot';
 
+void test('zero-confidence mixed glyphs from an illustration remain raw OCR without becoming a prompt',()=>{
+  const text='二 [三林本下 ”人全” 从人党 “RS |';
+  assert.deepEqual(draftsFromOcr([{text,blocks:[{text,confidence:0,top:20,bottom:40}]}]),[]);
+});
+
+void test('reference scores average real line evidence and retain weak-line warnings',()=>{
+  const lines=['古风全身双人立绘，平视厚涂笔触，顺滑绸缎黑发，温柔恬静氛围感。','--ar 9:16 --profile abc123 --stylize 650'];
+  const rows=draftsFromOcr([{text:lines.join('\n'),blocks:lines.map((text,index)=>({text,confidence:index?70:98,top:index*22,bottom:index*22+18}))}]);
+  assert.equal(rows.length,1);
+  assert.ok(rows[0].confidence>70&&rows[0].confidence<98);
+  assert.equal(rows[0].uncertainLines,1);
+  assert.equal(rows[0].minimumConfidence,70);
+  assert.match(rows[0].chinese,/--profile abc123/);
+});
+
 void test('OCR joins numeric flag values without changing prompt wording or profile codes', () => {
   const text = '中文：安静的林间人像，柔和的自然光影--chaos25 --ar 9：16 --profile abc123 --niji7';
   const rows = draftsFromOcr([{ text, blocks: [] }]);

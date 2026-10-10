@@ -89,7 +89,7 @@ export function VideoWatermarkPanel() {
   const [progress, setProgress] = useState('');
   const [progressValue, setProgressValue] = useState(0);
   const [error, setError] = useState('');
-  const [mobilePanel, setMobilePanel] = useState<VideoMobilePanel>('preview');
+  const [mobilePanel, setMobilePanel] = useState<VideoMobilePanel | null>('preview');
   const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [outputSettingsOpen, setOutputSettingsOpen] = useState(false);
@@ -133,6 +133,7 @@ export function VideoWatermarkPanel() {
       }
       setState((s) => ({ ...s, sources: [...s.sources, ...sources] }));
       await workspace.flush();
+      setMobilePanel(null);
       setProgress('首帧已就绪。请按第一段视频的首帧设置水印。');
     } catch (e) {
       setError(e instanceof Error ? e.message : '视频导入失败');
@@ -249,7 +250,7 @@ export function VideoWatermarkPanel() {
         />
       )}
       <div className="workshop-fieldset">
-        <MobileWorkspace className="watermark-mobile-workspace video-mobile-workspace">
+        <MobileWorkspace className="watermark-mobile-workspace video-mobile-workspace" onPanelClose={() => setMobilePanel(null)}>
           <MobileWorkspacePanel
             active={mobilePanel === 'preview'}
             className="watermark-source-panel video-source-panel"
@@ -347,7 +348,7 @@ export function VideoWatermarkPanel() {
 
           <MobileWorkspaceTabs
             label="视频水印功能"
-            onValueChange={setMobilePanel}
+            onValueChange={value => setMobilePanel(current => current === value ? null : value)}
             tabs={videoMobileTabs}
             value={mobilePanel}
           />
