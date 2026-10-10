@@ -1,5 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { enhancePixels, enhancementPresets } from '../lib/image-enhancement';
+
+test('local clarity retains dimensions, alpha, transparent pixels and zero-strength data', () => {
+  const pixels = new Uint8ClampedArray([110,140,150,255,255,255,255,255,10,20,30,0,190,170,180,128]);
+  assert.deepEqual(enhancePixels(pixels,2,2,{dehaze:0,clarity:0,sharpen:0}),pixels);
+  const output = enhancePixels(pixels,2,2,enhancementPresets.clear);
+  assert.equal(output.length,pixels.length);
+  for(let i=3;i<pixels.length;i+=4) assert.equal(output[i],pixels[i]);
+  assert.deepEqual(output.slice(8,12),pixels.slice(8,12));
+  assert.deepEqual(output.slice(4,8),pixels.slice(4,8));
+  assert.throws(()=>enhancePixels(pixels,0,2,enhancementPresets.clear),/尺寸/);
+});
 import { calculatorExpression, calculatorInitial, calculatorKey } from '../lib/calculator';
 import {
   classifyPrompt,

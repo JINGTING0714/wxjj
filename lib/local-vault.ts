@@ -14,6 +14,7 @@ type VaultMeta = {
   version?: 2;
   wrappedKey?: Envelope;
   recovery?: Envelope;
+  generation?: string;
 };
 type EncryptedRecord = {
   id: string;
@@ -21,7 +22,18 @@ type EncryptedRecord = {
   iv: string;
   payload: ArrayBuffer | Blob;
   updatedAt: string;
+  logicalId?: string;
+  logicalScope?: string;
 };
+const generationPrefix = (generation?: string) => generation ? `@prism-vault:${generation}:` : '';
+const storageKey = (key: string, generation?: string) => generationPrefix(generation) + key;
+function routed<T extends EncryptedRecord>(record: T, generation?: string): T {
+  return generation ? { ...record, id: storageKey(record.id,generation), scope: storageKey(record.scope,generation), logicalId: record.id, logicalScope: record.scope } : record;
+}
+function logical<T extends EncryptedRecord>(record: T): T {
+  const { logicalId, logicalScope, ...value } = record;
+  return { ...value,id:logicalId || record.id,scope:logicalScope || record.scope } as T;
+}
 type EncryptedBlobRecord = EncryptedRecord & {
   type: string;
   name: string;
@@ -267,14 +279,17 @@ export async function createVault(password: string) {
     const complete = done(tx);
     let checks = 0;
     let occupied = false;
+    const finish = () => { if (++checks === STORES.length) { if (occupied) tx.abort(); else tx.objectStore('meta').add(meta); } };
     for (const name of STORES) {
+      if (name !== 'meta') {
+        const cursor = tx.objectStore(name).openKeyCursor();
+        cursor.onsuccess = () => { const row = cursor.result; if (!row) { finish(); return; } if (!String(row.key).startsWith('@prism-vault:')) { occupied = true; finish(); return; } row.continue(); };
+        continue;
+      }
       const count = tx.objectStore(name).count();
       count.onsuccess = () => {
         occupied ||= count.result > 0;
-        if (++checks === STORES.length) {
-          if (occupied) tx.abort();
-          else tx.objectStore('meta').add(meta);
-        }
+        finish();
       };
     }
     await complete;
@@ -388,12 +403,12 @@ export async function writeVaultBatch(
         tx.abort();
         return;
       }
-      records.forEach((r) => tx.objectStore('records').put(r));
-      blobs.forEach((r) => tx.objectStore('blobs').put(r));
+      records.forEach((r) => tx.objectStore('records').put(routed(r,meta.generation)));
+      blobs.forEach((r) => tx.objectStore('blobs').put(routed(r,meta.generation)));
       batch.deleteRecords?.forEach((id) =>
-        tx.objectStore('records').delete(id),
+        tx.objectStore('records').delete(storageKey(id,meta.generation)),
       );
-      batch.deleteBlobs?.forEach((id) => tx.objectStore('blobs').delete(id));
+      batch.deleteBlobs?.forEach((id) => tx.objectStore('blobs').delete(storageKey(id,meta.generation)));
     };
     await complete;
   } finally {
@@ -424,6 +439,7 @@ export async function saveEncryptedBlob(
   return id;
 }
 async function loadScope<T>(store: string, scope: string) {
+  const meta = await getMeta();
   const database = await db();
   try {
     return (await request(
@@ -431,8 +447,8 @@ async function loadScope<T>(store: string, scope: string) {
         .transaction(store)
         .objectStore(store)
         .index('scope')
-        .getAll(scope),
-    )) as T[];
+        .getAll(storageKey(scope,meta?.generation)),
+    )).map(record => logical(record)) as T[];
   } finally {
     database.close();
   }
@@ -444,11 +460,12 @@ export async function loadEncryptedRecords<T>(
 ): Promise<T[]> {
   let records: EncryptedRecord[];
   if (ids) {
+    const meta = await getMeta();
     const database = await db();
     try {
       const store = database.transaction('records').objectStore('records');
-      records = (await Promise.all([...new Set(ids)].map(id => request(store.get(id)))))
-        .filter((record): record is EncryptedRecord => !!record && record.scope === scope);
+      records = (await Promise.all([...new Set(ids)].map(id => request(store.get(storageKey(id,meta?.generation))))))
+        .filter((record): record is EncryptedRecord => !!record && record.scope === storageKey(scope,meta?.generation)).map(record => logical(record));
     } finally { database.close(); }
   } else records = await loadScope<EncryptedRecord>('records', scope);
   return Promise.all(
@@ -462,11 +479,14 @@ export async function loadEncryptedBlobs(
   scope: string,
 ): Promise<DecryptedBlob[]> {
   const result: DecryptedBlob[] = [];
+  const vaultMeta = await getMeta();
   const database = await db();
   try {
-  const ids = await request(database.transaction('blobs').objectStore('blobs').index('scope').getAllKeys(scope));
+  const ids = await request(database.transaction('blobs').objectStore('blobs').index('scope').getAllKeys(storageKey(scope,vaultMeta?.generation)));
   for (const id of ids) {
-    const r = await request(database.transaction('blobs').objectStore('blobs').get(id)) as EncryptedBlobRecord;
+    const stored = await request(database.transaction('blobs').objectStore('blobs').get(id)) as EncryptedBlobRecord | undefined;
+    if (!stored) continue;
+    const r = logical(stored);
     const meta = r.privateMeta
       ? JSON.parse(
           new TextDecoder().decode(await openEnvelope(key, r.privateMeta)),
@@ -514,12 +534,14 @@ async function validateBlob(record: EncryptedBlobRecord, key: CryptoKey) {
   try { await decrypt(key, record.iv, record.payload); if (record.privateMeta) JSON.parse(new TextDecoder().decode(await openEnvelope(key, record.privateMeta))); }
   catch { throw new Error('备份中有图片或文件无法解密。未修改当前设备，请使用完整的原设备备份。'); }
 }
-async function exportPlan(database: IDBDatabase, kind: 'records' | 'blobs') {
+async function exportPlan(database: IDBDatabase, kind: 'records' | 'blobs', generation?: string) {
+  const prefix = generationPrefix(generation);
+  const visible = (scope: string) => generation ? scope.startsWith(prefix) : !scope.startsWith('@prism-vault:');
   const store = database.transaction(kind).objectStore(kind);
   if (!store.indexNames.contains('backup-revision')) return new Promise<{ id: string; scope: string; revision: string }[]>((resolve, reject) => {
     const rows: { id: string; scope: string; revision: string }[] = [], cursor = store.index('scope').openCursor();
     cursor.onerror = () => reject(cursor.error);
-    cursor.onsuccess = () => { const value = cursor.result; if (!value) { resolve(rows); return; } rows.push({ id: String(value.primaryKey), scope: String(value.key), revision: value.value.iv }); value.continue(); };
+    cursor.onsuccess = () => { const value = cursor.result; if (!value) { resolve(rows); return; } if (visible(String(value.key))) rows.push({ id: String(value.primaryKey).slice(prefix.length), scope: String(value.key).slice(prefix.length), revision: value.value.iv }); value.continue(); };
   });
   // Both key cursors share one snapshot and never materialize file payloads.
   const collect = (index: string) => new Promise<[string,string][]>((resolve, reject) => {
@@ -529,7 +551,7 @@ async function exportPlan(database: IDBDatabase, kind: 'records' | 'blobs') {
   });
   const [scopes, revisions] = await Promise.all([collect('scope'), collect('backup-revision')]);
   const byId = new Map(revisions);
-  return scopes.map(([id,scope]) => ({ id, scope, revision: byId.get(id)! }));
+  return scopes.filter(([,scope]) => visible(scope)).map(([id,scope]) => ({ id:id.slice(prefix.length), scope:scope.slice(prefix.length), revision: byId.get(id)! }));
 }
 export function exportVaultFile(key: CryptoKey): Promise<Blob>;
 export function exportVaultFile(key: CryptoKey, options: VaultExportOptions): Promise<Blob | undefined>;
@@ -538,15 +560,17 @@ export async function exportVaultFile(key: CryptoKey, options: VaultExportOption
   try {
     const meta = await getMeta(); if (!meta) throw new Error('没有可导出的保险库');
     await verify(key, meta);
-    const [records, blobs] = await Promise.all([exportPlan(database, 'records'), exportPlan(database, 'blobs')]);
+    const [records, blobs] = await Promise.all([exportPlan(database, 'records',meta.generation), exportPlan(database, 'blobs',meta.generation)]);
     const fileScopes = new Map(blobs.map(row => [row.id, row.scope]));
     const zip = new BackupZipWriter(options.write), entries: Record<string, unknown[]> = { records: [], blobs: [] };
     let current = 0; const total = records.length + blobs.length;
     for (const [kind, rows] of [['records', records], ['blobs', blobs]] as const) {
       for (const [index, planned] of rows.entries()) {
         options.assertSession?.(); options.onProgress?.({ stage: '正在校验并写入备份', current, total });
-        const row = await request(database.transaction(kind).objectStore(kind).get(planned.id)) as EncryptedBlobRecord;
-        if (!row || row.scope !== planned.scope || row.iv !== planned.revision) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
+        const storedRow = await request(database.transaction(kind).objectStore(kind).get(storageKey(planned.id,meta.generation))) as EncryptedBlobRecord | undefined;
+        if (!storedRow) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
+        const row = logical(storedRow);
+        if (row.scope !== planned.scope || row.iv !== planned.revision) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
         if (kind === 'records') await validateRecord(row, key, fileScopes); else await validateBlob(row, key);
         const { payload: stored, ...record } = row, path = `${kind}/${index}.bin`;
         const payload = stored instanceof Blob ? await stored.arrayBuffer() : stored;
@@ -558,9 +582,10 @@ export async function exportVaultFile(key: CryptoKey, options: VaultExportOption
     options.assertSession?.();
     const finalMeta = await getMeta();
     if (JSON.stringify(finalMeta) !== JSON.stringify(meta)) throw new Error('导出期间保险库发生变化，请重新导出。');
-    const [finalRecords, finalBlobs] = await Promise.all([exportPlan(database, 'records'), exportPlan(database, 'blobs')]);
+    const [finalRecords, finalBlobs] = await Promise.all([exportPlan(database, 'records',meta.generation), exportPlan(database, 'blobs',meta.generation)]);
     if (JSON.stringify(finalRecords) !== JSON.stringify(records) || JSON.stringify(finalBlobs) !== JSON.stringify(blobs)) throw new Error('导出期间资料发生变化，请重新导出。现有资料保留。');
-    const manifest = new TextEncoder().encode(JSON.stringify({ format: 'PRISM-VAULT', version: 2, exportedAt: new Date().toISOString(), meta: [meta], ...entries }));
+    const { generation: _generation, ...backupMeta } = meta;
+    const manifest = new TextEncoder().encode(JSON.stringify({ format: 'PRISM-VAULT', version: 2, exportedAt: new Date().toISOString(), meta: [backupMeta], ...entries }));
     await zip.add('manifest.json', manifest); await zip.add('manifest.sha256', new TextEncoder().encode(await hash(manifest.buffer)));
     options.onProgress?.({ stage: '正在完成备份文件', current: total, total });
     return await zip.finish();
@@ -568,7 +593,7 @@ export async function exportVaultFile(key: CryptoKey, options: VaultExportOption
 }
 
 type BackupReference = Omit<EncryptedBlobRecord, 'payload'> & { payload?: string; path?: string; size?: number; sha256?: string };
-type BackupSource = { meta: VaultMeta; records: BackupReference[]; blobs: BackupReference[]; info: BackupInfo; read: (entry: BackupReference) => Promise<EncryptedBlobRecord> };
+type BackupSource = { meta: VaultMeta; records: BackupReference[]; blobs: BackupReference[]; info: BackupInfo; read: (entry: BackupReference, payload?: ArrayBuffer) => Promise<EncryptedBlobRecord>; readMany: (entries: BackupReference[]) => Promise<EncryptedBlobRecord[]> };
 async function parseBackup(file: File): Promise<BackupSource> {
   try {
     const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
@@ -589,14 +614,21 @@ async function parseBackup(file: File): Promise<BackupSource> {
         ids.add(entry.id);
       }
     }
+    const readEntry = async (entry: BackupReference, supplied?: ArrayBuffer) => {
+      const payload = supplied || (zip ? await zip.read(entry.path!) : buffer(unb64(entry.payload!)));
+      if (payload.byteLength < 16 || zip && (entry.size !== payload.byteLength || entry.sha256 !== await hash(payload))) throw new Error('备份结构或完整性校验失败，没有修改本机数据。文件不完整。');
+      const { path: _path, sha256: _hash, size: _size, payload: _payload, ...rest } = entry;
+      return { ...rest, payload };
+    };
     return {
       meta: parsed.meta[0], records: parsed.records, blobs: parsed.blobs,
       info: { version: parsed.version, exportedAt: parsed.exportedAt || '', records: parsed.records.length, files: parsed.blobs.length, bytes: file.size, verified: Boolean(zip) },
-      async read(entry) {
-        const payload = zip ? await zip.read(entry.path!) : buffer(unb64(entry.payload!));
-        if (payload.byteLength < 16 || zip && (entry.size !== payload.byteLength || entry.sha256 !== await hash(payload))) throw new Error('备份结构或完整性校验失败，没有修改本机数据。文件不完整。');
-        const { path: _path, sha256: _hash, size: _size, payload: _payload, ...rest } = entry;
-        return { ...rest, payload };
+      read: readEntry,
+      async readMany(entries) {
+        const payloads = zip ? await zip.readMany(entries.map(entry => entry.path!)) : undefined;
+        const records: EncryptedBlobRecord[] = [];
+        for (let index = 0; index < entries.length; index += 4) records.push(...await Promise.all(entries.slice(index,index + 4).map(entry => readEntry(entry, payloads?.get(entry.path!)))));
+        return records;
       },
     };
   } catch (reason) { throw new Error(`备份结构或完整性校验失败，没有修改本机数据。${reason instanceof Error ? reason.message : ''}`); }
@@ -614,6 +646,13 @@ export async function checkRestoreSpace(bytes: number, estimate: { quota?: numbe
   if (available < required) throw new Error(`手机或浏览器可用网站存储空间不足：约 ${(available / 1024 ** 3).toFixed(2)} GB 可用，本次恢复需约 ${(required / 1024 ** 3).toFixed(2)} GB 暂存空间。请保留当前保险库，先释放设备上的其他文件，或换有足够空间的浏览器、设备导入。`);
 }
 export async function importVaultFile(file: File, password: string, options?: VaultImportOptions) {
+  if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request('prism-vault-restore', { ifAvailable:true }, async lock => {
+    if (!lock) throw new Error('另一个页面正在恢复保险库，请等待它完成或取消后再试。');
+    return restoreVaultFile(file,password,options,true);
+  });
+  return restoreVaultFile(file,password,options);
+}
+async function restoreVaultFile(file: File, password: string, options?: VaultImportOptions, cleanInactive = false) {
   const check = () => { if (options?.signal?.aborted) throw new Error('已取消恢复，当前保险库保留。'); options?.assertSession?.(); };
   check(); options?.onProgress?.({ stage: '正在读取备份目录', current: 0, total: 1 });
   const source = await parseBackup(file), meta = source.meta;
@@ -625,51 +664,98 @@ export async function importVaultFile(file: File, password: string, options?: Va
     catch { throw new Error('恢复密钥不匹配，没有修改本机数据。'); }
   } else key = await passwordKey(password, meta);
   check();
+  if (cleanInactive) {
+    const existing = await getMeta(), database = await db(), active = generationPrefix(existing?.generation);
+    try {
+      const tx = database.transaction(['records','blobs'],'readwrite'), complete = done(tx);
+      for (const kind of ['records','blobs']) {
+        const cursor = tx.objectStore(kind).openKeyCursor();
+        cursor.onsuccess = () => { const row=cursor.result; if(row) { const id=String(row.key); if(id.startsWith('@prism-vault:') && (!active || !id.startsWith(active))) tx.objectStore(kind).delete(row.primaryKey); row.continue(); } };
+      }
+      await complete;
+    } finally { database.close(); }
+    check();
+  }
   if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
     const estimate = await navigator.storage.estimate().catch(() => ({}));
     await checkRestoreSpace(file.size, estimate);
     check();
   }
-  const database = await db(true), job = crypto.randomUUID();
+  const previousMeta = await getMeta();
+  const database = await db(), job = crypto.randomUUID(), prefix = generationPrefix(job);
+  let committed = false;
   const cleanup = async () => {
-    const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
-    const cursor = tx.objectStore('backup-staging').index('job').openKeyCursor(IDBKeyRange.only(job));
-    cursor.onsuccess = () => { const row = cursor.result; if (row) { tx.objectStore('backup-staging').delete(row.primaryKey); row.continue(); } };
+    const tx = database.transaction(['records','blobs'], 'readwrite'), complete = done(tx);
+    for (const kind of ['records','blobs']) {
+      const cursor = tx.objectStore(kind).openKeyCursor();
+      cursor.onsuccess = () => { const row = cursor.result; if (row) { if (String(row.key).startsWith(prefix)) tx.objectStore(kind).delete(row.primaryKey); row.continue(); } };
+    }
     await complete;
   };
   try {
     const files = new Map(source.blobs.map(entry => [entry.id, entry.scope]));
-    // Authenticate and stage one file at a time. The live vault is untouched.
+    // Authenticate bounded batches. Readers continue using the active vault.
     let current = 0; const total = source.records.length + source.blobs.length;
-    for (const kind of ['records', 'blobs'] as const) for (const [index, entry] of source[kind].entries()) {
-      check(); options?.onProgress?.({ stage: '正在校验并暂存', current, total }); const record = await source.read(entry);
-      if (kind === 'records') await validateRecord(record, key, files); else await validateBlob(record, key);
-      check();
-      const tx = database.transaction('backup-staging', 'readwrite'), complete = done(tx);
-      // Blob handles keep the final atomic transaction from buffering gigabytes of ArrayBuffers.
-      const value = kind === 'blobs' ? { ...record, payload: new Blob([record.payload]) } : record;
-      tx.objectStore('backup-staging').put({ id: `${job}:${kind}:${index}`, job, kind, value }); await complete;
-      current++; options?.onProgress?.({ stage: '正在校验并暂存', current, total });
+    let lastReport = 0;
+    const report = (force = false) => { const now = Date.now(); if (force || now - lastReport >= 200) { lastReport = now; options?.onProgress?.({ stage: '正在校验并暂存', current, total }); } };
+    report(true);
+    for (const kind of ['records', 'blobs'] as const) {
+      for (let index = 0; index < source[kind].length;) {
+        check(); const entries: BackupReference[] = []; let bytes = 0;
+        while (index < source[kind].length && entries.length < 24) {
+          const entry = source[kind][index], size = entry.size ?? Math.ceil((entry.payload?.length || 0) * .75);
+          if (entries.length && bytes + size > 12 * 1024 * 1024) break;
+          entries.push(entry); bytes += size; index++;
+        }
+        const records = await source.readMany(entries);
+        for (let offset = 0; offset < records.length; offset += 4) {
+          check(); await Promise.all(records.slice(offset,offset + 4).map(record => kind === 'records' ? validateRecord(record,key,files) : validateBlob(record,key)));
+        }
+        check(); const tx = database.transaction(kind, 'readwrite'), complete = done(tx);
+        records.forEach(record => {
+          // Small entries stay in bounded database transactions. Large ones use
+          // Blob handles. Both are written once, under an inactive generation.
+          const size = record.payload instanceof Blob ? record.payload.size : record.payload.byteLength;
+          const value = kind === 'blobs' && size > 2 * 1024 * 1024 ? { ...record, payload: new Blob([record.payload]) } : record;
+          tx.objectStore(kind).put(routed(value,job));
+        });
+        await complete; current += records.length; report();
+      }
+      report(true);
     }
-    check(); options?.onProgress?.({ stage: '正在完成恢复', current: 0, total });
-    // Copy staged encrypted entries in one atomic transaction, with one put in flight.
-    const tx = database.transaction([...STORES, 'backup-staging'], 'readwrite'), complete = done(tx);
+    options?.onProgress?.({ stage: '正在完成恢复', current: total, total }); check();
+    // Activating one metadata pointer is atomic; no second copy of the files.
+    const tx = database.transaction(STORES, 'readwrite'), complete = done(tx);
     let cancellation: unknown;
-    STORES.forEach(store => tx.objectStore(store).clear()); tx.objectStore('meta').put(meta);
-    const cursor = tx.objectStore('backup-staging').index('job').openCursor(IDBKeyRange.only(job));
-    cursor.onsuccess = () => {
-      const row = cursor.result; if (!row) return;
+    const previous = tx.objectStore('meta').get('vault');
+    previous.onsuccess = () => {
+      try {
+        check(); if (JSON.stringify(previous.result ?? null) !== JSON.stringify(previousMeta ?? null)) throw new Error('恢复期间保险库已变化，请重新恢复。当前资料保留。');
+        let ready = 0;
+        for (const kind of ['records','blobs'] as const) {
+          const count=tx.objectStore(kind).count(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+          count.onsuccess=()=>{ try { check(); if(count.result!==source[kind].length) throw new Error('恢复数据未完整写入，当前保险库保留。'); if(++ready===2) activate(); } catch(reason) { cancellation=reason;tx.abort(); } };
+        }
+      } catch(reason) { cancellation = reason; tx.abort(); }
+    };
+    const activate = () => {
       try {
         check();
-        const put = tx.objectStore(row.value.kind).put(row.value.value);
-        put.onsuccess = () => { row.delete(); row.continue(); };
-      } catch (reason) { cancellation = reason; tx.abort(); }
+        tx.objectStore('meta').put({ ...meta,generation:job });
+        for (const kind of ['records','blobs']) {
+          if (previousMeta?.generation) { const old = generationPrefix(previousMeta.generation); tx.objectStore(kind).delete(IDBKeyRange.bound(old,old+'\uffff')); }
+          else {
+            const cursor = tx.objectStore(kind).openKeyCursor();
+            cursor.onsuccess = () => { const row = cursor.result; if (!row) return; try { check(); if (!String(row.key).startsWith('@prism-vault:')) tx.objectStore(kind).delete(row.primaryKey); row.continue(); } catch(reason) { cancellation = reason; tx.abort(); } };
+          }
+        }
+      } catch(reason) { cancellation = reason; tx.abort(); }
     };
-    try { await complete; } catch (reason) { throw cancellation || reason; }
+    try { await complete; } catch(reason) { throw cancellation || reason; } committed = true;
     options?.onProgress?.({ stage: '恢复完成', current: total, total });
     return { key, info: source.info };
   } catch (reason) {
     if (reason instanceof DOMException && reason.name === 'QuotaExceededError') throw new Error('浏览器存储空间不足，恢复已停止。当前保险库保留，请先释放设备上的其他文件，或换有足够空间的浏览器、设备导入。');
     throw reason;
-  } finally { await cleanup().catch(() => {}); database.close(); }
+  } finally { if (!committed) await cleanup().catch(() => {}); database.close(); }
 }

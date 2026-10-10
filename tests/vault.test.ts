@@ -8,7 +8,7 @@ import { pngFixture } from './png-fixtures';
 import { deepCleanPng } from '../lib/png-cleaner';
 import { syncProfileMoodboards } from '../lib/profile-moodboard-sync';
 import { syncPromptVariants } from '../lib/prompt-variant-sync';
-import { BackupZipWriter, openBackupZip } from '../lib/backup-zip';
+import { BackupZipWriter, openBackupZip, backupCrc } from '../lib/backup-zip';
 import type { StoredLibraryAsset, CollectionRecord, StoredRecipe } from '../lib/prism-types';
 import {
   createVault,
@@ -32,6 +32,62 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+void test('restored vaults support edits, scoped selection, deletion, password recovery and portable re-export', async () => {
+  const password = 'generation-test-password';
+  const key = await createVault(password);
+  await writeVaultBatch(key, { records: [
+    { scope:'assets:prompt',value:{ id:'keep',secret:'完整的原词',collection:'old' } },
+    { scope:'assets:prompt',value:{ id:'remove',secret:'可删除' } },
+  ],blobs:[
+    { id:'keep-image',scope:'asset-image:keep',blob:new Blob(['original image']),name:'original.png' },
+    { id:'remove-image',scope:'asset-image:remove',blob:new Blob(['remove']),name:'remove.png' },
+  ] });
+  const recovery = await createRecoveryKey(key,password);
+  const firstBackup = new File([await exportVaultFile(key)],'original.prism');
+  const imported = await importVaultFile(firstBackup,password);
+  const selected = await loadEncryptedRecords<{ id:string;secret:string;collection:string }>(imported.key,'assets:prompt',['keep','missing']);
+  assert.deepEqual(selected,[{ id:'keep',secret:'完整的原词',collection:'old' }]);
+  await writeVaultBatch(imported.key, { records:[{ scope:'assets:prompt',value:{ ...selected[0],collection:'new' } }],deleteRecords:['remove'],deleteBlobs:['remove-image'] });
+  assert.equal((await loadEncryptedBlobs(imported.key,'asset-image:remove')).length,0);
+  const recovered = await resetVaultPassword(recovery,'generation-new-password');
+  assert.equal((await loadEncryptedRecords<{ collection:string }>(recovered,'assets:prompt'))[0].collection,'new');
+  const portable = new File([await exportVaultFile(recovered)],'portable.prism');
+  const manifest = JSON.parse(await (await JSZip.loadAsync(await portable.arrayBuffer())).file('manifest.json')!.async('string'));
+  assert.equal(manifest.meta[0].generation,undefined);
+  assert.deepEqual(manifest.records.map((row:{id:string})=>row.id),['keep']);
+  assert.ok([...manifest.records,...manifest.blobs].every(row=>!row.logicalId && !row.logicalScope && !row.id.startsWith('@prism-vault:')));
+  const second = await importVaultFile(portable,'generation-new-password');
+  assert.equal((await loadEncryptedRecords<{ collection:string }>(second.key,'assets:prompt'))[0].collection,'new');
+  assert.equal(await (await loadEncryptedBlobs(second.key,'asset-image:keep'))[0].blob.text(),'original image');
+  await clear();
+  const fresh = await importVaultFile(portable,'generation-new-password');
+  assert.deepEqual(await loadEncryptedRecords(fresh.key,'assets:prompt'),[{ id:'keep',secret:'完整的原词',collection:'new' }]);
+  await unlockVault('generation-new-password');
+});
+
+void test('cancelling a later restore keeps the previously restored generation readable and exportable', async () => {
+  const key = await createVault('cancel-generation-password');
+  await writeVaultBatch(key,{ records:[{ scope:'test',value:{id:'preserve',note:'原有资料'} }],blobs:[{id:'photo',scope:'test-photo',blob:new Blob(['original']),name:'original.png'}] });
+  const backup = new File([await exportVaultFile(key)],'cancel.prism');
+  const active = await importVaultFile(backup,'cancel-generation-password');
+  await writeVaultBatch(active.key,{records:[{scope:'test',value:{id:'preserve',note:'恢复之后的编辑'}}]});
+  const abort = new AbortController();
+  await assert.rejects(importVaultFile(backup,'cancel-generation-password',{signal:abort.signal,onProgress:progress=>{if(progress.stage==='正在完成恢复')abort.abort();}}),/已取消恢复/);
+  assert.deepEqual(await loadEncryptedRecords(active.key,'test'),[{id:'preserve',note:'恢复之后的编辑'}]);
+  assert.equal(await (await loadEncryptedBlobs(active.key,'test-photo'))[0].blob.text(),'original');
+  const checked = await inspectVaultFile(new File([await exportVaultFile(active.key)],'retained.prism'));
+  assert.equal(checked.files,1);assert.equal(checked.records,1);
+});
+
+void test('coalesced ZIP reads verify each entry, slicing CRC matches standard values', async () => {
+  assert.equal(await backupCrc(new TextEncoder().encode('123456789')),0xcbf43926);
+  const original = new Uint8Array(128 * 1024 + 17); original.forEach((_,index)=>{original[index]=index%239;});
+  const writer = new BackupZipWriter(); await writer.add('first',original); await writer.add('second',original.subarray(3,109)); await writer.add('last',new Uint8Array([4,5,6]));
+  const blob=(await writer.finish())!;let slices=0; const counted={size:blob.size,slice(start:number,end:number){slices++;return blob.slice(start,end);}} as Blob;
+  const archive=await openBackupZip(counted);slices=0;const entries=await archive.readMany(['last','first','second']);assert.equal(slices,1);assert.deepEqual(new Uint8Array(entries.get('first')!),original);assert.deepEqual(new Uint8Array(entries.get('second')!),original.subarray(3,109));
+  const zip=await JSZip.loadAsync(await blob.arrayBuffer());assert.deepEqual(await zip.file('first')!.async('uint8array'),original);
+});
 
 void test('selected record reads are bounded to requested IDs and scope for batch moves', async () => {
   const key = await createVault('selected-record-password');
@@ -92,8 +148,8 @@ void test('existing schema v1 unlock and export do not upgrade or scan files, ev
   assert.equal(await (await loadEncryptedBlobs(restored.key, 'test'))[0].blob.text(), 'original image bytes');
   const upgraded = await new Promise<IDBDatabase>((resolve, reject) => { const req = indexedDB.open('prism-local-vault'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
   try {
-    assert.equal(upgraded.version, 2);
-    assert.ok(upgraded.objectStoreNames.contains('backup-staging'));
+    assert.equal(upgraded.version, 1);
+    assert.ok(!upgraded.objectStoreNames.contains('backup-staging'));
     assert.ok(!upgraded.transaction('blobs').objectStore('blobs').indexNames.contains('backup-revision'));
   } finally { upgraded.close(); }
 });

@@ -4,12 +4,20 @@ const table = Uint32Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ value >>> 1 : value >>> 1;
   return value >>> 0;
 });
+const crcTables = [table];
+for (let slice = 1; slice < 8; slice++) crcTables.push(Uint32Array.from(crcTables[slice - 1], value => table[value & 255] ^ value >>> 8));
 const pause = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 export async function backupCrc(bytes: Uint8Array) {
   let crc = 0xffffffff;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   for (let offset = 0; offset < bytes.length; offset += 4 * 1024 * 1024) {
     const end = Math.min(bytes.length, offset + 4 * 1024 * 1024);
-    for (let index = offset; index < end; index++) crc = table[(crc ^ bytes[index]) & 255] ^ crc >>> 8;
+    let index = offset;
+    for (; index + 8 <= end; index += 8) {
+      const first = view.getUint32(index, true) ^ crc, second = view.getUint32(index + 4, true);
+      crc = crcTables[7][first & 255] ^ crcTables[6][first >>> 8 & 255] ^ crcTables[5][first >>> 16 & 255] ^ crcTables[4][first >>> 24] ^ crcTables[3][second & 255] ^ crcTables[2][second >>> 8 & 255] ^ crcTables[1][second >>> 16 & 255] ^ crcTables[0][second >>> 24];
+    }
+    for (; index < end; index++) crc = table[(crc ^ bytes[index]) & 255] ^ crc >>> 8;
     if (end < bytes.length) await pause();
   }
   return (crc ^ 0xffffffff) >>> 0;
@@ -57,7 +65,7 @@ export class BackupZipWriter {
   }
 }
 
-type ZipEntry = { name: string; size: number; packed: number; offset: number; method: number; crc: number };
+type ZipEntry = { name: string; size: number; packed: number; offset: number; end?: number; method: number; crc: number };
 export async function openBackupZip(file: Blob) {
   const read = async (start: number, length: number) => {
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(length) || start < 0 || length < 0 || start + length > file.size) throw new Error('备份文件范围不完整');
@@ -103,14 +111,16 @@ export async function openBackupZip(file: Blob) {
     if (entries.has(name)) throw new Error('备份文件名重复');
     entries.set(name, { name, size: entrySize, packed, offset: localOffset, method: view.getUint16(position + 10, true), crc: view.getUint32(position + 16, true) }); position = end;
   }
-  return {
-    async read(name: string, maximum = Number.MAX_SAFE_INTEGER): Promise<ArrayBuffer> {
+  const sorted = [...entries.values()].sort((a,b) => a.offset - b.offset);
+  sorted.forEach((entry,index) => { entry.end = sorted[index + 1]?.offset ?? offset; });
+  const readEntry = async (name: string, maximum = Number.MAX_SAFE_INTEGER, region?: { start: number; bytes: Uint8Array<ArrayBuffer> }): Promise<ArrayBuffer> => {
       const entry = entries.get(name); if (!entry || entry.size > maximum) throw new Error('备份条目缺失或大小异常');
-      const local = new DataView((await read(entry.offset, 30)).buffer);
+      const localBytes = region ? region.bytes.subarray(entry.offset - region.start, entry.offset - region.start + 30) : await read(entry.offset, 30);
+      const local = new DataView(localBytes.buffer, localBytes.byteOffset, localBytes.byteLength);
       if (local.getUint32(0, true) !== 0x04034b50 || local.getUint16(8, true) !== entry.method) throw new Error('备份文件头不正确');
       const start = entry.offset + 30 + local.getUint16(26, true) + local.getUint16(28, true);
       if (start + entry.packed > offset) throw new Error('备份条目范围错误');
-      let data = await read(start, entry.packed);
+      let data = region ? region.bytes.slice(start - region.start, start - region.start + entry.packed) : await read(start, entry.packed);
       if (entry.method === 8) {
         const reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
         const chunks: Uint8Array<ArrayBuffer>[] = []; let length = 0;
@@ -119,6 +129,21 @@ export async function openBackupZip(file: Blob) {
       } else if (entry.method !== 0) throw new Error('不支持的备份压缩方式');
       if (data.byteLength !== entry.size || await backupCrc(data) !== entry.crc) throw new Error('备份内容校验失败');
       return data.buffer;
+  };
+  return {
+    read: readEntry,
+    async readMany(names: string[]) {
+      const requested = [...new Set(names)].map(name => { const entry = entries.get(name); if (!entry) throw new Error('备份条目缺失'); return entry; }).sort((a,b) => a.offset - b.offset);
+      const result = new Map<string, ArrayBuffer>(), maximumSpan = 16 * 1024 * 1024;
+      for (let index = 0; index < requested.length;) {
+        const first = requested[index];
+        if (!first.end || first.end - first.offset > maximumSpan) { result.set(first.name, await readEntry(first.name)); index++; continue; }
+        let last = index;
+        while (last + 1 < requested.length && requested[last + 1].end! - first.offset <= maximumSpan) last++;
+        const region = { start: first.offset, bytes: await read(first.offset, requested[last].end! - first.offset) };
+        for (; index <= last; index++) result.set(requested[index].name, await readEntry(requested[index].name, Number.MAX_SAFE_INTEGER, region));
+      }
+      return result;
     },
   };
 }

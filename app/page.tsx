@@ -1,5 +1,6 @@
 'use client';
 import { ImageDownloadDialog } from '@/components/prism/image-download-dialog';
+import { ImageEnhancementPanel } from '@/components/prism/image-enhancement-panel';
 
 import {
   Aperture,
@@ -58,6 +59,7 @@ type ViewId =
   | 'watermark'
   | 'collage'
   | 'png-cleaner'
+  | 'enhancement'
   | 'accounting'
   | 'sales'
   | 'security';
@@ -85,6 +87,7 @@ const primaryNav: NavEntry[] = [
 const pipelineNav: NavEntry[] = [
   { id: 'gallery' as const, label: '图片收纳', icon: Folder },
   { id: 'png-cleaner', label: 'PNG 隐私清洗', icon: ShieldCheck },
+  { id: 'enhancement', label: '画质增强', icon: Aperture },
   { id: 'watermark' as const, label: '水印工坊', icon: Stamp },
   { id: 'collage' as const, label: '拼图工坊', icon: Grid3X3 },
   { id: 'sales', label: '售图核对', icon: Grid3X3 },
@@ -112,7 +115,7 @@ const mobileNavGroups: Array<{
     label: '工坊',
     icon: Stamp,
     items: pipelineNav.filter((item) =>
-      ['gallery', 'png-cleaner', 'watermark', 'collage', 'sales'].includes(
+      ['gallery', 'png-cleaner', 'enhancement', 'watermark', 'collage', 'sales'].includes(
         item.id,
       ),
     ),
@@ -197,6 +200,7 @@ const workflowSteps: Array<{
 ];
 
 const moduleGuide: GuideEntry[] = [
+  { id: 'enhancement', number: '14', label: '画质增强', icon: Aperture, responsibility: '在本机去灰雾、增强层次与边缘细节，保留原图画风和尺寸。', firstAction: '导入图片，选择自然保真或调整强度，先看原图与结果对照。', result: '增强结果另存为 PNG，支持逐张或打包下载。' },
   {
     id: 'accounting',
     number: '10',
@@ -321,6 +325,7 @@ const orderedModuleGuide: GuideEntry[] = [
   'recipes',
   'gallery',
   'png-cleaner',
+  'enhancement',
   'watermark',
   'collage',
   'sales',
@@ -763,6 +768,7 @@ export default function Home() {
               >
                 {visitedLibraries.current.has('gallery') && <GalleryPanel onOpenCollage={() => setActiveView('collage')} />}
               </div>
+              <div className="content-frame studio-frame" hidden={activeView !== 'enhancement'}>{visitedLibraries.current.has('enhancement') && <ImageEnhancementPanel />}</div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'watermark'}
