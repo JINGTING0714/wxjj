@@ -4,6 +4,20 @@ import { enhancePixels, enhancementPresets } from '../lib/image-enhancement';
 import { enhancementSize,resolutionTiles } from '../lib/super-resolution';
 import { imageAdvice } from '../lib/image-quality';
 import { mergeFlowSources,mergePendingIds } from '../lib/pipeline';
+import {touchPair,pinchView,pinchLayer} from '../lib/editor-gestures';
+
+test('pinch keeps the viewed image point under the fingers, clamps zoom, and changes layers uniformly',()=>{
+  const first=touchPair({x:140,y:100},{x:180,y:100}),now=touchPair({x:140,y:130},{x:220,y:130});
+  const next=pinchView({zoom:1,x:20,y:-10},first,now,{x:100,y:80});
+  assert.deepEqual(next,{zoom:2,x:0,y:-10});
+  assert.equal(100+next.x+40*next.zoom,now.x);assert.equal(80+next.y+30*next.zoom,now.y);
+  assert.equal(pinchView({zoom:6,x:0,y:0},first,now,{x:100,y:80}).zoom,6);
+  const layer=pinchLayer({x:.5,y:.5,scale:.4,rotation:37},first,now,{width:200,height:400});
+  assert.equal(layer.scale,.8);assert.equal(layer.rotation,37);assert.equal(layer.x,.6);assert.equal(layer.y,.575);
+  assert.ok(!('scaleX' in layer)&&!('scaleY' in layer));
+  const wrapped=pinchLayer({x:0,y:0,scale:1,rotation:179},{...first,angle:179*Math.PI/180},{...first,angle:-179*Math.PI/180},{width:1,height:1});
+  assert.ok(Math.abs(wrapped.rotation-181)<.0001);
+});
 
 test('neural super-resolution sizes are bounded and overlap tiles cover each output pixel exactly once',()=>{
   assert.deepEqual(enhancementSize(816,1456,'sr2'),{width:1632,height:2912,scale:2});

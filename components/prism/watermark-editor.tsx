@@ -33,6 +33,9 @@ import {
 } from './mobile-workspace';
 import { useVault } from './vault-provider';
 import { useFileUrls } from './use-workspace-state';
+import { WatermarkFullscreen } from './watermark-fullscreen';
+import { useEditorGestures } from './use-editor-gestures';
+import { MOBILE_MEDIA } from '@/lib/mobile-media';
 import {
   canvasBlob,
   loadImage,
@@ -226,6 +229,7 @@ export function WatermarkEditor({
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [mobileTransformHandles, setMobileTransformHandles] = useState(false);
   const [mobilePreviewFullscreen, setMobilePreviewFullscreen] = useState(false);
+  const [previewNavigation,setPreviewNavigation]=useState(false);
   useEffect(() => { setMobilePreviewFullscreen(false); }, [mobilePanel]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [desktopTab, setDesktopTab] = useState('watermarks');
@@ -302,22 +306,22 @@ export function WatermarkEditor({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMobilePreviewFullscreen(false);
     };
-    const desktop = window.matchMedia('(min-width: 781px)');
+    const mobile = window.matchMedia(MOBILE_MEDIA);
     const closeOnDesktop = () => {
-      if (desktop.matches) setMobilePreviewFullscreen(false);
+      if (!mobile.matches) {setMobilePreviewFullscreen(false);setPreviewNavigation(false);}
     };
     document.addEventListener('keydown', closeOnEscape);
-    desktop.addEventListener('change', closeOnDesktop);
+    mobile.addEventListener('change', closeOnDesktop);
     return () => {
       document.removeEventListener('keydown', closeOnEscape);
-      desktop.removeEventListener('change', closeOnDesktop);
+      mobile.removeEventListener('change', closeOnDesktop);
     };
   }, [mobilePreviewFullscreen]);
   useEffect(() => {
     const root = editorRoot.current;
     const frame = root?.closest<HTMLElement>('.content-frame');
     if (!root || !frame) return;
-    const media = window.matchMedia('(max-width: 780px)');
+    const media = window.matchMedia(MOBILE_MEDIA);
     let frameId = 0;
     const syncVisibility = () => {
       cancelAnimationFrame(frameId);
@@ -352,7 +356,7 @@ export function WatermarkEditor({
     });
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [mobilePreviewFullscreen]);
   const hiddenLayerOpacity = useRef(new Map<string, number>());
   const [sourceUrl] = useFileUrls(source ? [source] : []);
   const layerUrls = useFileUrls(layers.map((l) => l.file));
@@ -407,6 +411,7 @@ export function WatermarkEditor({
     distance: number;
     mode: string;
     element: HTMLElement;
+    capture: HTMLElement;
     next: Partial<EditorLayer>;
     layer: EditorLayer;
     dimensions: LayerDimensions;
@@ -499,8 +504,9 @@ export function WatermarkEditor({
     let cancelled = false;
     (async () => {
       const list = [...(source ? [source] : []), ...layers.map((l) => l.file)];
-      const updated = new Map(dimensions);
-      let changed = false;
+      const referenced=new Set(list);
+      const updated = new Map([...dimensions].filter(([file])=>referenced.has(file)));
+      let changed = updated.size!==dimensions.size;
       for (const file of list)
         if (!updated.has(file)) {
           const image = await loadImage(file);
@@ -521,6 +527,7 @@ export function WatermarkEditor({
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
   const begin = (event: PointerEvent<HTMLDivElement>, layer: EditorLayer) => {
     if (disabled || !surface.current) return;
+    if(event.pointerType==='touch'&&previewNavigation)return;
     if (event.pointerType === 'touch' && !mobileDirectEditing) return;
     setActive(layer.id);
     if (layer.text) setTextDraft(layer.text);
@@ -543,6 +550,8 @@ export function WatermarkEditor({
     const rect = surface.current.getBoundingClientRect();
     const cx = rect.left + rect.width * layer.x;
     const cy = rect.top + rect.height * layer.y;
+    const element = [...surface.current.querySelectorAll<HTMLElement>('[data-layer-id]')].find(node => node.dataset.layerId === layer.id);
+    if (!element) return;
     drag.current = {
       pointer: event.pointerId,
       id: layer.id,
@@ -555,7 +564,8 @@ export function WatermarkEditor({
       angle: Math.atan2(event.clientY - cy, event.clientX - cx),
       distance: Math.max(1, Math.hypot(event.clientX - cx, event.clientY - cy)),
       mode: event.pointerType === 'touch' && !mobileTransformHandles ? 'move' : (event.target as HTMLElement).dataset.action || 'move',
-      element: event.currentTarget,
+      element,
+      capture: event.currentTarget,
       next: {},
       layer,
       dimensions: { width: dim.w, height: dim.h, bounds: dim.bounds },
@@ -653,13 +663,22 @@ export function WatermarkEditor({
   const end = (event: PointerEvent<HTMLDivElement>) => {
     const d = drag.current;
     if (!d || d.pointer !== event.pointerId) return;
+    if(event.type==='pointercancel'){cancelDrag();return;}
     cancelAnimationFrame(frame.current);
-    change(d.id, d.next);
+    if(event.type!=='pointercancel'&&Object.keys(d.next).length)change(d.id, d.next);
     drag.current = null;
     setGuides(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
+  const cancelDrag=()=>{
+    const d=drag.current;if(!d)return;cancelAnimationFrame(frame.current);drag.current=null;setGuides(null);
+    const geometry=layerGeometry(d.layer,d.dimensions.width,d.dimensions.height,d.scene.referenceWidth);
+    d.element.style.left=`${d.layer.x*100}%`;d.element.style.top=`${d.layer.y*100}%`;d.element.style.width=`${geometry.width/d.scene.width*100}%`;d.element.style.transform=`translate(-50%,-50%) rotate(${d.layer.rotation}deg)`;
+    d.element.style.aspectRatio=`${geometry.width}/${geometry.height}`;
+    if(d.capture.hasPointerCapture(d.pointer))d.capture.releasePointerCapture(d.pointer);
+  };
+  const gestures=useEditorGestures({surface,transform:mobileTransformHandles&&!previewNavigation,navigation:previewNavigation,selected,disabled,onLayerChange:change,cancelDrag,resetKey:source,fullscreen:mobilePreviewFullscreen});
   const base = source && dimensions.get(source);
   const backgroundVisible = (() => {
     if (!base || !base.opaque) return true;
@@ -675,14 +694,14 @@ export function WatermarkEditor({
       ref={editorRoot}
       data-desktop-tab={desktopTab}
     >
-      <section
+      <WatermarkFullscreen active={mobilePreviewFullscreen} onClose={()=>setMobilePreviewFullscreen(false)}><section
         className={`watermark-input-panel mobile-workspace-preview ${mobilePreviewFullscreen ? 'is-mobile-fullscreen' : ''}`}
         data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
         data-touch-handles={mobileTransformHandles ? 'transform' : 'move'}
         data-fullscreen={mobilePreviewFullscreen ? 'true' : 'false'}
       >
         <h3>第一张样本 · 自由摆放</h3>
-        {base && <div className="mobile-preview-mode-bar mobile-workspace-only" role="toolbar" aria-label="预览操作方式"><Button size="sm" variant={mobileTransformHandles ? 'outline' : 'default'} onClick={() => setMobileTransformHandles(false)}>移动水印</Button><Button size="sm" variant={mobileTransformHandles ? 'default' : 'outline'} onClick={() => setMobileTransformHandles(true)}>缩放 / 旋转</Button><Button size="sm" variant="outline" onClick={() => setMobilePreviewFullscreen(value => !value)}>{mobilePreviewFullscreen ? '退出全屏' : '放大预览'}</Button></div>}
+        {base && <div className="mobile-preview-mode-bar mobile-workspace-only" role="toolbar" aria-label="预览操作方式"><Button aria-label="移动水印" size="sm" variant={!mobileTransformHandles&&!previewNavigation ? 'default' : 'outline'} onClick={() => {setPreviewNavigation(false);setMobileTransformHandles(false);}}>移动</Button><Button aria-label="缩放 / 旋转" size="sm" variant={mobileTransformHandles&&!previewNavigation ? 'default' : 'outline'} onClick={() => {setPreviewNavigation(false);setMobileTransformHandles(true);}}>变换</Button><Button aria-label="查看画布" size="sm" variant={previewNavigation?'default':'outline'} onClick={()=>setPreviewNavigation(value=>!value)}>查看</Button>{!mobilePreviewFullscreen&&<Button aria-label="放大预览" size="sm" variant="outline" onClick={() => setMobilePreviewFullscreen(true)}>全屏</Button>}<Button aria-label="适应画布" size="sm" variant="outline" onClick={gestures.reset}>复位</Button><small>{Math.round(gestures.view.zoom*100)}%</small></div>}
         <div className="mobile-editor-topbar mobile-workspace-only">
           <Button
             aria-label="退出沉浸编辑"
@@ -709,18 +728,20 @@ export function WatermarkEditor({
         </label>
         <div
           className="watermark-stage dom-watermark-stage"
+          {...gestures.handlers}
           ref={stage}
           data-interaction={mobileDirectEditing ? 'edit' : 'scroll'}
           onPointerDown={event => {
+            if(previewNavigation)return;
             if (event.pointerType !== 'touch' || mobileTransformHandles || !selected || selected.locked || selected.id === SOURCE_LAYER_ID) return;
             if (event.target instanceof Element && event.target.closest('.watermark-dom-layer:not(.is-locked)')) return;
             // A selected tiny watermark can be moved by dragging the preview,
             // without needing to land a finger on its few visible pixels.
             begin(event, selected);
           }}
-          onPointerMove={event => { if (drag.current?.element === event.currentTarget) move(event); }}
-          onPointerUp={event => { if (drag.current?.element === event.currentTarget) end(event); }}
-          onPointerCancel={event => { if (drag.current?.element === event.currentTarget) end(event); }}
+          onPointerMove={event => { if (drag.current?.capture === event.currentTarget) move(event); }}
+          onPointerUp={event => { if (drag.current?.capture === event.currentTarget) end(event); }}
+          onPointerCancel={event => { if (drag.current?.capture === event.currentTarget) end(event); }}
         >
           {base && sourceUrl ? (
             <div
@@ -736,6 +757,7 @@ export function WatermarkEditor({
                     (base.w * canvas.canvasWidth) /
                     (base.h * canvas.canvasHeight),
                   backgroundColor: canvas.background,
+                  ...gestures.style,
                 } as React.CSSProperties
               }
             >
@@ -749,6 +771,7 @@ export function WatermarkEditor({
                     aria-label={`${layer.id === SOURCE_LAYER_ID ? '原图' : `水印层 ${i + 1}`}，${layer.locked ? '已锁定' : '方向键移动，Shift 加速'}`}
                     className={`watermark-dom-layer ${layer.id === selectedId ? 'selected' : ''} ${layer.locked ? 'is-locked' : ''}`}
                     key={layer.id}
+                    data-layer-id={layer.id}
                     onKeyDown={(event) => {
                       if (disabled || layer.locked) return;
                       const step = event.shiftKey ? 0.05 : 0.005;
@@ -1010,7 +1033,7 @@ export function WatermarkEditor({
             </Button>
           </div>
           <span>
-            {mobileTransformHandles ? '四角等比缩放，顶部旋转；完成后返回移动，避免误拉伸。' : '直接拖动水印即可移动。需要改大小时，再点“缩放 / 旋转”。'}
+            {mobileTransformHandles ? '双指等比缩放、旋转当前图层；四角也可缩放。' : '单指移动水印，双指缩放和平移预览；“查看画布”可单指平移。'}
           </span>
         </div>
         <output className="watermark-alignment-status">
@@ -1022,7 +1045,7 @@ export function WatermarkEditor({
           四角等比缩放，四条边中间的手柄分别拉伸宽、高，顶部圆点旋转；也可用滑块调整。原图默认锁定。对齐线只作辅助，水印可以放在原图外；摆好后点击“一键适应内容”收齐导出边界。样本按比例应用到整批。
         </p>
         {error && <p className="error-banner">{error}</p>}
-      </section>
+      </section></WatermarkFullscreen>
       <fieldset
         disabled={disabled}
         className="watermark-layer-panel workshop-fieldset mobile-editor-controls"

@@ -1,4 +1,5 @@
 'use client';
+import { MOBILE_MEDIA } from '@/lib/mobile-media';
 import { moveListItem } from './sortable-list';
 import { useConfirmation } from './use-confirmation';
 import { ExampleImage } from './example-image';
@@ -1281,7 +1282,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                             ];
                           if (!source || processing) return;
                           if (
-                            window.matchMedia('(max-width: 780px)').matches &&
+                            window.matchMedia(MOBILE_MEDIA).matches &&
                             !mobileReordering
                           )
                             return;

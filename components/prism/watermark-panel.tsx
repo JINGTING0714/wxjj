@@ -626,6 +626,7 @@ export function WatermarkPanel({
                             })),
                           ],
                         }));
+                        if(files.length)setMobilePanel(null);
                       }}
                       type="file"
                     />

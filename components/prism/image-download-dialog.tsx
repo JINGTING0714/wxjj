@@ -1,4 +1,5 @@
 'use client';
+import { MOBILE_MEDIA } from '@/lib/mobile-media';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -23,7 +24,7 @@ export function ImageDownloadDialog() {
     try {
       const picker = (window as Window & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
       let directory: FileSystemDirectoryHandle | undefined;
-      if (chooseFolder && picker && window.matchMedia('(min-width: 781px)').matches) {
+      if (chooseFolder && picker && !window.matchMedia(MOBILE_MEDIA).matches) {
         try { directory = await picker.call(window); }
         catch (reason) { if (reason instanceof DOMException && reason.name === 'AbortError') { setStatus('已取消选择文件夹，可以继续逐张下载。'); return; } }
       }
