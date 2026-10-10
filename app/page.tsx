@@ -171,7 +171,10 @@ const workflowSteps: Array<{
     id: 'png-cleaner',
     number: '05',
     title: '隐私清洗 · 可选',
-    detail: '检查 PNG 附加信息，清洗副本继续送往水印。',
+    detail: '检查 PNG 附加信息，清洗后检测画质并分流。',
+  },
+  {
+    id:'enhancement',number:'05B',title:'画质检测与增强 · 可选',detail:'需要增强的图片做本机超分辨率，其余先送水印；增强结果汇入同一批次。',
   },
   {
     id: 'watermark',
@@ -200,7 +203,7 @@ const workflowSteps: Array<{
 ];
 
 const moduleGuide: GuideEntry[] = [
-  { id: 'enhancement', number: '14', label: '画质增强', icon: Aperture, responsibility: '在本机去灰雾、增强层次与边缘细节，保留原图画风和尺寸。', firstAction: '导入图片，选择自然保真或调整强度，先看原图与结果对照。', result: '增强结果另存为 PNG，支持逐张或打包下载。' },
+  { id: 'enhancement', number: '14', label: '画质增强', icon: Aperture, responsibility: 'PNG 清洗后检测画质，在本机进行 2× / 4× 超分辨率与清晰度增强。', firstAction: '检查分流建议，选择倍数，放大对照人物、发丝与配饰。', result: '增强 PNG 汇入同一水印批次，继续打水印、拼图；支持单独下载。' },
   {
     id: 'accounting',
     number: '10',
@@ -386,6 +389,7 @@ export default function Home() {
   useEffect(() => { let clean: (() => void) | undefined; let stopped = false; void import('@/lib/file-drop').then(module => { if (!stopped) clean = module.installFileDrop(); }); return () => { stopped = true; clean?.(); }; }, []);
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
+  const [preparedEnhancement,setPreparedEnhancement] = useState<typeof vault.session|null>(null);
   const visitedLibraries = useRef(new Set<ViewId>());
   const librarySession = useRef(vault.session);
   if (librarySession.current !== vault.session) { visitedLibraries.current.clear(); librarySession.current = vault.session; }
@@ -730,7 +734,7 @@ export default function Home() {
                 className="content-frame studio-frame"
                 hidden={activeView !== 'png-cleaner'}
               >
-                <PngCleanerPanel onOpen={setActiveView} />
+                <PngCleanerPanel onOpen={setActiveView} onPrepareEnhancement={()=>setPreparedEnhancement(vault.session)} />
               </div>
               <div
                 className="content-frame studio-frame"
@@ -768,7 +772,7 @@ export default function Home() {
               >
                 {visitedLibraries.current.has('gallery') && <GalleryPanel onOpenCollage={() => setActiveView('collage')} />}
               </div>
-              <div className="content-frame studio-frame" hidden={activeView !== 'enhancement'}>{visitedLibraries.current.has('enhancement') && <ImageEnhancementPanel />}</div>
+              <div className="content-frame studio-frame" hidden={activeView !== 'enhancement'}>{(preparedEnhancement===vault.session||visitedLibraries.current.has('enhancement')) && <ImageEnhancementPanel onOpenWatermark={()=>setActiveView('watermark')} />}</div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'watermark'}

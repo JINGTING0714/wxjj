@@ -27,6 +27,7 @@ import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { applyWatermarks } from '@/lib/image-processing';
 import { downloadBlob, downloadZip } from '@/lib/download';
 import type { PipelineSource, PipelineTransfer } from '@/lib/pipeline';
+import { mergeFlowSources,mergePendingIds,sendPipeline } from '@/lib/pipeline';
 import { VideoWatermarkPanel } from './video-watermark-panel';
 import {
   defaultComposition,
@@ -71,6 +72,7 @@ type Batch = {
   outputs: Output[];
   retryIds: string[];
   autoSend: boolean;
+  pendingEnhancementIds?:string[];
   composition?: WatermarkComposition;
   sampleId?: string;
   editScope?: 'batch' | 'single';
@@ -115,7 +117,7 @@ function WaitingBatch({
   const send = () => {
     window.dispatchEvent(
       new CustomEvent('prism:send-to-collage', {
-        detail: qualified.map((o) => ({ id: o.id, file: o.file, batchId: batch.id, batchTitle: batch.title })),
+        detail: qualified.map((o) => ({ id: o.id, file: o.file, batchId: batch.id, batchTitle: batch.title,sequence:batch.sources.find(source=>source.id===o.sourceId)?.sequence })),
       }),
     );
     onOpenCollage();
@@ -321,14 +323,19 @@ export function WatermarkPanel({
   useEffect(() => {
     const receive = (event: Event) => {
       event.preventDefault();
-      const { sources, complete } = (event as CustomEvent<PipelineTransfer>).detail;
+      const { sources, complete,batchId,batchTitle,pendingIds=[],pendingRevisions={},settledIds=[] } = (event as CustomEvent<PipelineTransfer>).detail;
       const current = workspace.current.current;
-      if (!workspace.ready || current.batches.length >= 5 || sources.length > 200) {
+      const existing=batchId?current.batches.find(batch=>batch.id===batchId):undefined;
+      const count=new Set([...(existing?.sources.map(source=>source.id)||[]),...sources.map(source=>source.id)]).size;
+      if (!workspace.ready || (!existing&&current.batches.length >= 5) || count > 200) {
         complete(new Error('水印工坊尚未就绪或已达 5 批上限，请腾出批次后重试。'));
         return;
       }
-      const next = { ...freshBatch(current.batches.length + 1), title: 'PNG 清洗副本', sources };
-      setState((old) => ({ ...old, batches: [...old.batches, next], active: next.id, tab: 'images' }));
+      if(existing&&controllers.current.has(existing.id)){complete(new Error('这个批次正在打水印，请等本次处理完成后再汇入增强图片。'));return;}
+      const already=existing?.sources.filter(source=>source.inputRevision&&source.inputRevision===pendingRevisions[source.id]).map(source=>source.id)||[];
+      const changed=new Set([...sources.filter(source=>existing?.sources.some(old=>old.id===source.id&&old.file!==source.file&&(!old.revision||old.revision!==source.revision))).map(source=>source.id),...pendingIds.filter(id=>existing?.sources.some(source=>source.id===id)&&!already.includes(id))]);
+      const next:Batch=existing?{...existing,sources:mergeFlowSources(existing.sources.filter(source=>!changed.has(source.id)||sources.some(item=>item.id===source.id)),sources),outputs:existing.outputs.filter(output=>!changed.has(output.sourceId)),job:null,pendingEnhancementIds:mergePendingIds(existing.pendingEnhancementIds||[],pendingIds,[...settledIds,...already,...sources.map(source=>source.id)])}:{ ...freshBatch(current.batches.length + 1),id:batchId||crypto.randomUUID(),title:batchTitle||'PNG 清洗副本',sources:mergeFlowSources([],sources),pendingEnhancementIds:mergePendingIds([],pendingIds,[...settledIds,...sources.map(source=>source.id)]) };
+      setState((old) => ({ ...old, batches:existing?old.batches.map(batch=>batch.id===next.id?next:batch):[...old.batches,next],active:next.id,tab:'images' }));
       void workspace.flush().then(() => complete(), (error) => complete(error instanceof Error ? error : new Error('水印队列保存失败')));
     };
     window.addEventListener('prism:send-to-watermark', receive);
@@ -414,11 +421,7 @@ export function WatermarkPanel({
               workspace.current.current.batches.find((b) => b.id === target.id)
                 ?.autoSend
             )
-              window.dispatchEvent(
-                new CustomEvent('prism:send-to-collage', {
-                  detail: [{ id: output.id, file, batchId: target.id, batchTitle: target.title }],
-                }),
-              );
+              await sendPipeline('collage',{batchId:target.id,batchTitle:target.title,sources:[{id:output.id,file,batchId:target.id,batchTitle:target.title,sequence:source.sequence}]});
           },
           signal,
           job.composition,
@@ -473,6 +476,7 @@ export function WatermarkPanel({
           <p className="error-banner">{workspace.saveError}</p>
         )}
         {error && <p className="error-banner">{error}</p>}
+        {!!batch?.pendingEnhancementIds?.length && <p className="pipeline-notice" role="status">同一批次还有 {batch.pendingEnhancementIds.length} 张图片等待画质增强。增强结果汇入后，可以一起打水印、一起拼图；也可以先处理已经到达的图片。</p>}
         <div className="batch-tabs desktop-workspace-only">
           {state.batches.map((b) => (
             <Button

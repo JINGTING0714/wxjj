@@ -1,10 +1,30 @@
-export type PipelineSource = { id: string; file: File; batchId?: string; batchTitle?: string };
+export type PipelineSource = { id: string; file: File; batchId?: string; batchTitle?: string; sequence?:number; revision?:string; inputRevision?:string };
 export type PipelineTransfer = {
   sources: PipelineSource[];
   complete: (error?: Error) => void;
   batchId?: string;
   batchTitle?: string;
+  pendingIds?:string[];
+  pendingRevisions?:Record<string,string>;
+  settledIds?:string[];
 };
+export async function sendPipeline(target:'watermark'|'enhancement'|'collage',detail:Omit<PipelineTransfer,'complete'>,waitForReady=false) {
+  const deadline=Date.now()+30_000;
+  while(true) {
+    let handled=false;
+    const task=new Promise<void>((resolve,reject)=>{const event=new CustomEvent(`prism:send-to-${target}`,{cancelable:true,detail:{...detail,complete:(error?:Error)=>error?reject(error):resolve()}});handled=!window.dispatchEvent(event);if(!handled)resolve();});
+    await task;if(handled)return;
+    if(!waitForReady||Date.now()>=deadline)throw new Error('目标工坊尚未就绪，请稍后重试；当前图片保留。');
+    await new Promise(resolve=>setTimeout(resolve,50));
+  }
+}
+export function mergeFlowSources(current:PipelineSource[],incoming:PipelineSource[],limit=200) {
+  const merged=mergeSources(current,incoming,limit);
+  return merged.sort((a,b)=>a.sequence!==undefined&&b.sequence!==undefined?a.sequence-b.sequence:0);
+}
+export function mergePendingIds(current:string[],incoming:string[],settled:string[]) {
+  const done=new Set(settled);return [...new Set([...current,...incoming])].filter(id=>!done.has(id));
+}
 export function moveSource<T extends { id: string }>(
   sources: T[],
   id: string,

@@ -355,6 +355,7 @@ export async function fastCleanPng(
 }
 export type PngJobResult = {
   id: string;
+  revision?:string;
   report?: PngReport;
   file?: File;
   error?: string;
@@ -391,8 +392,10 @@ export async function runPngQueue(
             { type: 'image/png' },
           )
         : undefined;
+      const revision=file?Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),byte=>byte.toString(16).padStart(2,'0')).join(''):undefined;
+      abort(options.signal);
       options.onResult(
-        { id: source.id, report: { ...report, chunks: [] }, file },
+        { id: source.id, report: { ...report, chunks: [] }, file,revision },
         ++completed,
       );
     } catch (error) {

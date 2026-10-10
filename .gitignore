@@ -39,3 +39,4 @@ next-env.d.ts
 /work/
 /public/media-engine/
 /public/ocr/paddle/
+/public/enhancement/ort-*

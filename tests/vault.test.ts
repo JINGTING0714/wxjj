@@ -10,6 +10,7 @@ import { syncProfileMoodboards } from '../lib/profile-moodboard-sync';
 import { syncPromptVariants } from '../lib/prompt-variant-sync';
 import { BackupZipWriter, openBackupZip, backupCrc } from '../lib/backup-zip';
 import type { StoredLibraryAsset, CollectionRecord, StoredRecipe } from '../lib/prism-types';
+import { purgeEnhancementFiles } from '../lib/image-enhancement-purge';
 import {
   createVault,
   unlockVault,
@@ -32,6 +33,18 @@ async function clear() {
   });
 }
 beforeEach(clear);
+
+void test('sold image cleanup removes original and neural output even when enhancement UI is unmounted',async()=>{
+  const key=await createVault('enhancement-purge-password');
+  const ref=(id:string)=>({__prismFile:true,id,name:`${id}.png`,type:'image/png'});
+  const record={id:'workspace:image-enhancement',data:{mode:'sr2',photos:[{id:'png-clean-sold',file:ref('original-sold'),output:ref('enhanced-sold')},{id:'png-clean-keep',file:ref('original-keep'),output:ref('enhanced-keep')}]}};
+  await writeVaultBatch(key,{records:[{scope:'workspaces',value:record}],blobs:['original-sold','enhanced-sold','original-keep','enhanced-keep'].map(id=>({id,scope:'workspace-files:image-enhancement',blob:new Blob([id]),name:`${id}.png`}))});
+  const vault={loadRecords:<T>(scope:string,ids?:readonly string[])=>loadEncryptedRecords<T>(key,scope,ids),writeBatch:(batch:Parameters<typeof writeVaultBatch>[1])=>writeVaultBatch(key,batch)};
+  assert.equal(await purgeEnhancementFiles(vault,['png-clean-sold']),1);
+  assert.deepEqual((await loadEncryptedBlobs(key,'workspace-files:image-enhancement')).map(file=>file.id).sort(),['enhanced-keep','original-keep']);
+  const snapshot=(await loadEncryptedRecords<typeof record>(key,'workspaces'))[0];assert.equal(snapshot.data.mode,'sr2');assert.deepEqual(snapshot.data.photos.map(photo=>photo.id),['png-clean-keep']);
+  const backup=new File([await exportVaultFile(key)],'enhancement.prism');await clear();const restored=await importVaultFile(backup,'enhancement-purge-password');assert.deepEqual(await loadEncryptedRecords(restored.key,'workspaces'),[snapshot]);
+});
 
 void test('restored vaults support edits, scoped selection, deletion, password recovery and portable re-export', async () => {
   const password = 'generation-test-password';

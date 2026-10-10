@@ -24,7 +24,7 @@ void test('new panels render initial states safely while local workspace hydrati
   for (const panel of [
     React.createElement(AccountingPanel),
     React.createElement(CalculatorPanel),
-    React.createElement(PngCleanerPanel, { onOpen: () => {} }),
+    React.createElement(PngCleanerPanel, { onOpen: () => {},onPrepareEnhancement:()=>{} }),
   ]) {
     const html = renderToString(React.createElement(VaultProvider, null, panel));
     assert.ok(html.length > 500);

@@ -16,6 +16,10 @@ import {
   type PngJobResult,
 } from '@/lib/png-cleaner';
 import type { PipelineSource } from '@/lib/pipeline';
+import { sendPipeline } from '@/lib/pipeline';
+import { assessImage } from '@/lib/image-enhancement-client';
+import type { ImageAdvice } from '@/lib/image-quality';
+import { purgeEnhancementFiles } from '@/lib/image-enhancement-purge';
 import { SectionHead } from './studio-shared';
 import { useFileUrls, useWorkspaceState } from './use-workspace-state';
 import { useVault } from './vault-provider';
@@ -30,14 +34,19 @@ import { SourceSelection } from './source-selection';
 
 export function PngCleanerPanel({
   onOpen,
+  onPrepareEnhancement,
 }: {
-  onOpen: (target: 'gallery' | 'watermark' | 'collage') => void;
+  onOpen: (target: 'gallery' | 'watermark' | 'collage' | 'enhancement') => void;
+  onPrepareEnhancement:()=>void;
 }) {
   const vault = useVault();
   const workspace = useWorkspaceState('png-cleaner', {
     sources: [] as PipelineSource[],
     results: [] as PngJobResult[],
     mode: 'deep' as CleanMode,
+    advice:{} as Record<string,ImageAdvice>,
+    enhance:{} as Record<string,boolean>,
+    flowBatchId:'',
   });
   const { state, setState } = workspace;
   const [panel, setPanel] = useState<'sources' | 'mode' | 'output' | null>(
@@ -129,10 +138,16 @@ export function PngCleanerPanel({
         results: current.results.filter((result) => !originals.has(result.id)),
       }));
       detail.promises.push(workspace.flush());
+      if(!document.querySelector('.enhancement-page'))detail.promises.push(purgeEnhancementFiles(vault,detail.originalIds));
     };
     window.addEventListener('prism:purge-png-images', purge);
     return () => window.removeEventListener('prism:purge-png-images', purge);
   }, [workspace.ready]);
+
+  useEffect(()=>{
+    const bypass=(event:Event)=>{const detail=(event as CustomEvent<{ids:string[];promises:Promise<unknown>[]}>).detail,ids=new Set(detail.ids.map(id=>id.replace(/^png-clean-/,'')));if(!workspace.current.current.sources.some(source=>ids.has(source.id)))return;setState(current=>({...current,enhance:{...current.enhance,...Object.fromEntries([...ids].map(id=>[id,false]))}}));detail.promises.push(workspace.flush());};
+    window.addEventListener('prism:enhancement-bypass',bypass);return()=>window.removeEventListener('prism:enhancement-bypass',bypass);
+  },[workspace.ready]);
 
   const run = async (sources: PipelineSource[], mode?: CleanMode) => {
     if (controller.current || !sources.length) return;
@@ -161,9 +176,20 @@ export function PngCleanerPanel({
         });
       },
     });
-    task.current = operation;
+    let finishTask=()=>{};
+    task.current = new Promise<void>(resolve=>{finishTask=resolve;});
     try {
       const result = await operation;
+      if(mode&&!result.cancelled) {
+        const finished=workspace.current.current.results.filter(item=>item.file&&sources.some(source=>source.id===item.id));
+        for(let index=0;index<finished.length;index++) {
+          if(control.signal.aborted)break;
+          const item=finished[index];setMessage(`清洗完成，正在检测画质 ${index+1}/${finished.length}…`);
+          let advice:ImageAdvice;
+          try {advice=await assessImage(item.file!);} catch {advice={width:item.report?.width||0,height:item.report?.height||0,recommended:false,reason:'自动检测未完成，请自行放大检查后选择',mode:'clarity'};}
+          if(mounted.current)setState(current=>({...current,advice:{...current.advice,[item.id]:advice},enhance:{...current.enhance,[item.id]:current.enhance[item.id]??advice.recommended}}));
+        }
+      }
       if (mounted.current) {
         setProgress({
           done: result.completed,
@@ -174,7 +200,7 @@ export function PngCleanerPanel({
           result.cancelled
             ? '已取消，已完成的结果保留；可以继续处理剩余图片。'
             : mode
-              ? '清洗完成，请检查结果后下载或继续进入 PRISM。'
+              ? '清洗与画质检测完成。请检查分流建议，继续增强或先送水印。'
               : '检查完成，可以查看详情或开始清洗。',
         );
         if (mode) setPanel('output');
@@ -183,6 +209,7 @@ export function PngCleanerPanel({
       if (mounted.current)
         setMessage(error instanceof Error ? error.message : '批处理失败');
     } finally {
+      finishTask();
       controller.current = null;
       task.current = null;
       if (mounted.current) {
@@ -250,9 +277,11 @@ export function PngCleanerPanel({
             new CustomEvent(`prism:send-to-${target}`, {
               cancelable: true,
               detail: {
+                ...(target==='watermark'&&state.flowBatchId?{batchId:state.flowBatchId,batchTitle:'PNG 清洗与画质增强',settledIds:clean.map(result=>`png-clean-${result.id}`)}:{}),
                 sources: clean.map((result) => ({
                   id: `png-clean-${result.id}`,
                   file: result.file,
+                  sequence:state.sources.findIndex(source=>source.id===result.id),
                 })),
                 complete: (error?: Error) =>
                   error ? reject(error) : resolve(),
@@ -271,6 +300,22 @@ export function PngCleanerPanel({
     } finally {
       if (mounted.current) setBusy(false);
     }
+  };
+  const split = async (open:'enhancement'|'watermark') => {
+    if(busy||!clean.length)return;setBusy(true);setMessage('正在保存并分流图片…');
+    const batchId=workspace.current.current.flowBatchId||`png-flow-${crypto.randomUUID()}`,batchTitle='PNG 清洗与画质增强';
+    setState(current=>({...current,flowBatchId:batchId}));
+    const sources=clean.map(result=>({id:`png-clean-${result.id}`,file:result.file,revision:result.revision,batchId,batchTitle,sequence:state.sources.findIndex(source=>source.id===result.id)}));
+    const pending=sources.filter(source=>state.enhance[source.id.replace(/^png-clean-/, '')]);
+    const direct=sources.filter(source=>!pending.some(item=>item.id===source.id));
+    try {
+      await workspace.flush();
+      await sendPipeline('watermark',{sources:direct,batchId,batchTitle,pendingIds:pending.map(source=>source.id),pendingRevisions:Object.fromEntries(pending.filter(source=>source.revision).map(source=>[source.id,source.revision!]))});
+      if(pending.length){onPrepareEnhancement();await sendPipeline('enhancement',{sources:pending,batchId,batchTitle},true);}
+      setMessage(`已分流：${pending.length} 张进入画质增强，${direct.length} 张先送水印；增强完成后汇入同一批次。`);
+      onOpen(pending.length?open:'watermark');
+    } catch(reason){setMessage(reason instanceof Error?reason.message:'分流未全部完成，请重试；当前图片保留。');}
+    finally {if(mounted.current)setBusy(false);}
   };
   const download = async () => {
     setBusy(true);
@@ -549,6 +594,7 @@ export function PngCleanerPanel({
               清洗结果 <small>{clean.length} 张</small>
             </h2>
             <p>单个失败不会影响其他图片。取消后可继续清洗未完成图片。</p>
+            {!!clean.length&&<section className="quality-routing"><h3>清洗后的下一步</h3><p>建议增强 {clean.filter(result=>state.enhance[result.id]).length} 张，其余 {clean.filter(result=>!state.enhance[result.id]).length} 张可以先打水印。建议可修改；柔光画风也可能被判断为偏软，请放大对照。</p><div className="enhancement-actions"><Button disabled={busy||!!workspace.saveError} onClick={()=>void split('enhancement')}>按选择分流，打开画质增强</Button><Button variant="outline" disabled={busy||!!workspace.saveError} onClick={()=>void split('watermark')}>其他图片先去水印工坊</Button></div></section>}
             <div className="png-cleaner-output-actions">
               <Button
                 disabled={busy || !clean.length}
@@ -569,7 +615,7 @@ export function PngCleanerPanel({
                 disabled={busy || !clean.length || !!workspace.saveError}
                 onClick={() => void send('watermark')}
               >
-                进入水印工坊
+                全部直接进入水印工坊
               </Button>
               <Button
                 variant="outline"
@@ -599,6 +645,7 @@ export function PngCleanerPanel({
                           ? `已清洗 · 移除 ${result.report?.removedChunks.length || 0} 个附加块`
                           : '已检查，等待清洗')}
                     </small>
+                    {result.file&&<label className="quality-routing-choice"><input type="checkbox" checked={!!state.enhance[result.id]} disabled={busy} onChange={event=>setState(current=>({...current,enhance:{...current.enhance,[result.id]:event.target.checked}}))} /><span>送去画质增强<small>{state.advice[result.id]?.reason||'可自行选择是否增强'}{state.advice[result.id]?.width?` · ${state.advice[result.id].width} × ${state.advice[result.id].height}`:''}</small></span></label>}
                   </li>
                 ))}
             </ul>

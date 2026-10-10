@@ -39,7 +39,7 @@ import { SectionHead } from '@/components/prism/studio-shared';
 import { useWorkspaceState, useFileUrls } from './use-workspace-state';
 import {
   duplicateSourceIndexes,
-  mergeSources,
+  mergeFlowSources,
   moveSource,
   shuffleSources,
   type PipelineSource,
@@ -355,7 +355,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
         const id = transfer?.batchId || incoming[0]?.batchId || `incoming-${crypto.randomUUID()}`;
         const title = transfer?.batchTitle || incoming[0]?.batchTitle || `导入批次 ${new Date().toLocaleTimeString()}`;
         const batches = rememberBatch(current), target = batches.find((batch) => batch.id === id);
-        const sources = mergeSources(target?.sources || [], incoming);
+        const sources = mergeFlowSources(target?.sources || [], incoming,1000);
         const nextBatches = [...batches.filter((batch) => batch.id !== id), { ...target, id, title, sources }];
         if (current.job && current.activeBatchId !== id) return { ...current, batches: nextBatches };
         return { ...current, ...(target?.settings as Partial<typeof state>), sources, batches: nextBatches, activeBatchId: id, lastGenerated: id === current.activeBatchId ? current.lastGenerated : (target?.settings?.lastGenerated as typeof current.lastGenerated) || null, job: (target?.settings?.job as typeof current.job) || null };

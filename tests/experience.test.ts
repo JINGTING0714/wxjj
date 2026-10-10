@@ -1,6 +1,42 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { enhancePixels, enhancementPresets } from '../lib/image-enhancement';
+import { enhancementSize,resolutionTiles } from '../lib/super-resolution';
+import { imageAdvice } from '../lib/image-quality';
+import { mergeFlowSources,mergePendingIds } from '../lib/pipeline';
+
+test('neural super-resolution sizes are bounded and overlap tiles cover each output pixel exactly once',()=>{
+  assert.deepEqual(enhancementSize(816,1456,'sr2'),{width:1632,height:2912,scale:2});
+  assert.deepEqual(enhancementSize(816,1456,'sr4'),{width:3264,height:5824,scale:4});
+  assert.throws(()=>enhancementSize(2400,3200,'sr4'),/2000 万/);
+  const width=193,height=201,covered=new Uint8Array(width*height);
+  for(const tile of resolutionTiles(width,height)){
+    assert.ok(tile.inputWidth<=136&&tile.inputHeight<=136);
+    assert.ok(tile.left<=tile.x&&tile.top<=tile.y&&tile.left+tile.inputWidth>=tile.x+tile.width);
+    for(let y=tile.y;y<tile.y+tile.height;y++)for(let x=tile.x;x<tile.x+tile.width;x++)covered[y*width+x]++;
+  }
+  assert.ok(covered.every(value=>value===1));
+});
+
+test('quality suggestions identify low resolution but leave detailed high resolution, blank and transparent images alone',()=>{
+  const sample=new Uint8ClampedArray(32*32*4);
+  for(let y=0;y<32;y++)for(let x=0;x<32;x++){const i=(y*32+x)*4;sample[i]=sample[i+1]=sample[i+2]=(x+y)%2?200:20;sample[i+3]=255;}
+  assert.equal(imageAdvice(360,640,sample,32,32).recommended,true);
+  assert.equal(imageAdvice(2160,3840,sample,32,32).recommended,false);
+  assert.equal(imageAdvice(360,640,new Uint8ClampedArray(32*32*4),32,32).recommended,false);
+  const white=new Uint8ClampedArray(32*32*4).fill(255);assert.equal(imageAdvice(360,640,white,32,32).recommended,false);
+});
+
+test('late enhanced images replace their own sources and reunite in original order without duplicates',()=>{
+  const file=(name:string)=>new File([name],name);
+  const direct={id:'b',file:file('b.png'),sequence:1},first={id:'a',file:file('a-enhanced.png'),sequence:0},last={id:'c',file:file('c-enhanced.png'),sequence:2};
+  let sources=mergeFlowSources([direct],[last]);sources=mergeFlowSources(sources,[first]);
+  assert.deepEqual(sources.map(source=>source.id),['a','b','c']);
+  const replacement={...first,file:file('a-new-enhanced.png')};sources=mergeFlowSources(sources,[replacement]);
+  assert.equal(sources.length,3);assert.equal(sources[0].file.name,'a-new-enhanced.png');
+  assert.deepEqual(mergePendingIds(['a','c'],['c'],['a']),['c']);
+  assert.deepEqual(mergePendingIds(['c'],[],['c']),[]);
+});
 
 test('local clarity retains dimensions, alpha, transparent pixels and zero-strength data', () => {
   const pixels = new Uint8ClampedArray([110,140,150,255,255,255,255,255,10,20,30,0,190,170,180,128]);

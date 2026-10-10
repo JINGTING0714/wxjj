@@ -1,0 +1,10 @@
+{
+  "name": "Real-ESRGAN AnimeVideo-v3",
+  "architecture": "SRVGGNetCompact, 16 convolutions, PReLU, 4x",
+  "source": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.pth",
+  "sourceSha256": "b8a8376811077954d82ca3fcf476f1ac3da3e8a68a4f4d71363008000a18b75d",
+  "onnxSha256": "9471c57a9a5d2b7ff66806c65edeb230709d2efc7df4f3561a75614b58d9384b",
+  "license": "BSD-3-Clause; see LICENSE-Real-ESRGAN.txt",
+  "conversion": "scripts/export-super-resolution.py",
+  "processing": "Local browser inference; no image upload"
+}
