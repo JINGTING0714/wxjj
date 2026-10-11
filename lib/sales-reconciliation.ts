@@ -8,6 +8,7 @@ export type SaleMessage = {
   time: string;
   text: string;
   ignored?: boolean;
+  ocrReference?:{buyer:string;time:string;text:string};
   ocrConfidence?: number;
   ocrTop?: number;
 };

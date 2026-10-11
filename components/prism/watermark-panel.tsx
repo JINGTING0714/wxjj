@@ -1,4 +1,5 @@
 'use client';
+import {startTask,restoreTask} from '@/lib/task-center';
 import { moveListItem } from './sortable-list';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -381,6 +382,7 @@ export function WatermarkPanel({
     const controller = new AbortController();
     controllers.current.set(target.id, controller);
     const signal = controller.signal;
+    const tracked=startTask('watermark:'+target.id,'图片水印','watermark',{stop:()=>controller.abort(),retry:()=>{const latest=workspace.current.current.batches.find(batch=>batch.id===target.id);if(latest)run(latest,true);}});
     update(target.id, (b) => ({ ...b, job, retryIds: [] }));
     setRunning((current) => ({ ...current, [target.id]: 0 }));
     setError('');
@@ -388,16 +390,15 @@ export function WatermarkPanel({
       try {
         await workspace.flush();
         const remaining = job.todo.slice(job.next);
-        await applyWatermarks(
+        if(remaining.length) await applyWatermarks(
           remaining.map((s) => s.file),
           job.layers,
-          (done, total) =>
-            setRunning((current) => ({
+          (done, total) => {tracked.progress((job.next+done)/(job.next+total),`已完成 ${job.next+done} / ${job.next+total} 张`);return setRunning((current) => ({
               ...current,
               [target.id]: Math.round(
                 ((job.next + done) / (job.next + total)) * 100,
               ),
-            })),
+            }));},
           async (image, index) => {
             signal.throwIfAborted();
             const source = remaining[index];
@@ -428,8 +429,10 @@ export function WatermarkPanel({
           (index) => job.overrides?.[remaining[index].id] || { layers: job.layers, composition: job.composition },
         );
         update(target.id, (b) => ({ ...b, job: null }));
-        await workspace.flush();
+        await workspace.flush();tracked.done();
       } catch (e) {
+        update(target.id,b=>({...b,job:b.job||{...job,next:job.todo.length}}));
+        if(signal.aborted)tracked.pause();else tracked.fail(e);
         if (!signal.aborted)
           setError(e instanceof Error ? e.message : '水印处理失败');
       } finally {
@@ -444,6 +447,8 @@ export function WatermarkPanel({
     })();
     tasks.current.set(target.id, task);
   };
+  useEffect(()=>{if(workspace.ready)for(const batch of state.batches)if(batch.job)restoreTask('watermark:'+batch.id,'图片水印','watermark',()=>{const latest=workspace.current.current.batches.find(item=>item.id===batch.id);if(latest)run(latest,true);});},[workspace.ready,state.batches]);
+  useEffect(()=>{const open=(event:Event)=>{const id=(event as CustomEvent<{id:string}>).detail.id;if(id==='video-watermark')setState(current=>({...current,tab:'video'}));else if(id.startsWith('watermark:'))setState(current=>({...current,tab:'images',active:id.slice(10)}));};window.addEventListener('prism:task-open',open);return()=>window.removeEventListener('prism:task-open',open);},[]);
   return (
     <div className="studio-page watermark-page">
       <SectionHead

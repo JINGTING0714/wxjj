@@ -1,4 +1,5 @@
 'use client';
+import {TaskCenter} from '@/components/prism/task-center';
 import { ImageDownloadDialog } from '@/components/prism/image-download-dialog';
 import { ImageEnhancementPanel } from '@/components/prism/image-enhancement-panel';
 
@@ -560,6 +561,7 @@ export default function Home() {
             </div>
           )}
 
+          <TaskCenter onOpen={setActiveView} />
           <div className="content-frame" hidden={activeView !== 'overview'}>
             <section className="editorial-head">
               <div>

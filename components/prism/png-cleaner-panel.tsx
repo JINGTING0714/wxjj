@@ -1,4 +1,5 @@
 'use client';
+import {startTask,restoreTask} from '@/lib/task-center';
 /* oxlint-disable next/no-img-element -- Local Blob previews must stay on-device. */
 
 import { useEffect, useRef, useState } from 'react';
@@ -151,7 +152,9 @@ export function PngCleanerPanel({
 
   const run = async (sources: PipelineSource[], mode?: CleanMode) => {
     if (controller.current || !sources.length) return;
+    const succeeded=new Set<string>();
     const control = new AbortController();
+    const tracked=startTask('png-cleaner',mode?'PNG 清洗与画质检测':'PNG 检查','png-cleaner',{stop:()=>control.abort(),retry:()=>{const keep=new Set(workspace.current.current.sources.map(item=>item.id));void run(sources.filter(item=>!succeeded.has(item.id)&&keep.has(item.id)),mode);}});
     controller.current = control;
     setBusy(true);
     setProcessing(true);
@@ -161,6 +164,7 @@ export function PngCleanerPanel({
       mode,
       signal: control.signal,
       onResult: (result, completed) => {
+        if(!result.error)succeeded.add(result.id);tracked.progress(completed/sources.length,`已完成 ${completed} / ${sources.length} 张`);
         if (!mounted.current) return;
         setState((current) => ({
           ...current,
@@ -190,6 +194,7 @@ export function PngCleanerPanel({
           if(mounted.current)setState(current=>({...current,advice:{...current.advice,[item.id]:advice},enhance:{...current.enhance,[item.id]:current.enhance[item.id]??advice.recommended}}));
         }
       }
+      if(result.cancelled)tracked.pause();else if(succeeded.size<sources.length)tracked.fail(new Error('部分图片未完成，可重试未完成项。'));else tracked.done();
       if (mounted.current) {
         setProgress({
           done: result.completed,
@@ -206,6 +211,7 @@ export function PngCleanerPanel({
         if (mode) setPanel('output');
       }
     } catch (error) {
+      if(control.signal.aborted)tracked.pause();else tracked.fail(error);
       if (mounted.current)
         setMessage(error instanceof Error ? error.message : '批处理失败');
     } finally {

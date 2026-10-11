@@ -1,4 +1,7 @@
 'use client';
+import {RegionRecognition} from './region-recognition';
+import {TextReview} from './text-review';
+import {startTask} from '@/lib/task-center';
 import {MobileReview} from './mobile-review';
 import {useMobile} from './use-mobile';
 
@@ -145,17 +148,18 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   const recognize = async () => {
     if (!active?.screenshots.length) return;
     if (active.messages.length && !(await confirmation.ask('重新识别会替换当前消息及补录内容。请先确认你希望重新识别。', '重新识别', '确认重新识别'))) return;
+    const tracked=startTask('ocr:sales','售图截图识别','sales',{retry:()=>void recognize()});
     setBusy(true);
     try {
-      const pages = await recognizeLocalImages(active.screenshots, setMessage, 'sales');
-      const candidates = messagesFromOcr(pages);
+      const pages = await recognizeLocalImages(active.screenshots,label=>{setMessage(label);tracked.indeterminate(label);},'sales');
+      const candidates = messagesFromOcr(pages).map(row=>{const prior=active.messages.find(old=>old.screenshot===row.screenshot&&old.ocrTop!==undefined&&row.ocrTop!==undefined&&Math.abs(old.ocrTop-row.ocrTop)<25);return {...row,ocrReference:prior?(prior.ocrReference||{buyer:prior.buyer,time:prior.time,text:prior.text}):{buyer:row.buyer,time:row.time,text:row.text}};});tracked.done(`整理出 ${candidates.length} 条消息，等待人工复核。`);
       patchRound(active.id, (round) => ({ ...round, complete: false, assignments: [], messages: candidates }));
       setMessage(candidates.length
         ? `识别到 ${candidates.length} 条号码候选。请按原截图补齐遗漏消息、昵称和时间，确认截图完整后再核对。`
         : '识别完成，但没有找到号码候选。请确认截图清晰、顺序正确；可以删除错误截图后重传，或用“补录漏识别的购买消息”手动添加。');
       if (candidates.length) confirmation.notify('消息已整理好，请把左侧原截图与右侧结果逐条对照，特别检查昵称、时间、号码和重叠消息。确认截图完整后，再生成交付清单。', '请先人工复核');
     } catch (error) {
-      setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动添加消息核对。`);
+      tracked.fail(error);setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动添加消息核对。`);
     } finally { setBusy(false); }
   };
   const reorderScreenshots = (from: number, to: number) => {
@@ -255,6 +259,8 @@ export function SalesPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
           <strong>消息 {index + 1} · 第 {entry.screenshot + 1} 张</strong>
           <div className="sales-message-order"><SortHandle disabled={busy} /><button disabled={index === 0} type="button" onClick={() => moveMessage(index, -1)}>上移</button><button disabled={index === orderedMessages.length - 1} type="button" onClick={() => moveMessage(index, 1)}>下移</button><button type="button" onClick={() => void removeMessage(entry)}>删除消息</button></div>
           {entry.ocrConfidence !== undefined && entry.ocrConfidence < 90 && <p className="sales-ocr-warning">OCR 参考值 {Math.round(entry.ocrConfidence)}%，低于 90%。请仔细对照原图检查昵称、时间和号码。</p>}
+          <RegionRecognition key={entry.id} file={active?.screenshots[entry.screenshot]} focusTop={entry.ocrTop} mode="sales" disabled={busy} targets={[{key:'text',label:'号码原文',text:entry.text},{key:'buyer',label:'昵称',text:entry.buyer},{key:'time',label:'时分秒',text:entry.time.slice(11)}]} onApply={(key,value)=>{if(key==='time'){if(!/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value.trim()))throw new Error('请填写有效时分秒，例如 22:15:00。');patchMessage(entry.id,{time:entry.time.slice(0,11)+value.trim()});}else patchMessage(entry.id,{[key]:value});}}/>
+          <TextReview before={entry.ocrReference?.text} after={entry.text}/><TextReview before={entry.ocrReference?.buyer} after={entry.buyer}/><TextReview before={entry.ocrReference?.time} after={entry.time}/>
           <label>对应截图<select aria-label="对应截图" value={entry.screenshot} onChange={(event) => patchMessage(entry.id, { screenshot: Number(event.target.value) })}>{active.screenshots.map((file, screen) => <option key={`${file.name}-${screen}`} value={screen}>第 {screen + 1} 张</option>)}</select></label>
           <label>昵称<input value={entry.buyer} onChange={(event) => patchMessage(entry.id, { buyer: event.target.value })} /></label>
           <DateTimeFields compact label="消息时间" value={entry.time} onChange={value => patchMessage(entry.id, { time: value })} />

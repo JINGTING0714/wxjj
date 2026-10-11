@@ -14,6 +14,7 @@ async function recognizeImages(
   onProgress?: (label: string) => void,
   mode: 'prompt' | 'sales' = 'prompt',
   quality: 'balanced' | 'precise' = 'balanced',
+  layout: 'chat' | 'region' = 'chat',
 ): Promise<OcrPage[]> {
   const { PSM } = await import('tesseract.js');
   const base = (process.env.NEXT_PUBLIC_BASE_PATH || '').replace(/\/$/, '');
@@ -62,7 +63,7 @@ async function recognizeImages(
           if (y % 128 === 0)
             await new Promise((resolve) => setTimeout(resolve, 0));
           let ink = 0;
-          const from = Math.round(
+          const from = layout === 'region' ? 0 : Math.round(
             canvas.width * (mode === 'sales' ? 0.145 : 0.48),
           );
           const to = Math.round(canvas.width * 0.97);
@@ -132,7 +133,7 @@ async function recognizeImages(
         );
         let scale = detectionScale;
         let cut = document.createElement('canvas');
-        const left = dark
+        const left = dark && layout !== 'region'
           ? Math.round(canvas.width * (mode === 'sales' ? 0.145 : 0.112))
           : 0;
         cut = await prepareCut(canvas, left, region, scale, dark, background);
@@ -448,12 +449,13 @@ export function recognizeLocalImages(
   onProgress?: (label: string) => void,
   mode: 'prompt' | 'sales' = 'prompt',
   quality: 'balanced' | 'precise' = 'balanced',
+  layout: 'chat' | 'region' = 'chat',
 ): Promise<OcrPage[]> {
   const task = queue
     .catch(() => {})
     .then(async () => {
       const pages: OcrPage[] = [];
-      const key = `${mode}:${quality}`;
+      const key = `${mode}:${quality}:${layout}`;
       for (const [index, file] of files.entries()) {
         onProgress?.(`正在识别第 ${index + 1} / ${files.length} 张截图`);
         let known = results.get(file)?.get(key);
@@ -464,7 +466,7 @@ export function recognizeLocalImages(
                 .replace('第 1 / 1 张', `第 ${index + 1} / ${files.length} 张`)
                 .replace('第 1 张', `第 ${index + 1} 张`),
             );
-          [known] = await recognizeImages([file], report, mode, quality);
+          [known] = await recognizeImages([file], report, mode, quality, layout);
           const cache = results.get(file) || new Map<string, OcrPage>();
           cache.set(key, known);
           results.set(file, cache);

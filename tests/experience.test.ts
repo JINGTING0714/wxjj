@@ -5,6 +5,23 @@ import { enhancementSize,resolutionTiles } from '../lib/super-resolution';
 import { imageAdvice } from '../lib/image-quality';
 import { mergeFlowSources,mergePendingIds } from '../lib/pipeline';
 import {touchPair,pinchView,pinchLayer} from '../lib/editor-gestures';
+import {textChanges,reviewIssues} from '../lib/text-review';
+import {imageRegion} from '../lib/ocr-region';
+import {startTask,taskSnapshot,clearTasks,restoreTask} from '../lib/task-center';
+
+test('text comparison preserves both originals and new text including Chinese, parameters and long inputs',()=>{
+ for(const [before,after] of [['柔和T净 --ar 9:16','柔和干净 --ar 3:4'],['a profile ABC --stylize 650','a profile ABD --stylize 850'],['长'.repeat(3000),'文'.repeat(3000)],['','新词'],['原词','']]){const parts=textChanges(before,after);assert.equal(parts.filter(p=>p.kind!=='added').map(p=>p.text).join(''),before);assert.equal(parts.filter(p=>p.kind!=='removed').map(p=>p.text).join(''),after);}
+ assert.equal(reviewIssues('柔和T净 --ar 9:16').length,1);
+ assert.ok(reviewIssues('--ar 9;16 --stylize O50').length>=2);
+ assert.equal(reviewIssues('精致BJD五官，2.5D插画 --ar 9:16 --stylize 650 --profile 2g9wdey').length,0);
+});
+test('crop rectangles clamp to original pixels and work in either drag direction',()=>{
+ assert.deepEqual(imageRegion({x:80,y:90},{x:-20,y:30},100,100),{x:0,y:30,width:80,height:60});
+ assert.deepEqual(imageRegion({x:10,y:20},{x:200,y:130},100,100),{x:10,y:20,width:90,height:80});
+});
+test('task registry protects restarted jobs, keeps running items and clears private session state',()=>{
+ clearTasks(true);const old=startTask('a','识别','prompts'),next=startTask('a','识别','prompts',{retry:()=>{}});old.done();assert.equal(taskSnapshot()[0].status,'running');next.progress(.4);assert.equal(taskSnapshot()[0].progress,.4);next.fail(new Error('重试'));restoreTask('a','识别','prompts',()=>{});assert.equal(taskSnapshot()[0].status,'failed');startTask('b','水印','watermark');clearTasks();assert.equal(taskSnapshot().length,2);next.done();assert.equal(taskSnapshot().find(task=>task.id==='a')?.retry,undefined);clearTasks();assert.deepEqual(taskSnapshot().map(task=>task.id),['b']);clearTasks(true);assert.equal(taskSnapshot().length,0);
+});
 
 test('pinch keeps the viewed image point under the fingers, clamps zoom, and changes layers uniformly',()=>{
   const first=touchPair({x:140,y:100},{x:180,y:100}),now=touchPair({x:140,y:130},{x:220,y:130});

@@ -1,4 +1,5 @@
 'use client';
+import {startTask,restoreTask} from '@/lib/task-center';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Button } from '@/components/ui/button';
 import { SectionHead } from './studio-shared';
@@ -226,12 +227,13 @@ export function ImageEnhancementPanel({
       setBusy(false);
     }
   };
-  const run = (all: boolean) => {
+  const runLatest=useRef<(all:boolean,retryOnly?:boolean,subset?:string[])=>void>(()=>{});
+  const run = (all: boolean, retryOnly=false, subset?:string[]) => {
     if (busy || !photo || !workspace.ready || vault.busy || controller.current)
       return;
     const abort = new AbortController(),
       ids = all
-        ? state.photos.filter((photo) => !photo.sent).map((item) => item.id)
+        ? state.photos.filter((photo) => !photo.sent&&(!subset||subset.includes(photo.id))&&(!retryOnly||!photo.output||!!photo.error)).map((item) => item.id)
         : [photo.id],
       settings = { ...state.settings },
       choice = state.mode;
@@ -239,6 +241,8 @@ export function ImageEnhancementPanel({
       setProgress('当前图片都已汇入水印工坊，可以选择单张重新增强。');
       return;
     }
+    const tracked=startTask('enhancement','画质增强 / 超分辨率','enhancement',{stop:()=>abort.abort(),retry:()=>runLatest.current(true,true,ids)});
+    if(retryOnly&&!ids.length){setBusy(true);void (state.autoSend?sendPhotos(state.photos.filter(item=>(!subset||subset.includes(item.id))&&item.output&&!item.error&&!item.sent)):workspace.flush()).then(()=>tracked.done()).catch(reason=>{tracked.fail(reason);setError(reason instanceof Error?reason.message:'保存未完成，请重试。');}).finally(()=>setBusy(false));return;}
     controller.current = abort;
     setBusy(true);
     setError('');
@@ -259,10 +263,9 @@ export function ImageEnhancementPanel({
               item.file,
               settings,
               abort.signal,
-              (value, label) =>
-                setProgress(
+              (value, label) => {tracked.progress((index+value)/ids.length,`第 ${index+1} / ${ids.length} 张 · ${label||"清晰度处理"}`);return setProgress(
                   `第 ${index + 1}/${ids.length} 张 · ${label || '清晰度处理'} · ${Math.round(value * 100)}%`,
-                ),
+                );},
               mode,
             );
             setState((current) => ({
@@ -309,14 +312,16 @@ export function ImageEnhancementPanel({
         ) {
           const outputs = workspace.current.current.photos.filter(
             (photo) =>
-              ids.includes(photo.id) &&
+              (subset||ids).includes(photo.id) &&
               photo.output &&
               !photo.error &&
               !photo.sent,
           );
           await sendPhotos(outputs);
         }
+        if(failed)tracked.fail(new Error(`${failed} 张未完成，可只重试未完成项。`));else tracked.done();
       } catch (reason) {
+        if(abort.signal.aborted)tracked.pause();else tracked.fail(reason);
         setProgress(
           abort.signal.aborted
             ? '已取消，已完成的增强结果保留。'
@@ -331,6 +336,7 @@ export function ImageEnhancementPanel({
       }
     })();
   };
+  runLatest.current=run;
   const remove = async () => {
     if (!photo || busy) return;
     setBusy(true);

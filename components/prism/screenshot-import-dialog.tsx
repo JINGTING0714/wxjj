@@ -1,4 +1,7 @@
 'use client';
+import {RegionRecognition} from './region-recognition';
+import {TextReview} from './text-review';
+import {startTask} from '@/lib/task-center';
 import {MobileReview} from './mobile-review';
 import {ScreenshotReview} from './screenshot-review';
 import {useMobile} from './use-mobile';
@@ -88,19 +91,20 @@ export function ScreenshotImportDialog({
   const recognize = async () => {
     if (!files.length) return;
     if (rows.some(row => !row.saved) && !(await confirmation.ask('重新识别会替换当前候选和手动修改。要重新识别吗？', '重新识别', '确认重新识别'))) return;
+    const tracked=startTask('ocr:prompt','提示词截图识别','prompts',{retry:()=>void recognize()});
     setBusy(true);
     setMessage('正在本机加载英文和中文识别模型…');
     try {
-      const pages = await recognizeLocalImages(files, setMessage, 'prompt', quality);
-      const next = draftsFromOcr(pages);
-      setRows(next);
+      const pages = await recognizeLocalImages(files, label=>{setMessage(label);tracked.indeterminate(label);}, 'prompt', quality);
+      const next = draftsFromOcr(pages);tracked.done(`整理出 ${next.length} 条候选，等待人工复核。`);
+      setRows(next.map((row,index)=>{const prior=rows[index];return {...row,ocrReference:prior&&prior.screenshot===row.screenshot&&Math.abs(prior.top-row.top)<50?(prior.ocrReference||{english:prior.english,chinese:prior.chinese,unconfirmed:prior.unconfirmed}):{english:row.english,chinese:row.chinese,unconfirmed:row.unconfirmed}};}));
       if (next[0]) { setActiveScreenshot(next[0].screenshot); setReviewTop(next[0].top); }
       setMessage(next.length
         ? `识别完成：${next.length} 条候选。每条需校对并勾选才会保存；模糊小图不会入库。`
         : '识别完成，但没有找到可确认的提示词。请检查截图清晰度、顺序，或点击“手动新增条目”录入；原截图仍保留，可删除后重传。');
       if (next.length) confirmation.notify(`已经为你整理好候选提示词。请对照原截图检查中英文、标点和参数，再勾选确认入库。${next.some(row => row.confidence < 90) ? '其中有 OCR 参考值低于 90% 的内容，请特别仔细校对。' : ''}聊天截图不会成为正式例图；分享前请保护好提示词和 P 值。`, '请先校对，再安心入库');
     } catch (error) {
-      setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动新增条目并对照截图录入。`);
+      tracked.fail(error);setMessage(`识别失败：${error instanceof Error ? error.message : '未知错误'}。可手动新增条目并对照截图录入。`);
     } finally {
       setBusy(false);
     }
@@ -124,8 +128,8 @@ export function ScreenshotImportDialog({
     next.splice(index + 1, 1);
     return next;
   });
-  const draftActions = useRef({ patch, setActiveScreenshot, setDuplicates, mergeNext, setRows });
-  draftActions.current = { patch, setActiveScreenshot, setDuplicates, mergeNext, setRows };
+  const draftActions = useRef({ patch, setActiveScreenshot, setDuplicates, mergeNext, setRows, files });
+  draftActions.current = { patch, setActiveScreenshot, setDuplicates, mergeNext, setRows, files };
   const save = async () => {
     const selected = rows.filter((row) => row.include && !row.saved);
     if (!selected.length) { setMessage('请先勾选已校对的条目。'); return; }
@@ -234,17 +238,22 @@ export function ScreenshotImportDialog({
 
 const ScreenshotDraftCard = memo(function ScreenshotDraftCard({ row, index, last, collections, duplicate, allowDuplicate, actions }: {
   row: ScreenshotPromptDraft; index: number; last: boolean; collections: CollectionRecord[]; duplicate: boolean; allowDuplicate: boolean;
-  actions: { current: { patch: (id: string, change: Partial<ScreenshotPromptDraft>) => void; setActiveScreenshot: React.Dispatch<React.SetStateAction<number>>; setDuplicates: React.Dispatch<React.SetStateAction<Set<string>>>; mergeNext: (index: number) => void; setRows: React.Dispatch<React.SetStateAction<ScreenshotPromptDraft[]>> } };
+  actions: { current: { patch: (id: string, change: Partial<ScreenshotPromptDraft>) => void; setActiveScreenshot: React.Dispatch<React.SetStateAction<number>>; setDuplicates: React.Dispatch<React.SetStateAction<Set<string>>>; mergeNext: (index: number) => void; files:File[]; setRows: React.Dispatch<React.SetStateAction<ScreenshotPromptDraft[]>> } };
 }) {
-  const { patch, setActiveScreenshot, setDuplicates, mergeNext, setRows } = actions.current;
+  const { patch, setActiveScreenshot, setDuplicates, mergeNext, setRows, files } = actions.current;
+  const selectedText=useRef<{key:string;start:number;end:number;text:string}|null>(null);
+  useEffect(()=>{selectedText.current=null;},[row.id]);
+  const selectText=(key:string,event:React.SyntheticEvent<HTMLTextAreaElement>)=>{const node=event.currentTarget;if(node.selectionEnd>node.selectionStart)selectedText.current={key,start:node.selectionStart,end:node.selectionEnd,text:node.value};};
   return <article className="screenshot-draft" key={row.id}>
                 <div className="screenshot-draft-head"><SortHandle disabled={row.saved} /><button onClick={() => setActiveScreenshot(row.screenshot)} type="button">第 {row.screenshot + 1} 张 · 约 {Math.round(row.top)} px</button><span>{Math.round(row.confidence)}% OCR 参考值</span></div>
                 {(row.confidence < 90 || !!row.uncertainLines) && <p className="import-warning" role="note">本条包含低于 90% 的识别行，请对照原图检查字词、标点和参数。{row.uncertainLines ? ` 共 ${row.uncertainLines} 行，最低 ${Math.round(row.minimumConfidence || 0)}%。` : ""}</p>}
+                <RegionRecognition key={row.id} getSelection={()=>{const selected=selectedText.current;return selected&&({english:row.english,chinese:row.chinese,unconfirmed:row.unconfirmed} as Record<string,string>)[selected.key]===selected.text?selected:null;}} file={files[row.screenshot]} focusTop={row.top} mode="prompt" disabled={row.saved} targets={[{key:'chinese',label:'中文 Prompt',text:row.chinese},{key:'english',label:'英文 Prompt',text:row.english},{key:'unconfirmed',label:'待确认原文',text:row.unconfirmed}]} onApply={(key,value)=>patch(row.id,{[key]:value,include:false})}/>
                 <label>名称<input value={row.title} onChange={(event) => patch(row.id, { title: event.target.value })} /></label>
                 <div className="screenshot-row-category"><label>本条分类<select value={row.collectionId || ''} onChange={(event) => patch(row.id, { collectionId: event.target.value })}><option value="">使用上方批量分类</option><option value="unfiled">未分类</option>{collections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>或为本条新建分类<input value={row.newCollection || ''} onChange={(event) => patch(row.id, { newCollection: event.target.value })} placeholder="留空则使用所选分类" /></label></div>
-                <label>英文 Prompt<textarea aria-label="英文 Prompt" value={row.english} onChange={(event) => patch(row.id, { english: event.target.value })} spellCheck={false} /></label>
-                <label>中文 Prompt<textarea aria-label="中文 Prompt" value={row.chinese} onChange={(event) => patch(row.id, { chinese: event.target.value })} /></label>
-                <label>待确认原文<textarea aria-label="待确认原文" value={row.unconfirmed} onChange={(event) => patch(row.id, { unconfirmed: event.target.value })} /></label>
+                <label>英文 Prompt<textarea onBlur={event=>selectText('english',event)} onSelect={event=>selectText('english',event)} aria-label="英文 Prompt" value={row.english} onChange={(event) => patch(row.id, { english: event.target.value })} spellCheck={false} /></label>
+                <label>中文 Prompt<textarea onBlur={event=>selectText('chinese',event)} onSelect={event=>selectText('chinese',event)} aria-label="中文 Prompt" value={row.chinese} onChange={(event) => patch(row.id, { chinese: event.target.value })} /></label>
+                <TextReview before={row.ocrReference?.english} after={row.english}/><TextReview before={row.ocrReference?.chinese} after={row.chinese}/><TextReview before={row.ocrReference?.unconfirmed} after={row.unconfirmed}/>
+                <label>待确认原文<textarea onBlur={event=>selectText('unconfirmed',event)} onSelect={event=>selectText('unconfirmed',event)} aria-label="待确认原文" value={row.unconfirmed} onChange={(event) => patch(row.id, { unconfirmed: event.target.value })} /></label>
                 <label>使用说明 / 普通备注（只填你确认属于此条的内容）<textarea value={row.note} onChange={(event) => patch(row.id, { note: event.target.value })} /></label>
                 <details className="screenshot-row-details"><summary>本条作者、来源、取得方式与标签</summary><div className="screenshot-row-category"><label>作者<input value={row.author || ''} onChange={(event) => patch(row.id, { author: event.target.value })} placeholder="留空使用整批设置" /></label><label>来源<input value={row.origin || ''} onChange={(event) => patch(row.id, { origin: event.target.value })} placeholder="留空使用整批设置" /></label><label>取得方式<input value={row.acquisition || ''} onChange={(event) => patch(row.id, { acquisition: event.target.value })} placeholder="留空使用整批设置" /></label><label>标签<input value={row.tags || ''} onChange={(event) => patch(row.id, { tags: event.target.value })} placeholder="逗号分隔；留空使用整批设置" /></label></div></details>
                 {duplicate && <label className="import-warning"><input type="checkbox" checked={allowDuplicate} onChange={(event) => setDuplicates((current) => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next; })} />与现有词条的中英文和原文完全相同；确认仍要新增这一条</label>}

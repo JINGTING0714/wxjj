@@ -6,6 +6,7 @@ export type ScreenshotPromptDraft = {
   screenshot: number;
   top: number;
   confidence: number;
+  ocrReference?:{english:string;chinese:string;unconfirmed:string};
   uncertainLines?: number;
   minimumConfidence?: number;
   title: string;

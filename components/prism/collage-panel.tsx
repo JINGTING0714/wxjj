@@ -1,4 +1,5 @@
 'use client';
+import {startTask,restoreTask} from '@/lib/task-center';
 import { MOBILE_MEDIA } from '@/lib/mobile-media';
 import { moveListItem } from './sortable-list';
 import { useConfirmation } from './use-confirmation';
@@ -434,6 +435,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
     ? Math.ceil(files.length / (activeGrid.columns * activeGrid.rows))
     : 0;
 
+  const generateLatest=useRef<(resume?:boolean)=>Promise<void>>(async()=>{});
   const generate = async (resume = false) => {
     if (processing || !workspace.ready) return;
     if (boardWidth > 8000 || boardHeight > 8000 || boardWidth * boardHeight > 40_000_000) { setError('整板尺寸过大。请减小单张图片尺寸或行列数（单边最多 8000 px，总像素最多 4000 万）。'); return; }
@@ -482,17 +484,19 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
     if (!job.files.length) return;
     controller.current = new AbortController();
     const signal = controller.current.signal;
+    const tracked=startTask("collage:"+job.id,"编号拼图","collage",{stop:()=>controller.current?.abort(),retry:()=>void generateLatest.current(true)});
     setState((current) => ({ ...current, job }));
     setProcessing(true);
     setProgress(0);
     setError('');
+    let completedBoard=job.nextBoard;
     const task = (async () => {
       try {
         await workspace.flush();
         await createCollages(
           job.files,
           job.options,
-          (done, total) => setProgress(Math.round((done / total) * 100)),
+          (done, total) => {setProgress(Math.round((done / total) * 100));tracked.progress(done/total,`已完成 ${done} / ${total} 板`);},
           signal,
           async (result, boardIndex) => {
             signal.throwIfAborted();
@@ -529,6 +533,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
               result,
               ...current.filter((item) => item.id !== result.id),
             ]);
+            completedBoard=boardIndex+1;
             setState((current) => ({
               ...current,
               job: { ...job, nextBoard: boardIndex + 1 },
@@ -543,7 +548,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
           jobId: job.id, startNumber: job.options.startNumber, sources: job.sources || current.sources,
           boardIds: Array.from({ length: Math.ceil(job.files.length / (job.options.columns * job.options.rows)) }, (_, index) => `${job.id}-${index}`),
         } }));
-        await workspace.flush();
+        await workspace.flush();tracked.done();
       } catch (reason) {
         if (!signal.aborted)
           setError(reason instanceof Error ? reason.message : '拼图失败');
@@ -557,6 +562,8 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
     });
   };
 
+  generateLatest.current=generate;
+  useEffect(()=>{if(workspace.ready&&state.job&&!processing)restoreTask('collage:'+state.job.id,'编号拼图','collage',()=>void generateLatest.current(true));},[workspace.ready,state.job,processing]);
   const deleteOutput = async (output: ProcessedImage) => {
     if (!window.confirm(`删除拼图“${output.name}”吗？`)) return;
     try {

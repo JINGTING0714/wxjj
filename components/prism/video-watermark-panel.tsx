@@ -1,4 +1,5 @@
 'use client';
+import {startTask,restoreTask} from '@/lib/task-center';
 import { moveListItem } from './sortable-list';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -141,6 +142,7 @@ export function VideoWatermarkPanel() {
       setImporting(false);
     }
   };
+  const runLatest=useRef<(resume?:boolean)=>void>(()=>{});
   const run = (resume = false) => {
     if (busy || task.current) return;
     const job =
@@ -155,10 +157,12 @@ export function VideoWatermarkPanel() {
           };
     controller.current = new AbortController();
     const signal = controller.current.signal;
+    const tracked=startTask("video-watermark","视频水印","watermark",{stop:()=>controller.current?.abort(),retry:()=>runLatest.current(true)});
     setState((s) => ({ ...s, job }));
     setBusy(true);
     setProgressValue(0);
     setError('');
+    let completedVideo=job.next;
     task.current = (async () => {
       const engine = new VideoEngineSession();
       try {
@@ -171,7 +175,7 @@ export function VideoWatermarkPanel() {
             job.layers,
             signal,
             (value, phase) => {
-              setProgressValue(value);
+              setProgressValue(value);tracked.progress((i+value)/job.todo.length,`第 ${i+1} / ${job.todo.length} 段 · ${phase}`);
               setProgress(
                 `${i + 1} / ${job.todo.length} · ${Math.round(value * 100)}% · ${phase}`,
               );
@@ -181,6 +185,7 @@ export function VideoWatermarkPanel() {
             engine,
           );
           signal.throwIfAborted();
+          completedVideo=i+1;
           setState((s) => ({
             ...s,
             outputs: [
@@ -193,8 +198,10 @@ export function VideoWatermarkPanel() {
         }
         setState((s) => ({ ...s, job: null }));
         await workspace.flush();
-        setProgress('本批视频水印已完成，可逐段检查并下载。');
+        setProgress('本批视频水印已完成，可逐段检查并下载。');tracked.done();
       } catch (e) {
+        setState(current=>({...current,job:current.job||{...job,next:completedVideo}}));
+        if(signal.aborted)tracked.pause();else tracked.fail(e);
         if (!signal.aborted)
           setError(e instanceof Error ? e.message : '视频处理失败');
         else
@@ -206,6 +213,8 @@ export function VideoWatermarkPanel() {
       }
     })();
   };
+  runLatest.current=run;
+  useEffect(()=>{if(workspace.ready&&state.job&&!busy)restoreTask('video-watermark','视频水印','watermark',()=>runLatest.current(true));},[workspace.ready,state.job,busy]);
   return (
     <section className="video-workshop">
       <h2>视频水印 · 独立工区</h2>
