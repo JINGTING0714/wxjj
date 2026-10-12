@@ -1,4 +1,5 @@
 'use client';
+import {useCodeFormat,rawProfileCodes} from './code-copy';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ export function ProfileCopyDialog({
   title: string;
   codes: ProfileShortCode[];
 }) {
+  const {format,change}=useCodeFormat();
   const [open, setOpen] = useState(false),
     [order, setOrder] = useState<ProfileShortCode[]>([]),
     [selected, setSelected] = useState<string[]>([]);
@@ -60,6 +62,7 @@ export function ProfileCopyDialog({
           <DialogDescription>
             勾选要使用的短码，并调整本次复制的顺序。
           </DialogDescription>
+<label>复制格式<select aria-label="文件夹复制格式" value={format} onChange={event=>change(event.target.value as 'profile'|'raw')}><option value="profile">带 --profile</option><option value="raw">仅短码</option></select></label>
           <SortableList className="profile-copy-list" onMove={(from, to) => setOrder(current => moveListItem(current, from, to))}>
             {order.map((code, index) => (
               <article key={code.id}><SortHandle />
@@ -110,7 +113,7 @@ export function ProfileCopyDialog({
             <Button
               disabled={!selected.length}
               onClick={async () => {
-                if (await copyText(value)) setOpen(false);
+                if (await copyText(format==='profile'?value:rawProfileCodes(value))) setOpen(false);
               }}
             >
               确认复制 {selected.length} 个短码

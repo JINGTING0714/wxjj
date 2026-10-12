@@ -39,6 +39,7 @@ import type {
 } from '@/lib/prism-types';
 import { prismId } from '@/lib/prism-types';
 import { MobileWorkspaceSheet } from './mobile-workspace';
+import {IndexJump} from './index-jump';
 
 const coreCollections: CollectionRecord[] = [{ id: 'daily', name: '每日刷图' }];
 
@@ -273,6 +274,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
     setImages((current) =>
       current.map((image) => (image.id === next.id ? next : image)),
     );
+    setPreview(current=>current?.id===next.id?next:current);
     setEditingImage(null);
   };
 
@@ -707,18 +709,24 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       </Dialog>
 
       <Dialog
-        onOpenChange={(open) => !open && setPreview(null)}
+        onOpenChange={() => {}}
         open={Boolean(preview)}
       >
-        <DialogContent className="image-preview-dialog">
+        <DialogContent className="image-preview-dialog" showCloseButton={false} onKeyDown={event=>{if(event.target instanceof HTMLElement&&event.target.closest('input,textarea,select'))return;const delta=event.key==='ArrowLeft'?-1:event.key==='ArrowRight'?1:0;if(delta&&preview&&visible.length){const index=visible.findIndex(image=>image.id===preview.id);setPreview(visible[(index+delta+visible.length)%visible.length]);}}}>
           {preview && (
             <>
+              <Button variant="outline" aria-label="退出图片库查看" onClick={()=>setPreview(null)}>退出查看</Button>
               <DialogHeader>
                 <DialogTitle>{preview.name}</DialogTitle>
                 <DialogDescription>
                   {preview.note || '暂无备注'}
                 </DialogDescription>
               </DialogHeader>
+              <div className="example-lightbox-tools">
+                <Button variant="outline" aria-label="上一张图库图片" disabled={visible.length<2} onClick={()=>setPreview(visible[(visible.findIndex(image=>image.id===preview.id)-1+visible.length)%visible.length])}>上一张</Button>
+                <IndexJump label="跳转图库图片序号" index={Math.max(0,visible.findIndex(image=>image.id===preview.id))} count={visible.length} onChange={index=>setPreview(visible[index])}/>
+                <Button variant="outline" aria-label="下一张图库图片" disabled={visible.length<2} onClick={()=>setPreview(visible[(visible.findIndex(image=>image.id===preview.id)+1)%visible.length])}>下一张</Button>
+              </div>
               <img alt={preview.name} src={preview.url} />
               <DialogFooter>
                 <Button
@@ -729,7 +737,6 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
                 </Button>
                 <Button
                   onClick={() => {
-                    setPreview(null);
                     setEditingImage(preview);
                   }}
                 >

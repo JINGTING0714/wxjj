@@ -1,4 +1,5 @@
 'use client';
+import {useCodeFormat,rawProfileCodes} from './code-copy';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import {
   CollectionRail,
@@ -214,6 +215,7 @@ function SelectionList({
 }
 
 export function RecipePanel({ globalQuery }: { globalQuery: string }) {
+  const {format:copyFormat,change:changeCopyFormat}=useCodeFormat();
   const vault = useVault();
   const confirmation = useConfirmation();
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
@@ -608,7 +610,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                   id={recipe.id}
                   name={recipe.title}
                 />
-                <RecordExamples images={recipe.images} title={recipe.title} />
+                <RecordExamples images={recipe.images} title={recipe.title} browseImages={recipe.images.map(image=>({...image,assetId:recipe.id,title:recipe.title,copyValue:(()=>{try{const command=recipeCommand(recipe,assetById);return copyFormat==='profile'?command:rawProfileCodes(command);}catch{return '';}})(),copyLabel:'复制此配方'}))}/>
                 <div>
                   <Badge variant="outline">配方 · {recipe.ratio}</Badge>
                   <h3>{recipe.title}</h3>
@@ -629,7 +631,8 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                   ))}
                 </div>
                 <div className="record-secret-actions">
-                  {(['all', 'profile', 'moodboard'] as const).map((kind) => <button key={kind} type="button" onClick={() => { try { void copyText(recipeCommand(recipe, assetById, kind === 'all' ? undefined : kind)); } catch (error) { setFormError(error instanceof Error ? error.message : '复制失败'); } }}>{kind === 'all' ? '复制完整配方' : kind === 'profile' ? '仅复制 Profile' : '仅复制 Moodboard'}</button>)}
+                  <select aria-label="配方复制格式" value={copyFormat} onChange={event=>changeCopyFormat(event.target.value as 'profile'|'raw')}><option value="profile">带 --profile</option><option value="raw">仅短码</option></select>
+                  {(['all', 'profile', 'moodboard'] as const).map((kind) => <button key={kind} type="button" onClick={() => { try { const command=recipeCommand(recipe, assetById, kind === 'all' ? undefined : kind);void copyText(copyFormat==='profile'?command:rawProfileCodes(command)); } catch (error) { setFormError(error instanceof Error ? error.message : '复制失败'); } }}>{kind === 'all' ? '复制完整配方' : kind === 'profile' ? '仅复制 Profile' : '仅复制 Moodboard'}</button>)}
                   <button
                     type="button"
                     aria-label={open ? '隐藏配方短码' : '显示配方短码'}
@@ -934,7 +937,7 @@ export function RecipePanel({ globalQuery }: { globalQuery: string }) {
                 <div>
                   {existingImages.map((image) => (
                     <figure key={image.id}>
-                      <ExampleImage alt={image.name} src={image.url} />
+                      <ExampleImage alt={image.name} src={image.url} images={existingImages} index={existingImages.findIndex(item=>item.id===image.id)} />
                       <figcaption>{image.name}</figcaption>
                       <button
                         aria-label={`删除例图 ${image.name}`}

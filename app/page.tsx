@@ -1,4 +1,9 @@
 'use client';
+import {WritingStudio} from '@/components/prism/writing-studio';
+import {WrittenLibrary} from '@/components/prism/written-library';
+import {PosterPanel} from '@/components/prism/poster-panel';
+import {sendPipeline} from '@/lib/pipeline';
+import type {WrittenPrompt} from '@/lib/writing-model';
 import {TaskCenter} from '@/components/prism/task-center';
 import { ImageDownloadDialog } from '@/components/prism/image-download-dialog';
 import { ImageEnhancementPanel } from '@/components/prism/image-enhancement-panel';
@@ -63,7 +68,10 @@ type ViewId =
   | 'enhancement'
   | 'accounting'
   | 'sales'
-  | 'security';
+  | 'security'
+  | 'writer'
+  | 'written-prompts'
+  | 'poster';
 type NavEntry = { id: ViewId; label: string; icon: LucideIcon; count?: number };
 
 type GuideEntry = {
@@ -78,6 +86,8 @@ type GuideEntry = {
 
 const primaryNav: NavEntry[] = [
   { id: 'overview' as const, label: '开始与总览', icon: Aperture },
+  {id:'writer',label:'写词练习',icon:Library},
+  {id:'written-prompts',label:'自己的写词库',icon:Library},
   { id: 'prompts' as const, label: '提示词库', icon: Library },
   { id: 'profiles' as const, label: 'Profile 库', icon: KeyRound },
   { id: 'moodboards' as const, label: 'Moodboard 库', icon: ImageIcon },
@@ -91,6 +101,7 @@ const pipelineNav: NavEntry[] = [
   { id: 'enhancement', label: '画质增强', icon: Aperture },
   { id: 'watermark' as const, label: '水印工坊', icon: Stamp },
   { id: 'collage' as const, label: '拼图工坊', icon: Grid3X3 },
+  {id:'poster',label:'海报工坊',icon:Stamp},
   { id: 'sales', label: '售图核对', icon: Grid3X3 },
   { id: 'accounting', label: '记账本', icon: Library },
 ];
@@ -108,7 +119,7 @@ const mobileNavGroups: Array<{
     label: '资产',
     icon: Blocks,
     items: primaryNav.filter((item) =>
-      ['prompts', 'profiles', 'moodboards', 'recipes'].includes(item.id),
+      ['writer','written-prompts','prompts', 'profiles', 'moodboards', 'recipes'].includes(item.id),
     ),
   },
   {
@@ -116,7 +127,7 @@ const mobileNavGroups: Array<{
     label: '工坊',
     icon: Stamp,
     items: pipelineNav.filter((item) =>
-      ['gallery', 'png-cleaner', 'enhancement', 'watermark', 'collage', 'sales'].includes(
+      ['poster','gallery', 'png-cleaner', 'enhancement', 'watermark', 'collage', 'sales'].includes(
         item.id,
       ),
     ),
@@ -204,6 +215,9 @@ const workflowSteps: Array<{
 ];
 
 const moduleGuide: GuideEntry[] = [
+ {id:'writer',number:'15',label:'写词练习',icon:Library,responsibility:'参考图片、六种语言、AI 辅助与翻译、自己的常用词条。',firstAction:'导入参考图，写好描述和参数，核对翻译后保存新版本。',result:'写词、例图与版本收进自己的写词库。'},
+ {id:'written-prompts',number:'16',label:'自己的写词库',icon:Library,responsibility:'分类收纳自创提示词、不同语言、例图与旧版本。',firstAction:'选择分类、查看版本，或导出带例图的词包 XLSX。',result:'标记词以紫色字体导出；例图可送水印、海报。'},
+ {id:'poster',number:'17',label:'海报工坊',icon:Stamp,responsibility:'独立调整海报尺寸、各张图片尺寸，添加艺术字与符号。',firstAction:'从水印送入图片，选择布局，调整文字并输出海报。',result:'保存草稿、导出 PNG，或收纳到图片库。'},
   { id: 'enhancement', number: '14', label: '画质增强', icon: Aperture, responsibility: 'PNG 清洗后检测画质，在本机进行 2× / 4× 超分辨率与清晰度增强。', firstAction: '检查分流建议，选择倍数，放大对照人物、发丝与配饰。', result: '增强 PNG 汇入同一水印批次，继续打水印、拼图；支持单独下载。' },
   {
     id: 'accounting',
@@ -390,6 +404,8 @@ export default function Home() {
   useEffect(() => { let clean: (() => void) | undefined; let stopped = false; void import('@/lib/file-drop').then(module => { if (!stopped) clean = module.installFileDrop(); }); return () => { stopped = true; clean?.(); }; }, []);
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
+  const [writingSeed,setWritingSeed]=useState<{doc:WrittenPrompt;request:string}|undefined>();
+  useEffect(()=>setWritingSeed(undefined),[vault.session]);
   const [preparedEnhancement,setPreparedEnhancement] = useState<typeof vault.session|null>(null);
   const visitedLibraries = useRef(new Set<ViewId>());
   const librarySession = useRef(vault.session);
@@ -445,7 +461,7 @@ export default function Home() {
       <ImageDownloadDialog />
       <SiteTools previous={navigationOrder[navigationIndex - 1]?.label} next={navigationOrder[navigationIndex + 1]?.label} onPrevious={() => { const entry = navigationOrder[navigationIndex - 1]; if (entry) setActiveView(entry.id); }} onNext={() => { const entry = navigationOrder[navigationIndex + 1]; if (entry) setActiveView(entry.id); }} />
       <main
-        className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' ? 'editor-active' : ''}`}
+        className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${activeView === 'watermark' || activeView === 'collage' || activeView==='poster' ? 'editor-active' : ''}`}
       >
         <aside className="sidebar">
           <div className="brand-row">
@@ -549,13 +565,13 @@ export default function Home() {
         </aside>
 
         <section className="workspace">
-          {(activeView === 'watermark' || activeView === 'collage') && (
+          {(activeView === 'watermark' || activeView === 'collage' || activeView==='poster') && (
             <div className="mobile-editor-header mobile-workspace-only">
               <button type="button" onClick={() => setActiveView('overview')}>
                 <ChevronLeft /> 返回
               </button>
               <strong>
-                {activeView === 'watermark' ? '水印工坊' : '拼图工坊'}
+                {activeView === 'watermark' ? '水印工坊' : activeView==='poster'?'海报工坊':'拼图工坊'}
               </strong>
               <span>本机编辑</span>
             </div>
@@ -726,6 +742,9 @@ export default function Home() {
           </div>
           {vaultReady ? (
             <div key={vault.session} className={vault.busy ? 'vault-busy' : ''}>
+              <div className="content-frame studio-frame" hidden={activeView!=='writer'}>{visitedLibraries.current.has('writer')&&<WritingStudio seed={writingSeed?.doc} seedRequest={writingSeed?.request} onOpenLibrary={()=>setActiveView('written-prompts')}/>}</div>
+              <div className="content-frame studio-frame" hidden={activeView!=='written-prompts'}>{visitedLibraries.current.has('written-prompts')&&<WrittenLibrary onEdit={doc=>{setWritingSeed({doc,request:crypto.randomUUID()});setActiveView('writer');}} onWatermark={async(files,title)=>{setActiveView('watermark');await sendPipeline('watermark',{batchId:'writing-'+crypto.randomUUID(),batchTitle:title,sources:files},true);}}/>}</div>
+              <div className="content-frame studio-frame" hidden={activeView!=='poster'}>{visitedLibraries.current.has('poster')&&<PosterPanel/>}</div>
               <div
                 className="content-frame studio-frame"
                 hidden={activeView !== 'accounting'}
@@ -779,7 +798,7 @@ export default function Home() {
                 className="content-frame studio-frame"
                 hidden={activeView !== 'watermark'}
               >
-                <WatermarkPanel
+                <WatermarkPanel onOpenPoster={()=>setActiveView('poster')}
                   onOpenCollage={() => setActiveView('collage')}
                 />
               </div>

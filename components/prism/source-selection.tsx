@@ -1,4 +1,5 @@
 'use client';
+import {IndexJump} from './index-jump';
 import { SortableList, SortHandle } from './sortable-list';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -67,9 +68,7 @@ export function SourceSelection({
         >
           上一页
         </Button>
-        <span>
-          {current + 1} / {pages}
-        </span>
+        <IndexJump index={current} count={pages} onChange={setPage} label="跳转原图管理页码"/>
         <Button
           type="button"
           variant="outline"

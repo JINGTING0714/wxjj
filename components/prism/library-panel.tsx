@@ -1,4 +1,5 @@
 'use client';
+import {CodeCopy} from './code-copy';
 import { PromptExampleAssignment } from './prompt-example-assignment';
 import { formatProfileCode } from '@/lib/short-codes';
 import { copyText } from '@/lib/clipboard';
@@ -339,7 +340,7 @@ function SimpleLibraryPanel({
     [activeCollection, assets, query, searchIndex],
   );
 
-  const browsePictures = useMemo(() => filtered.flatMap(asset => (asset.promptExampleReviewRequired ? [] : asset.images).map(image => ({ ...image, assetId: asset.id, title: asset.title, ...(kind === 'prompt' ? promptLanguages(asset) : { copyValue: asset.secret, copyLabel: '复制完整短码' }) }))), [kind, filtered]);
+  const browsePictures = useMemo(() => filtered.flatMap(asset => (asset.promptExampleReviewRequired ? [] : asset.images).map(image => ({ ...image, assetId: asset.id, title: asset.title, ...(kind === 'prompt' ? promptLanguages(asset) : { copyValue: asset.secret,copyCode:asset.secret,copyFormat:'raw' as const, copyLabel: '复制完整短码' }) }))), [kind, filtered]);
   const browseOffsets = useMemo(() => { const offsets = new Map<string, number>(); browsePictures?.forEach((picture, index) => { if (!offsets.has(picture.assetId)) offsets.set(picture.assetId, index); }); return offsets; }, [browsePictures]);
   const openCreate = () => {
     setEditingAsset(null);
@@ -715,7 +716,7 @@ function SimpleLibraryPanel({
               <div className="record-secret">
                 {kind === 'prompt' ? <div className="prompt-languages">{isRevealed ? Object.entries(promptLanguages(asset)).map(([language, content]) => content && <div key={language}><strong>{language === 'english' ? '英文 Prompt' : language === 'chinese' ? '中文 Prompt' : '待核对原文 · 原文保留'}</strong><pre>{content}</pre></div>) : <p className="prompt-hidden-label">提示词已隐藏 · 可直接复制</p>}</div> :
                 <div
-                  className={`record-secret-value ${!isRevealed ? 'is-obscured' : ''}`}
+                  className={`record-secret-value ${!isRevealed ? (kind==='moodboard'?'is-masked':'is-obscured') : ''}`}
                 >
                   <code>{visibleValue}</code>
                 </div>}
@@ -732,11 +733,10 @@ function SimpleLibraryPanel({
                     {isRevealed ? <EyeOff /> : <Eye />}{' '}
                     {isRevealed ? '隐藏内容' : kind === 'prompt' ? '显示提示词' : '显示短码'}
                   </button>}
-                  {(kind !== 'prompt' || promptLanguages(asset).english) && <button
+                  {kind!=='prompt'&&<CodeCopy value={asset.secret} initial={kind==='moodboard'?'raw':'profile'} label={kind==='moodboard'?'Moodboard':'Profile'}/>}
+                  {(kind === 'prompt' && promptLanguages(asset).english) && <button
                     onClick={() => void copyText(
-                        kind === 'profile'
-                          ? formatProfileCode(asset.secret)
-                          : kind === 'prompt' ? promptLanguages(asset).english : asset.secret,
+                        promptLanguages(asset).english,
                       )}
                     type="button"
                   >

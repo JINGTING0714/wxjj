@@ -477,15 +477,17 @@ export async function loadEncryptedRecords<T>(
 export async function loadEncryptedBlobs(
   key: CryptoKey,
   scope: string,
+  selectedIds?:readonly string[],
 ): Promise<DecryptedBlob[]> {
   const result: DecryptedBlob[] = [];
   const vaultMeta = await getMeta();
   const database = await db();
   try {
-  const ids = await request(database.transaction('blobs').objectStore('blobs').index('scope').getAllKeys(storageKey(scope,vaultMeta?.generation)));
+  const storedScope=storageKey(scope,vaultMeta?.generation);
+  const ids = selectedIds ? [...new Set(selectedIds)].map(id=>storageKey(id,vaultMeta?.generation)) : await request(database.transaction('blobs').objectStore('blobs').index('scope').getAllKeys(storedScope));
   for (const id of ids) {
     const stored = await request(database.transaction('blobs').objectStore('blobs').get(id)) as EncryptedBlobRecord | undefined;
-    if (!stored) continue;
+    if (!stored||stored.scope!==storedScope) continue;
     const r = logical(stored);
     const meta = r.privateMeta
       ? JSON.parse(

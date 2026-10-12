@@ -104,12 +104,14 @@ function WaitingBatch({
   onChange,
   onRetry,
   onOpenCollage,
+  onOpenPoster,
 }: {
   batch: Batch;
   processing: boolean;
   onChange: (update: (batch: Batch) => Batch) => void;
   onRetry: () => void;
   onOpenCollage: () => void;
+  onOpenPoster?:()=>void;
 }) {
   const urls = useFileUrls(batch.outputs.map((o) => o.file));
   const selection = useSelection(batch.outputs.map((o) => o.id));
@@ -258,14 +260,17 @@ function WaitingBatch({
           <Grid3X3 />
           合格图片送入拼图
         </Button>
+        {onOpenPoster&&<Button variant="outline" disabled={processing||!qualified.some(output=>!selection.selected.size||selection.selected.has(output.id))} onClick={()=>{onOpenPoster();void sendPipeline('poster',{batchId:batch.id,batchTitle:batch.title,sources:qualified.filter(output=>!selection.selected.size||selection.selected.has(output.id)).map(output=>({id:output.id,file:output.file}))},true).catch(error=>window.alert(error instanceof Error?error.message:'海报工坊尚未就绪，请重试。'));}}>{selection.selected.size?'所选图片送入海报':'合格图片送入海报'}</Button>}
       </div>
     </section>
   );
 }
 export function WatermarkPanel({
   onOpenCollage,
+  onOpenPoster,
 }: {
   onOpenCollage: () => void;
+  onOpenPoster?:()=>void;
 }) {
   const workspace = useWorkspaceState('watermark-batches', {
     batches: [] as Batch[],
@@ -328,7 +333,7 @@ export function WatermarkPanel({
       const current = workspace.current.current;
       const existing=batchId?current.batches.find(batch=>batch.id===batchId):undefined;
       const count=new Set([...(existing?.sources.map(source=>source.id)||[]),...sources.map(source=>source.id)]).size;
-      if (!workspace.ready || (!existing&&current.batches.length >= 5) || count > 200) {
+      if (!workspace.ready || (!existing&&current.batches.length >= 5) || count > 500) {
         complete(new Error('水印工坊尚未就绪或已达 5 批上限，请腾出批次后重试。'));
         return;
       }
@@ -617,8 +622,8 @@ export function WatermarkPanel({
                       onChange={(e) => {
                         const files = Array.from(e.target.files || []);
                         e.target.value = '';
-                        if (files.length + batch.sources.length > 200) {
-                          setError('每批最多 200 张，请减少文件或新建下一批。');
+                        if (files.length + batch.sources.length > 500) {
+                          setError('每批最多 500 张，请减少文件或新建下一批。');
                           return;
                         }
                         update(batch.id, (b) => ({
@@ -636,7 +641,7 @@ export function WatermarkPanel({
                       type="file"
                     />
                   </label>
-                  <span>{batch.sources.length} / 200 张</span>
+                  <span>{batch.sources.length} / 500 张</span>
                   <Button
                     disabled={
                       !workspace.ready || running[batch.id] !== undefined
@@ -934,6 +939,7 @@ export function WatermarkPanel({
                 <WaitingBatch
                   batch={batch}
                   onChange={(change) => update(batch.id, change)}
+                  onOpenPoster={()=>{setResultsOpen(false);onOpenPoster?.();}}
                   onOpenCollage={() => {
                     setResultsOpen(false);
                     onOpenCollage();
@@ -964,7 +970,7 @@ export function WatermarkPanel({
                 batch={b}
                 key={b.id}
                 onChange={(change) => update(b.id, change)}
-                onOpenCollage={onOpenCollage}
+                onOpenCollage={onOpenCollage} onOpenPoster={onOpenPoster}
                 onRetry={() => {
                   update(b.id, (old) => ({
                     ...old,

@@ -107,9 +107,9 @@ export function ImageEnhancementPanel({
               },
         );
       }
-      if (map.size > 200) {
+      if (map.size > 500) {
         complete(
-          new Error('画质增强每批最多保留 200 张，请移除已完成的图片后重试。'),
+          new Error('画质增强每批最多保留 500 张，请移除已完成的图片后重试。'),
         );
         return;
       }
@@ -383,8 +383,8 @@ export function ImageEnhancementPanel({
             onChange={(event) => {
               const files = Array.from(event.target.files || []);
               event.target.value = '';
-              if (files.length + state.photos.length > 200) {
-                setError('每批最多 200 张，请减少选择。');
+              if (files.length + state.photos.length > 500) {
+                setError('每批最多 500 张，请减少选择。');
                 return;
               }
               setState((current) => ({

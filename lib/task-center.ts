@@ -5,7 +5,9 @@ export type TaskView =
   | 'png-cleaner'
   | 'enhancement'
   | 'watermark'
-  | 'collage';
+  | 'collage'
+  | 'writer'
+  | 'poster';
 export type TaskRecord = {
   id: string;
   title: string;

@@ -33,6 +33,14 @@ async function clear() {
   });
 }
 beforeEach(clear);
+void test('selected version media reads only requested images, stays within scope and works after restore',async()=>{
+ const key=await createVault('selective-images-password');await writeVaultBatch(key,{blobs:[{id:'chosen',scope:'writing-media:test',blob:new Blob(['chosen bytes']),name:'chosen.png'},{id:'old-unused',scope:'writing-media:test',blob:new Blob(['old bytes']),name:'old.png'},{id:'foreign',scope:'other-private-scope',blob:new Blob(['foreign bytes']),name:'foreign.png'}]});
+ const backup=new File([await exportVaultFile(key)],'selected.prism');
+ const db=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('prism-local-vault');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+ await new Promise<void>((resolve,reject)=>{const tx=db.transaction('blobs','readwrite'),store=tx.objectStore('blobs'),request=store.get('old-unused');request.onsuccess=()=>store.put({...request.result,payload:new ArrayBuffer(1)});tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});db.close();
+ const selected=await loadEncryptedBlobs(key,'writing-media:test',['chosen','foreign','chosen','missing']);assert.deepEqual(selected.map(item=>item.id),['chosen']);assert.equal(await selected[0].blob.text(),'chosen bytes');assert.deepEqual(await loadEncryptedBlobs(key,'writing-media:test',[]),[]);await assert.rejects(()=>loadEncryptedBlobs(key,'writing-media:test'));
+ await clear();const restored=await importVaultFile(backup,'selective-images-password');assert.equal(await(await loadEncryptedBlobs(restored.key,'writing-media:test',['chosen','foreign']))[0].blob.text(),'chosen bytes');
+});
 
 void test('sold image cleanup removes original and neural output even when enhancement UI is unmounted',async()=>{
   const key=await createVault('enhancement-purge-password');

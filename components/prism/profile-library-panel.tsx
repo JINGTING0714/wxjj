@@ -1,4 +1,5 @@
 'use client';
+import {CodeCopy} from './code-copy';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useEffect, useRef, useState, useTransition, type FormEvent } from 'react';
 import { copyText } from '@/lib/clipboard';
@@ -102,7 +103,7 @@ function Secret({ value, long = false }: { value: string; long?: boolean }) {
           {show ? <EyeOff /> : <Eye />}
           {show ? '隐藏' : '显示'}
         </button>
-        <button
+        {long?<button
           aria-label={long ? '复制长码' : '复制 Profile 参数'}
           title={long ? '复制长码' : '复制 --profile 参数'}
           disabled={!value}
@@ -115,7 +116,7 @@ function Secret({ value, long = false }: { value: string; long?: boolean }) {
         >
           <Copy />
           {long ? '复制长码' : '复制 Profile 参数'}
-        </button>
+        </button>:<CodeCopy value={value} label="Profile 短码"/>}
       </div>
     </div>
   );
@@ -212,7 +213,7 @@ function CodeEditor({
       <div className="profile-code-examples" data-file-drop-target={`profile-code-images-${code.id}`}>
         {code.images.map((image) => (
           <figure key={image.id}>
-            <ExampleImage alt={image.name} src={image.url} />
+            <ExampleImage alt={image.name} src={image.url} images={code.images} index={code.images.findIndex(item=>item.id===image.id)} />
             <button
               aria-label={`移除 ${image.name}`}
               onClick={() =>
@@ -607,7 +608,8 @@ export function ProfileLibraryPanel({ globalQuery }: { globalQuery: string }) {
                   <RecordExamples
                     images={code.images}
                     title={code.label || folder.title}
-                    browseImages={code.images.map(image => ({ ...image, assetId: folder.id, title: `${folder.title} / ${code.label}`, copyValue: formatProfileCode(code.secret), copyLabel: '复制完整 Profile 参数' }))}
+                    browseImages={folder.codes.flatMap(item=>item.images.map(image=>({...image,assetId:folder.id+':'+item.id,title:`${folder.title} / ${item.label}`,copyCode:item.secret,copyValue:formatProfileCode(item.secret),copyLabel:'复制完整 Profile 参数'})))}
+                    browseOffset={folder.codes.slice(0,index).reduce((total,item)=>total+item.images.length,0)}
                     onEditAsset={() => open(folder)}
                   />
                   <div>

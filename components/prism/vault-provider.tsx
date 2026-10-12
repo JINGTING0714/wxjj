@@ -48,7 +48,7 @@ type VaultContextValue = {
     id?: string,
   ) => Promise<string>;
   deleteBlob: (id: string) => Promise<void>;
-  loadBlobs: (scope: string) => ReturnType<typeof loadEncryptedBlobs>;
+  loadBlobs: (scope: string,ids?:readonly string[]) => ReturnType<typeof loadEncryptedBlobs>;
   writeBatch: (batch: VaultWrite) => Promise<void>;
   exportBackup: (options?: VaultExportOptions) => Promise<Blob | undefined>;
   inspectBackup: (file: File) => Promise<BackupInfo>;
@@ -168,9 +168,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         return id;
       },
       deleteBlob: async (id) => write({ deleteBlobs: [id] }),
-      loadBlobs: async (scope) => {
+      loadBlobs: async (scope,ids) => {
         const { key, check } = access();
-        const result = await loadEncryptedBlobs(key, scope);
+        const result = await loadEncryptedBlobs(key, scope,ids);
         check();
         return result;
       },

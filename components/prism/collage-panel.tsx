@@ -1,4 +1,5 @@
 'use client';
+import {IndexJump} from './index-jump';
 import {startTask,restoreTask} from '@/lib/task-center';
 import { MOBILE_MEDIA } from '@/lib/mobile-media';
 import { moveListItem } from './sortable-list';
@@ -1507,9 +1508,7 @@ export function CollagePanel({ onOpenSales }: { onOpenSales: () => void }) {
                     >
                       上一板
                     </Button>
-                    <span>
-                      {currentPreview + 1} / {Math.max(1, boardCount)}
-                    </span>
+                    <IndexJump index={currentPreview} count={Math.max(1,boardCount)} onChange={setPreviewBoard} label="跳转拼图预览页码"/>
                     <Button
                       disabled={currentPreview >= boardCount - 1}
                       onClick={() => setPreviewBoard(currentPreview + 1)}

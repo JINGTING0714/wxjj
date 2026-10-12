@@ -8,7 +8,7 @@ export type PipelineTransfer = {
   pendingRevisions?:Record<string,string>;
   settledIds?:string[];
 };
-export async function sendPipeline(target:'watermark'|'enhancement'|'collage',detail:Omit<PipelineTransfer,'complete'>,waitForReady=false) {
+export async function sendPipeline(target:'watermark'|'enhancement'|'collage'|'poster',detail:Omit<PipelineTransfer,'complete'>,waitForReady=false) {
   const deadline=Date.now()+30_000;
   while(true) {
     let handled=false;
@@ -18,7 +18,7 @@ export async function sendPipeline(target:'watermark'|'enhancement'|'collage',de
     await new Promise(resolve=>setTimeout(resolve,50));
   }
 }
-export function mergeFlowSources(current:PipelineSource[],incoming:PipelineSource[],limit=200) {
+export function mergeFlowSources(current:PipelineSource[],incoming:PipelineSource[],limit=500) {
   const merged=mergeSources(current,incoming,limit);
   return merged.sort((a,b)=>a.sequence!==undefined&&b.sequence!==undefined?a.sequence-b.sequence:0);
 }

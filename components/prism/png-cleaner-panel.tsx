@@ -1,4 +1,5 @@
 'use client';
+import {IndexJump} from './index-jump';
 import {startTask,restoreTask} from '@/lib/task-center';
 /* oxlint-disable next/no-img-element -- Local Blob previews must stay on-device. */
 
@@ -230,12 +231,12 @@ export function PngCleanerPanel({
     const candidates = Array.from(files).filter(
       (file) => /\.png$/i.test(file.name) || file.type === 'image/png',
     );
-    const available = Math.max(0, 200 - state.sources.length);
+    const available = Math.max(0, 300 - state.sources.length);
     const incoming = candidates
       .slice(0, available)
       .map((file) => ({ id: crypto.randomUUID(), file }));
     if (!incoming.length) {
-      setMessage('请选择 PNG 文件；每批最多 200 张。');
+      setMessage('请选择 PNG 文件；每批最多 300 张。');
       return;
     }
     setState((current) => ({
@@ -244,7 +245,7 @@ export function PngCleanerPanel({
     }));
     void run(incoming).then(() => {
       if (candidates.length > available && mounted.current)
-        setMessage('每批最多 200 张，超出的文件未导入，请完成本批后再添加。');
+        setMessage('每批最多 300 张，超出的文件未导入，请完成本批后再添加。');
     });
   };
   const send = async (target: 'gallery' | 'watermark' | 'collage') => {
@@ -405,10 +406,7 @@ export function PngCleanerPanel({
               >
                 上一张
               </Button>
-              <span>
-                {Math.min(previewIndex + 1, state.sources.length)} /{' '}
-                {state.sources.length}
-              </span>
+              <IndexJump index={previewIndex} count={state.sources.length} onChange={setPreviewIndex} label="跳转 PNG 原图序号"/>
               <Button
                 variant="outline"
                 disabled={previewIndex >= state.sources.length - 1}
@@ -492,7 +490,7 @@ export function PngCleanerPanel({
             className="png-cleaner-card"
           >
             <h2>导入原图</h2>
-            <p>每批最多 200 张，单张最大 64 MB，逐张检查和清洗。</p>
+            <p>每批最多 300 张，单张最大 64 MB，逐张检查和清洗。</p>
             <label className="png-cleaner-upload">
               <Upload />
               选择 PNG 文件
