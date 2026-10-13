@@ -18,15 +18,21 @@ import {
   posterTemplate,
   posterTitle,
   posterPresets,
-  posterFonts,
   posterSymbols,
   renderPoster,
   type PosterDocument,
   type PosterLayer,
-  type PosterText,
 } from '@/lib/poster';
 import type { PipelineTransfer } from '@/lib/pipeline';
 import { usePosterPreviews } from './poster-previews';
+import {
+  PosterTypeControls,
+  type PosterFontFile,
+} from './poster-type-controls';
+import { usePosterFonts } from './poster-fonts';
+import { PosterLettering } from './poster-lettering';
+import { PosterLayoutPicker } from './poster-layout-picker';
+import type { PosterLayout } from '@/lib/poster';
 import { useEditorGestures } from './use-editor-gestures';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
 type Project = PosterDocument & { id: string; title: string; batchId?: string };
@@ -79,6 +85,7 @@ function NumberField({
 export function PosterPanel() {
   const vault = useVault(),
     workspace = useWorkspaceState('poster-studio', {
+      fonts: [] as PosterFontFile[],
       projects: [] as Project[],
       active: '',
     }),
@@ -87,10 +94,8 @@ export function PosterPanel() {
       state.projects.find((item) => item.id === state.active) ||
       state.projects[0],
     [selectedId, setSelectedId] = useState(''),
-    [panel, setPanel] = useState<string | null>(null),
-    [template, setTemplate] = useState<'grid' | 'hero' | '4-3-4' | 'mosaic'>(
-      '4-3-4',
-    ),
+    [panel, setPanel] = useState<string | null>('images'),
+    [template, setTemplate] = useState<PosterLayout>('4-3-4'),
     [gap, setGap] = useState(0),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false),
@@ -98,6 +103,7 @@ export function PosterPanel() {
     [full, setFull] = useState(false),
     [output, setOutput] = useState<File | null>(null),
     [scaleContents, setScaleContents] = useState(false);
+  usePosterFonts(state.fonts || [], setMessage);
   const selected = project?.layers.find((layer) => layer.id === selectedId),
     images = useMemo(
       () =>
@@ -107,7 +113,8 @@ export function PosterPanel() {
         ) || [],
       [project?.layers],
     ),
-    previewUrls = usePosterPreviews(images),
+    previews = usePosterPreviews(images),
+    previewUrls = previews.urls,
     previewMap = new Map(images.map((image, i) => [image.id, previewUrls[i]])),
     [outputUrl] = useFileUrls(output ? [output] : []),
     stage = useRef<HTMLDivElement>(null),
@@ -398,8 +405,10 @@ export function PosterPanel() {
     });
     try {
       await workspace.flush();
-      const file = await renderPoster(project, control.signal, (value) =>
-        task.progress(value, '正在绘制海报…'),
+      const file = await renderPoster(
+        { ...project, fonts: state.fonts || [] },
+        control.signal,
+        (value) => task.progress(value, '正在绘制海报…'),
       );
       if (
         workspace.current.current.projects.find(
@@ -407,11 +416,12 @@ export function PosterPanel() {
         ) === project
       )
         setOutput(file);
-      await downloadBlob(file, file.name);
+      downloadBlob(file, file.name);
       task.done('海报 PNG 已生成，可下载或收纳。');
       setMessage('海报已按画布原尺寸输出，文字与图片位置保持一致。');
     } catch (error) {
-      control.signal.aborted ? task.pause() : task.fail(error);
+      if (control.signal.aborted) task.pause();
+      else task.fail(error);
       setMessage(
         error instanceof Error ? error.message : '海报输出失败，原稿保留。',
       );
@@ -458,6 +468,13 @@ export function PosterPanel() {
         data-file-drop-target="poster-images"
         {...gestures.handlers}
       >
+        {(previews.pending > 0 || previews.failed > 0) && (
+          <span className="poster-preview-status">
+            {previews.pending > 0
+              ? `正在准备预览 ${images.length - previews.pending} / ${images.length}`
+              : `${previews.failed} 张图片无法预览，请检查原文件`}
+          </span>
+        )}
         {project ? (
           <div
             ref={surface}
@@ -481,12 +498,15 @@ export function PosterPanel() {
                   role="button"
                   aria-label={`选择海报图层 ${layer.kind === 'image' ? layer.name : layer.kind === 'text' ? layer.text : layer.symbol}`}
                   tabIndex={0}
-                  onClick={() => setSelectedId(layer.id)}
+                  onClick={() => {
+                    setSelectedId(layer.id);
+                    if (layer.kind === 'text') setPanel('text');
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       setSelectedId(layer.id);
-                      setPanel('adjust');
+                      setPanel(layer.kind === 'text' ? 'text' : 'adjust');
                     }
                   }}
                   onPointerDown={(event) => startMove(event, layer)}
@@ -524,39 +544,7 @@ export function PosterPanel() {
                       {layer.symbol}
                     </span>
                   ) : (
-                    <div
-                      style={{
-                        fontFamily: layer.font,
-                        fontSize: layer.size * ratio,
-                        fontWeight: layer.weight,
-                        textAlign: layer.align,
-                        lineHeight: 1.25,
-                        color: layer.color,
-                        whiteSpace: 'pre-wrap',
-                        ...(layer.style === 'gradient' ||
-                        layer.style === 'extrude'
-                          ? {
-                              backgroundImage: `linear-gradient(${layer.color2},${layer.color})`,
-                              backgroundClip: 'text',
-                              WebkitTextFillColor: 'transparent',
-                            }
-                          : {}),
-                        ...(layer.style === 'outline' ||
-                        layer.style === 'extrude'
-                          ? {
-                              WebkitTextStroke: `${layer.size * 0.035 * ratio}px ${layer.stroke}`,
-                            }
-                          : {}),
-                        textShadow:
-                          layer.style === 'glow'
-                            ? `0 0 ${layer.size * 0.2 * ratio}px ${layer.color}`
-                            : layer.style === 'extrude'
-                              ? `${layer.size * 0.05 * ratio}px ${layer.size * 0.05 * ratio}px 0 ${layer.stroke}`
-                              : undefined,
-                      }}
-                    >
-                      {layer.text}
-                    </div>
+                    <PosterLettering text={layer} ratio={ratio} />
                   )}
                 </div>
               ))}
@@ -635,7 +623,7 @@ export function PosterPanel() {
           </Button>
         )}
       </div>
-      <div className="poster-workspace">
+      <div className="poster-workspace" data-controls-open={panel !== null}>
         <div className="poster-preview-host">{!full && preview}</div>
         <section
           className="poster-controls"
@@ -655,11 +643,8 @@ export function PosterPanel() {
               收起操作区
             </Button>
           </div>
-          <div
-            className="poster-control-group"
-            hidden={panel !== null && panel !== 'images'}
-          >
-            <label className="mini-file">
+          <div className="poster-control-group" hidden={panel !== 'images'}>
+            <label className="poster-file-control">
               导入海报图片
               <input
                 id="poster-images"
@@ -710,10 +695,7 @@ export function PosterPanel() {
           </div>
           {project && (
             <>
-              <div
-                className="poster-control-group"
-                hidden={panel !== null && panel !== 'layout'}
-              >
+              <div className="poster-control-group" hidden={panel !== 'layout'}>
                 <label>
                   海报名称
                   <input
@@ -785,21 +767,33 @@ export function PosterPanel() {
                     }
                   />
                 </label>
-                <label>
-                  图片布局
-                  <select
-                    aria-label="海报布局"
-                    value={template}
-                    onChange={(event) =>
-                      setTemplate(event.target.value as typeof template)
-                    }
-                  >
-                    <option value="4-3-4">4 / 3 / 4 · 中间三张更大</option>
-                    <option value="mosaic">三列错落 · 中间更宽</option>
-                    <option value="hero">主图与侧栏</option>
-                    <option value="grid">均匀拼排</option>
-                  </select>
-                </label>
+                <PosterLayoutPicker
+                  value={template}
+                  count={images.length}
+                  onSelect={(layout) => {
+                    setTemplate(layout);
+                    if (!images.length) return;
+                    const layers = posterTemplate(
+                      images.map((image) => ({
+                        file: image.file,
+                        id: image.sourceId,
+                      })),
+                      project,
+                      layout,
+                      gap,
+                    );
+                    change((current) => ({
+                      ...current,
+                      layers: [
+                        ...layers,
+                        ...current.layers.filter(
+                          (layer) => layer.kind !== 'image',
+                        ),
+                      ],
+                    }));
+                    setSelectedId(layers[0]?.id || '');
+                  }}
+                />
                 <NumberField
                   label="海报图片间距 px"
                   value={gap}
@@ -834,10 +828,7 @@ export function PosterPanel() {
                   应用图片布局
                 </Button>
               </div>
-              <div
-                className="poster-control-group"
-                hidden={panel !== null && panel !== 'text'}
-              >
+              <div className="poster-control-group" hidden={panel !== 'text'}>
                 <Button
                   onClick={() => {
                     const layer = posterTitle(project);
@@ -846,12 +837,12 @@ export function PosterPanel() {
                       layers: [...current.layers, layer],
                     }));
                     setSelectedId(layer.id);
-                    setPanel('adjust');
+                    setPanel('text');
                   }}
                 >
                   添加标题 / 艺术字
                 </Button>
-                <label className="mini-file">
+                <label className="poster-file-control">
                   导入 TXT 文本
                   <input
                     type="file"
@@ -878,42 +869,84 @@ export function PosterPanel() {
                     }}
                   />
                 </label>
-                <div className="poster-symbols">
-                  {posterSymbols.map((symbol) => (
-                    <Button
-                      variant="outline"
-                      key={symbol}
-                      onClick={() => {
-                        const layer: PosterLayer = {
-                          id: crypto.randomUUID(),
-                          kind: 'shape',
-                          symbol,
-                          x: project.width * 0.4,
-                          y: project.height * 0.4,
-                          width: project.width * 0.2,
-                          height: project.width * 0.2,
-                          rotation: 0,
-                          opacity: 1,
-                          locked: false,
-                          visible: true,
-                          color: '#ff66b6',
-                        };
-                        change((current) => ({
-                          ...current,
-                          layers: [...current.layers, layer],
-                        }));
-                        setSelectedId(layer.id);
-                      }}
-                    >
-                      {symbol}
-                    </Button>
-                  ))}
-                </div>
+                <details className="poster-symbol-library">
+                  <summary>符号与装饰</summary>
+                  <div className="poster-symbols">
+                    {posterSymbols.map((symbol) => (
+                      <Button
+                        variant="outline"
+                        key={symbol}
+                        onClick={() => {
+                          const layer: PosterLayer = {
+                            id: crypto.randomUUID(),
+                            kind: 'shape',
+                            symbol,
+                            x: project.width * 0.4,
+                            y: project.height * 0.4,
+                            width: project.width * 0.2,
+                            height: project.width * 0.2,
+                            rotation: 0,
+                            opacity: 1,
+                            locked: false,
+                            visible: true,
+                            color: '#ff66b6',
+                          };
+                          change((current) => ({
+                            ...current,
+                            layers: [...current.layers, layer],
+                          }));
+                          setSelectedId(layer.id);
+                        }}
+                      >
+                        {symbol}
+                      </Button>
+                    ))}
+                  </div>
+                </details>
+
+                {selected?.kind === 'text' && (
+                  <PosterTypeControls
+                    value={selected}
+                    onChange={(update) => patch(selected.id, update)}
+                    fonts={state.fonts || []}
+                    onImportFont={(file) => {
+                      if (file.size > 30_000_000) {
+                        setMessage('字体文件最大 30 MB，请选择较小的字体。');
+                        return;
+                      }
+                      const next = {
+                        id:
+                          'PrismFont_' +
+                          crypto.randomUUID().replaceAll('-', ''),
+                        name: file.name.replace(/\.[^.]+$/, ''),
+                        file,
+                      };
+                      setState((current) => ({
+                        ...current,
+                        fonts: [...(current.fonts || []), next],
+                      }));
+                      patch(selected.id, { font: next.id });
+                    }}
+                    onRemoveFont={(id) => {
+                      setState((current) => ({
+                        ...current,
+                        fonts: (current.fonts || []).filter(
+                          (font) => font.id !== id,
+                        ),
+                        projects: current.projects.map((item) => ({
+                          ...item,
+                          layers: item.layers.map((layer) =>
+                            layer.kind === 'text' && layer.font === id
+                              ? { ...layer, font: 'Noto Sans SC' }
+                              : layer,
+                          ),
+                        })),
+                      }));
+                    }}
+                  />
+                )}
               </div>
-              <div
-                className="poster-control-group"
-                hidden={panel !== null && panel !== 'adjust'}
-              >
+              <div className="poster-control-group" hidden={panel !== 'adjust'}>
                 <div className="poster-history">
                   <Button
                     variant="outline"
@@ -1132,97 +1165,6 @@ export function PosterPanel() {
                         </label>
                       </>
                     )}
-                    {selected.kind === 'text' && (
-                      <>
-                        <label>
-                          文字
-                          <textarea
-                            aria-label="海报文字"
-                            value={selected.text}
-                            maxLength={8000}
-                            onChange={(event) =>
-                              patch(selected.id, { text: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          艺术字效果
-                          <select
-                            aria-label="海报艺术字效果"
-                            value={selected.style}
-                            onChange={(event) =>
-                              patch(selected.id, {
-                                style: event.target
-                                  .value as PosterText['style'],
-                              })
-                            }
-                          >
-                            <option value="plain">普通文字</option>
-                            <option value="outline">描边</option>
-                            <option value="extrude">渐变立体</option>
-                            <option value="glow">霓虹发光</option>
-                            <option value="gradient">渐变</option>
-                          </select>
-                        </label>
-                        <label>
-                          字体
-                          <select
-                            aria-label="海报字体"
-                            value={selected.font}
-                            onChange={(event) =>
-                              patch(selected.id, { font: event.target.value })
-                            }
-                          >
-                            {posterFonts.map((font) => (
-                              <option key={font}>{font}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <NumberField
-                          label="海报字号 px"
-                          value={selected.size}
-                          min={8}
-                          max={1000}
-                          onChange={(value) =>
-                            patch(selected.id, { size: value })
-                          }
-                        />
-                        <label>
-                          对齐
-                          <select
-                            value={selected.align}
-                            onChange={(event) =>
-                              patch(selected.id, {
-                                align: event.target
-                                  .value as PosterText['align'],
-                              })
-                            }
-                          >
-                            <option value="left">左对齐</option>
-                            <option value="center">居中</option>
-                            <option value="right">右对齐</option>
-                          </select>
-                        </label>
-                        {(['color', 'color2', 'stroke'] as const).map((key) => (
-                          <label key={key}>
-                            {key === 'color'
-                              ? '文字颜色'
-                              : key === 'color2'
-                                ? '渐变第二色'
-                                : '描边 / 立体底色'}
-                            <input
-                              type="color"
-                              value={selected[key]}
-                              onChange={(event) =>
-                                patch(selected.id, {
-                                  [key]: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        ))}
-                      </>
-                    )}
                     {selected.kind === 'shape' && (
                       <label>
                         符号颜色
@@ -1242,10 +1184,7 @@ export function PosterPanel() {
                   </p>
                 )}
               </div>
-              <div
-                className="poster-control-group"
-                hidden={panel !== null && panel !== 'output'}
-              >
+              <div className="poster-control-group" hidden={panel !== 'output'}>
                 <p>
                   输出尺寸：{project.width} × {project.height}{' '}
                   px。图片图框、艺术字与符号按当前位置导出。

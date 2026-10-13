@@ -2,6 +2,13 @@
 import { useEffect, useState } from 'react';
 import { copyText } from '@/lib/clipboard';
 import { formatProfileCode } from '@/lib/short-codes';
+import { Copy, ChevronDown, Check } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 export type CodeFormat = 'profile' | 'raw';
 export function rawProfileCodes(value: string) {
   return value
@@ -46,17 +53,10 @@ export function CodeCopy({
   const { format, change } = useCodeFormat(initial);
   return (
     <span className="code-copy-control">
-      <select
-        aria-label={`${label}复制格式`}
-        value={format}
-        onChange={(event) => change(event.target.value as CodeFormat)}
-      >
-        <option value="profile">带 --profile</option>
-        <option value="raw">仅短码</option>
-      </select>
       <button
         type="button"
         className="visible-copy-action"
+        aria-label={format === 'profile' ? '复制 Profile 参数' : '复制短码'}
         disabled={!value.trim()}
         onClick={() =>
           void copyText(
@@ -66,8 +66,29 @@ export function CodeCopy({
           )
         }
       >
-        {format === 'profile' ? '复制 Profile 参数' : '复制短码'}
+        <Copy aria-hidden="true" />
+        <span>复制</span>
       </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="copy-format-trigger"
+          aria-label={`${label}复制格式`}
+          title="选择复制格式"
+        >
+          <span>{format === 'profile' ? '参数' : '短码'}</span>
+          <ChevronDown />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="copy-format-menu">
+          <DropdownMenuItem onClick={() => change('profile')}>
+            <span>带 --profile</span>
+            {format === 'profile' && <Check />}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => change('raw')}>
+            <span>仅短码</span>
+            {format === 'raw' && <Check />}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </span>
   );
 }

@@ -88,6 +88,9 @@ export type ApiSettings = {
   url: string;
   key: string;
   model: string;
+  transport?: 'auto' | 'direct' | 'relay';
+  relayUrl?: string;
+  authHeader?: 'auto' | 'bearer' | 'x-api-key';
 };
 export const emptySensitive = (): Record<WritingLanguage, string[]> => ({
   zh: [],

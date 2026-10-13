@@ -1,3 +1,4 @@
+import { posterFontCss, posterTextStops } from './poster-typography';
 export type PosterImage = {
   id: string;
   kind: 'image';
@@ -35,9 +36,29 @@ export type PosterText = {
   color: string;
   color2: string;
   stroke: string;
-  style: 'plain' | 'outline' | 'glow' | 'extrude' | 'gradient';
+  style:
+    | 'plain'
+    | 'outline'
+    | 'glow'
+    | 'extrude'
+    | 'gradient'
+    | 'double-outline'
+    | 'chrome'
+    | 'hollow'
+    | 'shadow'
+    | 'soft-glow';
   align: 'left' | 'center' | 'right';
   spacing: number;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  lineHeight?: number;
+  strokeWidth?: number;
+  depth?: number;
+  shadowX?: number;
+  shadowY?: number;
+  shadowBlur?: number;
+  gradientAngle?: number;
 };
 export type PosterShape = {
   id: string;
@@ -59,7 +80,42 @@ export type PosterDocument = {
   height: number;
   background: string;
   layers: PosterLayer[];
+  fonts?: { id: string; file: File }[];
 };
+export type PosterLayout =
+  | 'hero'
+  | '4-3-4'
+  | 'mosaic'
+  | 'grid'
+  | 'duo'
+  | 'triptych'
+  | 'hero-top'
+  | 'hero-bottom'
+  | 'gallery'
+  | 'filmstrip'
+  | 'overlap'
+  | 'magazine'
+  | '2-3-2';
+export const posterLayoutOptions: {
+  id: PosterLayout;
+  name: string;
+  note: string;
+  count?: number;
+}[] = [
+  { id: '4-3-4', name: '主推词包', note: '4 / 3 / 4 · 中间更大', count: 11 },
+  { id: 'mosaic', name: '错落九宫', note: '宽窄错落 · 9 张', count: 9 },
+  { id: '2-3-2', name: '七图展览', note: '2 / 3 / 2 · 7 张', count: 7 },
+  { id: 'grid', name: '均匀拼排', note: '适配任意数量' },
+  { id: 'duo', name: '双列排版', note: '两列连贯展示' },
+  { id: 'triptych', name: '三列展览', note: '三列整齐排布' },
+  { id: 'hero', name: '主图侧栏', note: '主视觉与缩略图' },
+  { id: 'hero-top', name: '上方主视觉', note: '下方陈列细节' },
+  { id: 'hero-bottom', name: '下方主视觉', note: '上方陈列细节' },
+  { id: 'gallery', name: '留白画廊', note: '留出标题与边距' },
+  { id: 'filmstrip', name: '胶片条', note: '纵向图片序列' },
+  { id: 'overlap', name: '随手拼贴', note: '错位与叠放' },
+  { id: 'magazine', name: '杂志封面', note: '底图与浮动图片' },
+];
 export const posterPresets = [
   { name: '竖版 9:16', width: 1080, height: 1920 },
   { name: '竖版 2:3', width: 1200, height: 1800 },
@@ -72,6 +128,9 @@ export const posterFonts = [
   'Noto Serif SC',
   'Ma Shan Zheng',
   'Bebas Neue',
+  'Caveat',
+  'Geist Variable',
+  'Geist Mono Variable',
   'Arial',
 ];
 export const posterSymbols = [
@@ -95,9 +154,12 @@ export const posterSymbols = [
 export function posterTemplate(
   files: { id?: string; file: File }[],
   doc: Pick<PosterDocument, 'width' | 'height'>,
-  template: 'hero' | '4-3-4' | 'mosaic' | 'grid',
+  template: PosterLayout,
   gap = 0,
 ): PosterImage[] {
+  const requestedGap = Number.isFinite(gap) ? Math.max(0, gap) : 0;
+  // Apply spacing after the layout so dense batches keep valid image frames.
+  gap = 0;
   const boxes: { x: number; y: number; width: number; height: number }[] = [];
   const row = (count: number, y: number, height: number, widths?: number[]) => {
     let x = 0;
@@ -120,6 +182,73 @@ export function posterTemplate(
     row(3, 0, 0.3, [0.35, 0.35, 0.3]);
     row(3, 0.3, 0.4, [0.3, 0.4, 0.3]);
     row(3, 0.7, 0.3, [0.3, 0.35, 0.35]);
+  } else if (template === '2-3-2' && files.length === 7) {
+    row(2, 0, 0.35);
+    row(3, 0.35, 0.3);
+    row(2, 0.65, 0.35);
+  } else if (
+    ['hero-top', 'hero-bottom'].includes(template) &&
+    files.length > 1
+  ) {
+    const bottom = template === 'hero-bottom',
+      mainHeight = doc.height * 0.62;
+    boxes.push({
+      x: 0,
+      y: bottom ? doc.height - mainHeight : 0,
+      width: doc.width,
+      height: mainHeight,
+    });
+    const count = files.length - 1,
+      columns = Math.min(4, count),
+      rows = Math.ceil(count / columns);
+    for (let i = 0; i < count; i++)
+      boxes.push({
+        x: ((i % columns) * doc.width) / columns + gap / 2,
+        y:
+          (bottom ? 0 : mainHeight) +
+          (Math.floor(i / columns) * doc.height * 0.38) / rows +
+          gap / 2,
+        width: doc.width / columns - gap,
+        height: (doc.height * 0.38) / rows - gap,
+      });
+  } else if (template === 'filmstrip') {
+    for (let i = 0; i < files.length; i++)
+      boxes.push({
+        x: doc.width * 0.1 + gap / 2,
+        y: doc.height * 0.05 + (i * doc.height * 0.9) / files.length + gap / 2,
+        width: doc.width * 0.8 - gap,
+        height: (doc.height * 0.9) / files.length - gap,
+      });
+  } else if (template === 'magazine' && files.length > 1) {
+    boxes.push({ x: 0, y: 0, width: doc.width, height: doc.height });
+    const count = files.length - 1,
+      columns = Math.min(count, 4),
+      rows = Math.ceil(count / columns);
+    for (let i = 0; i < count; i++)
+      boxes.push({
+        x:
+          doc.width * 0.04 +
+          ((i % columns) * doc.width * 0.92) / columns +
+          gap / 2,
+        y:
+          doc.height * 0.62 +
+          (Math.floor(i / columns) * doc.height * 0.34) / rows +
+          gap / 2,
+        width: (doc.width * 0.92) / columns - gap,
+        height: (doc.height * 0.34) / rows - gap,
+      });
+  } else if (template === 'overlap' && files.length <= 12) {
+    const columns = files.length <= 3 ? 2 : 3,
+      rows = Math.ceil(files.length / columns);
+    for (let i = 0; i < files.length; i++)
+      boxes.push({
+        x: doc.width * (0.035 + (i % columns) * 0.28 + (i % 2) * 0.035),
+        y:
+          doc.height *
+          (0.04 + (Math.floor(i / columns) * 0.87) / rows + (i % 2) * 0.02),
+        width: doc.width * 0.36,
+        height: (doc.height * 0.91) / rows,
+      });
   } else if (template === 'hero' && files.length > 1) {
     boxes.push({ x: 0, y: 0, width: doc.width * 0.65, height: doc.height });
     for (let i = 1; i < files.length; i++)
@@ -130,9 +259,12 @@ export function posterTemplate(
         height: doc.height / (files.length - 1) - gap,
       });
   } else {
-    const columns = Math.ceil(
-        Math.sqrt((files.length * doc.width) / doc.height),
-      ),
+    const columns =
+        template === 'duo'
+          ? 2
+          : template === 'triptych'
+            ? 3
+            : Math.ceil(Math.sqrt((files.length * doc.width) / doc.height)),
       rows = Math.ceil(files.length / Math.max(1, columns));
     for (let i = 0; i < files.length; i++)
       boxes.push({
@@ -143,6 +275,24 @@ export function posterTemplate(
         width: doc.width / Math.max(1, columns) - gap,
         height: doc.height / rows - gap,
       });
+    if (template === 'gallery')
+      for (const box of boxes) {
+        box.x = doc.width * 0.07 + box.x * 0.86;
+        box.y = doc.height * 0.08 + box.y * 0.77;
+        box.width *= 0.86;
+        box.height *= 0.77;
+      }
+  }
+  for (const box of boxes) {
+    box.x = Math.max(0, Math.min(doc.width - 1, box.x));
+    box.y = Math.max(0, Math.min(doc.height - 1, box.y));
+    box.width = Math.max(1, Math.min(doc.width - box.x, box.width));
+    box.height = Math.max(1, Math.min(doc.height - box.y, box.height));
+    const inset = Math.min(requestedGap, box.width - 1, box.height - 1);
+    box.x += inset / 2;
+    box.y += inset / 2;
+    box.width -= inset;
+    box.height -= inset;
   }
   return files.map((item, index) => ({
     id: crypto.randomUUID(),
@@ -194,12 +344,22 @@ export function posterTitle(
     spacing: 1,
   };
 }
-function lines(text: string, context: CanvasRenderingContext2D, width: number) {
+function lines(
+  text: string,
+  context: CanvasRenderingContext2D,
+  width: number,
+  spacing = 0,
+) {
   const result: string[] = [];
   for (const paragraph of text.split('\n')) {
     let line = '';
     for (const char of Array.from(paragraph)) {
-      if (line && context.measureText(line + char).width > width) {
+      if (
+        line &&
+        context.measureText(line + char).width +
+          Array.from(line).length * spacing >
+          width
+      ) {
         result.push(line);
         line = char;
       } else line += char;
@@ -229,7 +389,24 @@ export async function renderPoster(
   canvas.height = doc.height;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('浏览器无法创建海报画布');
+  context.imageSmoothingQuality = 'high';
+  const faces: FontFace[] = [];
   try {
+    for (const font of doc.fonts || []) {
+      signal.throwIfAborted();
+      if (
+        !doc.layers.some(
+          (layer) => layer.kind === 'text' && layer.font === font.id,
+        )
+      )
+        continue;
+      const face = await new FontFace(
+        font.id,
+        await font.file.arrayBuffer(),
+      ).load();
+      document.fonts.add(face);
+      faces.push(face);
+    }
     context.fillStyle = doc.background;
     context.fillRect(0, 0, doc.width, doc.height);
     for (let index = 0; index < doc.layers.length; index++) {
@@ -274,53 +451,136 @@ export async function renderPoster(
         context.beginPath();
         context.rect(0, 0, layer.width, layer.height);
         context.clip();
-        await document.fonts.load(
-          `${layer.weight} ${layer.size}px "${layer.font}"`,
-          layer.text,
-        );
-        context.font = `${layer.weight} ${layer.size}px "${layer.font}",sans-serif`;
+        await document.fonts.load(posterFontCss(layer), layer.text);
+        context.font = posterFontCss(layer);
         context.textAlign = layer.align;
         context.textBaseline = 'top';
-        const rows = lines(layer.text, context, layer.width),
+        const spacing = layer.spacing || 0,
+          rows = lines(layer.text, context, layer.width, spacing),
           x =
             layer.align === 'center'
               ? layer.width / 2
               : layer.align === 'right'
                 ? layer.width
                 : 0;
+        const paint = (
+          line: string,
+          px: number,
+          py: number,
+          stroke = false,
+        ) => {
+          if (!spacing) {
+            if (stroke) context.strokeText(line, px, py);
+            else context.fillText(line, px, py);
+            return;
+          }
+          const chars = Array.from(line),
+            width =
+              context.measureText(line).width +
+              Math.max(0, chars.length - 1) * spacing,
+            left =
+              px -
+              (layer.align === 'center'
+                ? width / 2
+                : layer.align === 'right'
+                  ? width
+                  : 0);
+          context.textAlign = 'left';
+          let prefix = '';
+          for (let i = 0; i < chars.length; i++) {
+            const xx = left + context.measureText(prefix).width + i * spacing;
+            if (stroke) context.strokeText(chars[i], xx, py);
+            else context.fillText(chars[i], xx, py);
+            prefix += chars[i];
+          }
+          context.textAlign = layer.align;
+        };
         for (let i = 0; i < rows.length; i++) {
-          const y = i * layer.size * 1.25;
+          const y = i * layer.size * (layer.lineHeight || 1.25),
+            width = layer.size * (layer.strokeWidth ?? 0.04);
+          if (y > layer.height) break;
           if (layer.style === 'extrude') {
             context.fillStyle = layer.stroke;
             for (
-              let depth = Math.max(2, Math.round(layer.size * 0.08));
+              let depth = Math.min(
+                100,
+                Math.round(layer.size * (layer.depth ?? 0.06)),
+              );
               depth > 0;
               depth--
             )
-              context.fillText(rows[i], x + depth, y + depth);
+              paint(rows[i], x + depth, y + depth);
           }
-          if (layer.style === 'glow') {
-            context.shadowColor = layer.color;
-            context.shadowBlur = layer.size * 0.24;
+          context.shadowColor = 'transparent';
+          context.shadowBlur = 0;
+          context.shadowOffsetX = 0;
+          context.shadowOffsetY = 0;
+          if (['glow', 'soft-glow', 'shadow'].includes(layer.style)) {
+            context.shadowColor =
+              layer.style === 'glow' ? layer.color : layer.stroke;
+            context.shadowBlur = layer.size * (layer.shadowBlur ?? 0.22);
+            context.shadowOffsetX = layer.size * (layer.shadowX ?? 0);
+            context.shadowOffsetY = layer.size * (layer.shadowY ?? 0);
           }
-          if (layer.style === 'outline' || layer.style === 'extrude') {
+          context.lineJoin = 'round';
+          if (layer.style === 'double-outline') {
             context.strokeStyle = layer.stroke;
-            context.lineJoin = 'round';
-            context.lineWidth = Math.max(1, layer.size * 0.05);
-            context.strokeText(rows[i], x, y);
+            context.lineWidth = width * 3;
+            paint(rows[i], x, y, true);
+            context.strokeStyle = layer.color2;
+            context.lineWidth = width * 1.3;
+            paint(rows[i], x, y, true);
+          } else if (
+            ['outline', 'extrude', 'hollow', 'chrome'].includes(layer.style)
+          ) {
+            context.strokeStyle = layer.stroke;
+            context.lineWidth = width;
+            paint(rows[i], x, y, true);
           }
-          if (layer.style === 'gradient' || layer.style === 'extrude') {
-            const gradient = context.createLinearGradient(
-              0,
-              y,
-              0,
-              y + layer.size,
-            );
-            gradient.addColorStop(0, layer.color2);
-            gradient.addColorStop(1, layer.color);
-            context.fillStyle = gradient;
+          if (
+            ['gradient', 'extrude', 'double-outline', 'chrome'].includes(
+              layer.style,
+            )
+          ) {
+            const angle = ((layer.gradientAngle ?? 180) * Math.PI) / 180,
+              dx = Math.sin(angle) * layer.width,
+              dy = -Math.cos(angle) * layer.size,
+              g = context.createLinearGradient(
+                layer.width / 2 - dx / 2,
+                y + layer.size / 2 - dy / 2,
+                layer.width / 2 + dx / 2,
+                y + layer.size / 2 + dy / 2,
+              );
+            for (const stop of posterTextStops(layer))
+              g.addColorStop(stop.offset, stop.color);
+            context.fillStyle = g;
           } else context.fillStyle = layer.color;
-          context.fillText(rows[i], x, y);
+          if (layer.style !== 'hollow') paint(rows[i], x, y);
+          context.shadowColor = 'transparent';
+          context.shadowBlur = 0;
+          const rowWidth =
+              context.measureText(rows[i]).width +
+              Math.max(0, Array.from(rows[i]).length - 1) * spacing,
+            left =
+              x -
+              (layer.align === 'center'
+                ? rowWidth / 2
+                : layer.align === 'right'
+                  ? rowWidth
+                  : 0);
+          for (const yy of [
+            layer.underline ? y + layer.size * 1.05 : null,
+            layer.strike ? y + layer.size * 0.5 : null,
+          ])
+            if (yy !== null) {
+              context.fillStyle = layer.color;
+              context.fillRect(
+                left,
+                yy,
+                rowWidth,
+                Math.max(1, layer.size * 0.035),
+              );
+            }
         }
       }
       context.restore();
@@ -339,6 +599,7 @@ export async function renderPoster(
       type: 'image/png',
     });
   } finally {
+    for (const face of faces) document.fonts.delete(face);
     canvas.width = canvas.height = 0;
   }
 }

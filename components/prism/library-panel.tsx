@@ -729,25 +729,20 @@ function SimpleLibraryPanel({
                   </p>
                 )}
                 <div className="record-secret-actions">
-                  {<button onClick={() => toggleReveal(asset.id)} type="button">
+                  {<button aria-label={isRevealed?'隐藏内容':kind==='prompt'?'显示提示词':'显示短码'} onClick={() => toggleReveal(asset.id)} type="button">
                     {isRevealed ? <EyeOff /> : <Eye />}{' '}
-                    {isRevealed ? '隐藏内容' : kind === 'prompt' ? '显示提示词' : '显示短码'}
+                    {isRevealed ? '隐藏' : '显示'}
                   </button>}
                   {kind!=='prompt'&&<CodeCopy value={asset.secret} initial={kind==='moodboard'?'raw':'profile'} label={kind==='moodboard'?'Moodboard':'Profile'}/>}
                   {(kind === 'prompt' && promptLanguages(asset).english) && <button
-                    onClick={() => void copyText(
+                    aria-label="复制英文 Prompt" onClick={() => void copyText(
                         promptLanguages(asset).english,
                       )}
                     type="button"
                   >
-                    <Copy />{' '}
-                    {kind === 'prompt'
-                      ? '复制英文 Prompt'
-                      : kind === 'profile'
-                        ? '复制 Profile 参数'
-                        : '复制短码'}
+                    <Copy /> 英文
                   </button>}
-                  {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" onClick={() => void copyText(promptLanguages(asset).chinese)}>复制中文 Prompt</button>}{promptLanguages(asset).unconfirmed && <button type="button" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}>复制待核对原文</button>}</>}
+                  {kind === 'prompt' && <>{promptLanguages(asset).chinese && <button type="button" aria-label="复制中文 Prompt" onClick={() => void copyText(promptLanguages(asset).chinese)}><Copy/>中文</button>}{promptLanguages(asset).unconfirmed && <button type="button" aria-label="复制待核对原文" onClick={() => void copyText(promptLanguages(asset).unconfirmed)}><Copy/>原文</button>}</>}
                 </div>
                 {<p>
                   <strong>{asset.author}</strong>

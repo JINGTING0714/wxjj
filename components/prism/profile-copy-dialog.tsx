@@ -1,5 +1,5 @@
 'use client';
-import {useCodeFormat,rawProfileCodes} from './code-copy';
+import { useCodeFormat, rawProfileCodes } from './code-copy';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { natureLabel } from '@/lib/profile-model';
 import { copyText } from '@/lib/clipboard';
 import { formatProfileCode } from '@/lib/short-codes';
 import { secretPreview } from '@/lib/prism-types';
+import { ArrowUp, ArrowDown } from 'lucide-react';
 
 export function ProfileCopyDialog({
   title,
@@ -23,7 +24,7 @@ export function ProfileCopyDialog({
   title: string;
   codes: ProfileShortCode[];
 }) {
-  const {format,change}=useCodeFormat();
+  const { format, change } = useCodeFormat();
   const [open, setOpen] = useState(false),
     [order, setOrder] = useState<ProfileShortCode[]>([]),
     [selected, setSelected] = useState<string[]>([]);
@@ -62,10 +63,37 @@ export function ProfileCopyDialog({
           <DialogDescription>
             勾选要使用的短码，并调整本次复制的顺序。
           </DialogDescription>
-<label>复制格式<select aria-label="文件夹复制格式" value={format} onChange={event=>change(event.target.value as 'profile'|'raw')}><option value="profile">带 --profile</option><option value="raw">仅短码</option></select></label>
-          <SortableList className="profile-copy-list" onMove={(from, to) => setOrder(current => moveListItem(current, from, to))}>
+          <div className="profile-copy-options">
+            <span>复制格式</span>
+            <div role="group" aria-label="文件夹复制格式">
+              <button
+                type="button"
+                aria-pressed={format === 'profile'}
+                onClick={() => change('profile')}
+              >
+                带 --profile
+              </button>
+              <button
+                type="button"
+                aria-pressed={format === 'raw'}
+                onClick={() => change('raw')}
+              >
+                仅短码
+              </button>
+            </div>
+            <small>
+              已选 {selected.length} / {codes.length}
+            </small>
+          </div>
+          <SortableList
+            className="profile-copy-list"
+            onMove={(from, to) =>
+              setOrder((current) => moveListItem(current, from, to))
+            }
+          >
             {order.map((code, index) => (
-              <article key={code.id}><SortHandle />
+              <article key={code.id}>
+                <SortHandle />
                 <label aria-label={`选择 ${code.label || `短码 ${index + 1}`}`}>
                   <input
                     type="checkbox"
@@ -87,24 +115,35 @@ export function ProfileCopyDialog({
                 <div>
                   <Button
                     variant="outline"
+                    size="icon-sm"
+                    aria-label="上移短码"
                     disabled={!index}
                     onClick={() => move(index, -1)}
                   >
-                    上移
+                    <ArrowUp />
                   </Button>
                   <Button
                     variant="outline"
+                    size="icon-sm"
+                    aria-label="下移短码"
                     disabled={index === order.length - 1}
                     onClick={() => move(index, 1)}
                   >
-                    下移
+                    <ArrowDown />
                   </Button>
                 </div>
               </article>
             ))}
           </SortableList>
           <pre className="copy-parameter-preview">
-            {selected.length ? formatProfileCode(order.filter(code => selected.includes(code.id)).map(code => secretPreview(code.secret)).join(' ')) : '请选择短码'}
+            {selected.length
+              ? (format === 'profile' ? formatProfileCode : rawProfileCodes)(
+                  order
+                    .filter((code) => selected.includes(code.id))
+                    .map((code) => secretPreview(code.secret))
+                    .join(' '),
+                )
+              : '请选择短码'}
           </pre>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
@@ -113,7 +152,12 @@ export function ProfileCopyDialog({
             <Button
               disabled={!selected.length}
               onClick={async () => {
-                if (await copyText(format==='profile'?value:rawProfileCodes(value))) setOpen(false);
+                if (
+                  await copyText(
+                    format === 'profile' ? value : rawProfileCodes(value),
+                  )
+                )
+                  setOpen(false);
               }}
             >
               确认复制 {selected.length} 个短码

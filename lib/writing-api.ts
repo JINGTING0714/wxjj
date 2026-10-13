@@ -34,7 +34,9 @@ async function apiRequest(
   body: unknown,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  if (!settings.key.trim()) throw new Error('请先配置并保存 API 密钥。');
+  const apiKey = settings.key.trim().replace(/^Bearer\s+/i, '');
+  if (!apiKey) throw new Error('请先配置并保存 API 密钥。');
+  signal.throwIfAborted();
   const base = apiBase(settings.url);
   const control = new AbortController(),
     abort = () => control.abort();
@@ -44,25 +46,80 @@ async function apiRequest(
   let response: Response;
   let data: Record<string, unknown> = {};
   try {
-    response = await fetch(base + path, {
-      method: body ? 'POST' : 'GET',
-      headers: {
-        Authorization: `Bearer ${settings.key.trim()}`,
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: control.signal,
-      credentials: 'omit',
-      redirect: 'error',
-      referrerPolicy: 'no-referrer',
-    });
+    const direct = (kind: 'bearer' | 'x-api-key') =>
+      fetch(base + path, {
+        method: body ? 'POST' : 'GET',
+        headers: {
+          ...(kind === 'x-api-key'
+            ? { 'X-Api-Key': apiKey }
+            : {
+                Authorization: `Bearer ${apiKey}`,
+              }),
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: control.signal,
+        credentials: 'omit',
+        redirect: 'follow',
+        referrerPolicy: 'no-referrer',
+      });
+    const relay = () => {
+      if (!settings.relayUrl)
+        throw new Error('请先填写你能直接访问的中继地址。');
+      const url = new URL(settings.relayUrl);
+      if (
+        url.protocol !== 'https:' &&
+        !(
+          url.protocol === 'http:' &&
+          ['localhost', '127.0.0.1'].includes(url.hostname)
+        )
+      )
+        throw new Error('中继地址请使用 HTTPS。');
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: base,
+          apiKey,
+          path: path.replace(/^\//, ''),
+          ...(body ? { body } : {}),
+        }),
+        signal: control.signal,
+        credentials: 'omit',
+        redirect: 'error',
+        referrerPolicy: 'no-referrer',
+      });
+    };
+    if (settings.transport === 'relay') response = await relay();
+    else {
+      try {
+        response = await direct(
+          settings.authHeader === 'x-api-key' ? 'x-api-key' : 'bearer',
+        );
+      } catch (error) {
+        if (control.signal.aborted) throw error;
+        try {
+          if (settings.authHeader && settings.authHeader !== 'auto')
+            throw error;
+          response = await direct('x-api-key');
+        } catch (compatibilityError) {
+          if (
+            control.signal.aborted ||
+            settings.transport !== 'auto' ||
+            !settings.relayUrl
+          )
+            throw compatibilityError;
+          response = await relay();
+        }
+      }
+    }
     const value: unknown = await response.json().catch(() => null);
     if (value && typeof value === 'object')
       data = value as Record<string, unknown>;
   } catch {
     signal.throwIfAborted();
     throw new Error(
-      '接口未能连接。请检查地址、网络，以及服务是否允许本网站的跨域请求。',
+      '未能直连所选接口。请检查地址，或选择可直连的中继。网站的本机功能仍可正常使用。',
     );
   } finally {
     clearTimeout(timer);
@@ -79,6 +136,8 @@ async function apiRequest(
         : `接口返回 ${response.status}`
     )
       .split(settings.key.trim())
+      .join('[密钥已隐藏]')
+      .split(apiKey)
       .join('[密钥已隐藏]');
     throw new Error(message.slice(0, 500));
   }
@@ -141,9 +200,13 @@ export async function writingCompletion(
     signal,
   );
   const choice = Array.isArray(data.choices)
-    ? (data.choices[0] as { message?: { content?: unknown } })
+    ? (data.choices[0] as { message?: { content?: unknown }; text?: unknown })
     : undefined;
-  const result = choice?.message?.content;
+  const result =
+    choice?.message?.content ??
+    choice?.text ??
+    data.output_text ??
+    data.response;
   const value =
     typeof result === 'string'
       ? result

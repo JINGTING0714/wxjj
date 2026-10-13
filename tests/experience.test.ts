@@ -12,6 +12,83 @@ import {apiBase,translateWriting,writingApiModels,assistWriting} from '../lib/wr
 import {protectedParameters,applyTranslation,insertWritingText,emptyWritingText,emptySensitive,splitWritingVariants,type WrittenPrompt} from '../lib/writing-model';
 import {richWritingRuns,writingTextChunks,exportWritingXlsx} from '../lib/writing-export';
 import {posterTemplate,posterTitle} from '../lib/poster';
+import { posterLayoutOptions } from '../lib/poster';
+import { posterArtPresets, posterFontOptions, posterFontCss, posterTextStops } from '../lib/poster-typography';
+import { writingCompletion } from '../lib/writing-api';
+import { readFileSync } from 'node:fs';
+
+test('production CSP permits chosen HTTPS APIs while scripts stay restricted to this website', () => {
+  const html = readFileSync(new URL('../static/index.html', import.meta.url), 'utf8');
+  const policy = html.match(/content="(default-src[^\"]+)"/)![1];
+  assert.match(policy, /connect-src 'self' https:/);
+  assert.match(policy, /script-src 'self' 'wasm-unsafe-eval';/);
+  assert.ok(!/script-src[^;]*(?:https:|'unsafe-eval')/.test(policy));
+});
+
+test('API compatibility stays on the chosen service and never adds a built-in relay dependency', async () => {
+  const original = globalThis.fetch, calls: { url: string; headers: Record<string, string> }[] = [];
+  const settings = { id: 'writing-api' as const, url: 'https://api.example/v1', key: 'Bearer SYNTHETIC_SECRET', model: 'test' };
+  try {
+    globalThis.fetch = (async (url, options) => {
+      const headers = options!.headers as Record<string, string>;
+      calls.push({ url: String(url), headers });
+      if (headers.Authorization) throw new TypeError('CORS blocked Authorization');
+      return Response.json({ data: [{ id: 'compatible' }] });
+    }) as typeof fetch;
+    assert.deepEqual(await writingApiModels(settings, new AbortController().signal), ['compatible']);
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every(call => call.url === 'https://api.example/v1/models'));
+    assert.equal(calls[1].headers['X-Api-Key'], 'SYNTHETIC_SECRET');
+    globalThis.fetch = (async () => Response.json({ error: { message: 'invalid SYNTHETIC_SECRET' } }, { status: 401 })) as typeof fetch;
+    await assert.rejects(() => writingApiModels(settings, new AbortController().signal), error => error instanceof Error && !error.message.includes('SYNTHETIC_SECRET'));
+    const abort = new AbortController(); abort.abort();
+    globalThis.fetch = (async () => { assert.fail('cancelled job must not send a request'); }) as typeof fetch;
+    await assert.rejects(() => writingApiModels(settings, abort.signal), { name: 'AbortError' });
+  } finally { globalThis.fetch = original; }
+});
+
+test('explicit relay preserves the AIRP request contract and common completion response formats', async () => {
+  const original = globalThis.fetch, settings = { id: 'writing-api' as const, url: 'https://chosen.example/v1', key: 'SYNTHETIC_SECRET', model: 'test', transport: 'relay' as const, relayUrl: 'https://trusted.example/api/relay' };
+  try {
+    globalThis.fetch = (async (url, options) => {
+      assert.equal(String(url), settings.relayUrl);
+      const request = JSON.parse(String(options!.body));
+      assert.equal(request.baseUrl, settings.url);
+      assert.equal(request.apiKey, settings.key);
+      assert.equal(request.path, 'models');
+      assert.equal(options!.credentials, 'omit');
+      return Response.json({ data: ['model'] });
+    }) as typeof fetch;
+    assert.deepEqual(await writingApiModels(settings, new AbortController().signal), ['model']);
+    for (const data of [{ choices: [{ text: 'Result' }] }, { output_text: 'Result' }, { response: 'Result' }, { choices: [{ message: { content: [{ type: 'text', text: 'Result' }] } }] }]) {
+      globalThis.fetch = (async () => Response.json(data)) as typeof fetch;
+      assert.equal(await writingCompletion({ ...settings, transport: 'direct' }, '', 'source', new AbortController().signal), 'Result');
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+test('every poster layout retains dense batches with positive frames inside the canvas even at large gaps', () => {
+  const files = Array.from({ length: 500 }, (_, i) => ({ id: String(i), file: new File(['x'], `${i}.png`, { type: 'image/png' }) }));
+  for (const option of posterLayoutOptions) for (const count of [1, 7, 9, 11, 500]) {
+    const layers = posterTemplate(files.slice(0, count), { width: 1080, height: 1920 }, option.id, 100);
+    assert.equal(layers.length, count);
+    assert.equal(new Set(layers.map(layer => layer.sourceId)).size, count);
+    for (const layer of layers) {
+      assert.ok(layer.width > 0 && layer.height > 0, option.id);
+      assert.ok(layer.x >= 0 && layer.y >= 0 && layer.x + layer.width <= 1080.001 && layer.y + layer.height <= 1920.001, option.id);
+    }
+  }
+});
+
+test('poster typography includes real font choices and distinct outlined, metallic and italic treatments', () => {
+  assert.ok(posterFontOptions.length >= 14);
+  assert.ok(posterArtPresets.length >= 20);
+  assert.equal(new Set(posterArtPresets.map(preset => preset.id)).size, posterArtPresets.length);
+  const text = { ...posterTitle({ width: 1080, height: 1920 }), italic: true, underline: true, style: 'chrome' as const };
+  assert.match(posterFontCss(text), /^italic 900 /);
+  assert.equal(posterTextStops(text).length, 6);
+  assert.ok(posterTextStops(text).every((stop, index, stops) => index === 0 || stop.offset > stops[index - 1].offset));
+});
 
 test('writing keeps MJ parameter tails and cursor insertion intact, and rejects unexpected translated flags',()=>{
  const source='柔和侧光，2个人 --ar 9:16 --profile 2g9wdey --stylize 650';assert.equal(protectedParameters(source).body,'柔和侧光，2个人');assert.equal(applyTranslation(source,'Soft side lighting, 2 people'),'Soft side lighting, 2 people --ar 9:16 --profile 2g9wdey --stylize 650');assert.throws(()=>applyTranslation(source,'Portrait --ar 1:1'),/额外参数/);assert.equal(insertWritingText('第一段 旧词 末段','新词',4,6),'第一段 新词 末段');

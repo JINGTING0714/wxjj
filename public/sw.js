@@ -1,5 +1,5 @@
 const BASE = new URL('./', self.location.href).pathname;
-const CACHE_NAME = `prism-shell-v3-${BASE}`;
+const CACHE_NAME = `prism-shell-v4-${BASE}`;
 const APP_SHELL = ['', 'manifest.webmanifest', 'favicon.svg', 'og.png'].map(
   (path) => BASE + path,
 );

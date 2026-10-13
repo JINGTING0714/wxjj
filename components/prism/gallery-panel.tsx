@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
@@ -715,7 +716,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         <DialogContent className="image-preview-dialog" showCloseButton={false} onKeyDown={event=>{if(event.target instanceof HTMLElement&&event.target.closest('input,textarea,select'))return;const delta=event.key==='ArrowLeft'?-1:event.key==='ArrowRight'?1:0;if(delta&&preview&&visible.length){const index=visible.findIndex(image=>image.id===preview.id);setPreview(visible[(index+delta+visible.length)%visible.length]);}}}>
           {preview && (
             <>
-              <Button variant="outline" aria-label="退出图片库查看" onClick={()=>setPreview(null)}>退出查看</Button>
+              <button className="preview-close-icon" aria-label="关闭图片库查看" title="关闭" onClick={()=>setPreview(null)}><X/></button>
               <DialogHeader>
                 <DialogTitle>{preview.name}</DialogTitle>
                 <DialogDescription>

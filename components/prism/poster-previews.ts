@@ -13,6 +13,7 @@ export function usePosterPreviews(images: PosterImage[]) {
         cache.current.delete(file);
       }
     void (async () => {
+      let pending = 0;
       for (const image of images) {
         if (cancelled) return;
         if (cache.current.has(image.file)) continue;
@@ -41,13 +42,15 @@ export function usePosterPreviews(images: PosterImage[]) {
           if (cancelled) return;
           if (blob) {
             cache.current.set(image.file, URL.createObjectURL(blob));
-            refresh((value) => value + 1);
+            if (++pending % 8 === 0) refresh((value) => value + 1);
           }
           await new Promise((resolve) => setTimeout(resolve, 0));
         } catch {
           cache.current.set(image.file, '');
+          if (++pending % 8 === 0) refresh((value) => value + 1);
         }
       }
+      if (!cancelled && pending % 8) refresh((value) => value + 1);
     })().catch(() => {});
     return () => {
       cancelled = true;
@@ -60,5 +63,12 @@ export function usePosterPreviews(images: PosterImage[]) {
     },
     [],
   );
-  return images.map((image) => cache.current.get(image.file) || '');
+  return {
+    urls: images.map((image) => cache.current.get(image.file) || ''),
+    pending: images.filter((image) => !cache.current.has(image.file)).length,
+    failed: images.filter(
+      (image) =>
+        cache.current.has(image.file) && !cache.current.get(image.file),
+    ).length,
+  };
 }
