@@ -1,5 +1,5 @@
 'use client';
-import {startTask,restoreTask} from '@/lib/task-center';
+import { startTask, restoreTask } from '@/lib/task-center';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Button } from '@/components/ui/button';
 import { SectionHead } from './studio-shared';
@@ -18,6 +18,8 @@ import {
 } from '@/lib/pipeline';
 import { downloadBlob, downloadZip } from '@/lib/download';
 import { useVault } from './vault-provider';
+import { SourceSelection } from './source-selection';
+import { IndexJump } from './index-jump';
 
 type Photo = PipelineSource & {
   output?: File;
@@ -227,13 +229,22 @@ export function ImageEnhancementPanel({
       setBusy(false);
     }
   };
-  const runLatest=useRef<(all:boolean,retryOnly?:boolean,subset?:string[])=>void>(()=>{});
-  const run = (all: boolean, retryOnly=false, subset?:string[]) => {
+  const runLatest = useRef<
+    (all: boolean, retryOnly?: boolean, subset?: string[]) => void
+  >(() => {});
+  const run = (all: boolean, retryOnly = false, subset?: string[]) => {
     if (busy || !photo || !workspace.ready || vault.busy || controller.current)
       return;
     const abort = new AbortController(),
       ids = all
-        ? state.photos.filter((photo) => !photo.sent&&(!subset||subset.includes(photo.id))&&(!retryOnly||!photo.output||!!photo.error)).map((item) => item.id)
+        ? state.photos
+            .filter(
+              (photo) =>
+                (!photo.sent || !!subset) &&
+                (!subset || subset.includes(photo.id)) &&
+                (!retryOnly || !photo.output || !!photo.error),
+            )
+            .map((item) => item.id)
         : [photo.id],
       settings = { ...state.settings },
       choice = state.mode;
@@ -241,8 +252,40 @@ export function ImageEnhancementPanel({
       setProgress('当前图片都已汇入水印工坊，可以选择单张重新增强。');
       return;
     }
-    const tracked=startTask('enhancement','画质增强 / 超分辨率','enhancement',{stop:()=>abort.abort(),retry:()=>runLatest.current(true,true,ids)});
-    if(retryOnly&&!ids.length){setBusy(true);void (state.autoSend?sendPhotos(state.photos.filter(item=>(!subset||subset.includes(item.id))&&item.output&&!item.error&&!item.sent)):workspace.flush()).then(()=>tracked.done()).catch(reason=>{tracked.fail(reason);setError(reason instanceof Error?reason.message:'保存未完成，请重试。');}).finally(()=>setBusy(false));return;}
+    const tracked = startTask(
+      'enhancement',
+      '画质增强 / 超分辨率',
+      'enhancement',
+      {
+        stop: () => abort.abort(),
+        retry: () => runLatest.current(true, true, ids),
+      },
+    );
+    if (retryOnly && !ids.length) {
+      setBusy(true);
+      void (
+        state.autoSend
+          ? sendPhotos(
+              state.photos.filter(
+                (item) =>
+                  (!subset || subset.includes(item.id)) &&
+                  item.output &&
+                  !item.error &&
+                  !item.sent,
+              ),
+            )
+          : workspace.flush()
+      )
+        .then(() => tracked.done())
+        .catch((reason) => {
+          tracked.fail(reason);
+          setError(
+            reason instanceof Error ? reason.message : '保存未完成，请重试。',
+          );
+        })
+        .finally(() => setBusy(false));
+      return;
+    }
     controller.current = abort;
     setBusy(true);
     setError('');
@@ -263,9 +306,15 @@ export function ImageEnhancementPanel({
               item.file,
               settings,
               abort.signal,
-              (value, label) => {tracked.progress((index+value)/ids.length,`第 ${index+1} / ${ids.length} 张 · ${label||"清晰度处理"}`);return setProgress(
+              (value, label) => {
+                tracked.progress(
+                  (index + value) / ids.length,
+                  `第 ${index + 1} / ${ids.length} 张 · ${label || '清晰度处理'}`,
+                );
+                return setProgress(
                   `第 ${index + 1}/${ids.length} 张 · ${label || '清晰度处理'} · ${Math.round(value * 100)}%`,
-                );},
+                );
+              },
               mode,
             );
             setState((current) => ({
@@ -312,16 +361,19 @@ export function ImageEnhancementPanel({
         ) {
           const outputs = workspace.current.current.photos.filter(
             (photo) =>
-              (subset||ids).includes(photo.id) &&
+              (subset || ids).includes(photo.id) &&
               photo.output &&
               !photo.error &&
               !photo.sent,
           );
           await sendPhotos(outputs);
         }
-        if(failed)tracked.fail(new Error(`${failed} 张未完成，可只重试未完成项。`));else tracked.done();
+        if (failed)
+          tracked.fail(new Error(`${failed} 张未完成，可只重试未完成项。`));
+        else tracked.done();
       } catch (reason) {
-        if(abort.signal.aborted)tracked.pause();else tracked.fail(reason);
+        if (abort.signal.aborted) tracked.pause();
+        else tracked.fail(reason);
         setProgress(
           abort.signal.aborted
             ? '已取消，已完成的增强结果保留。'
@@ -336,25 +388,34 @@ export function ImageEnhancementPanel({
       }
     })();
   };
-  runLatest.current=run;
-  const remove = async () => {
-    if (!photo || busy) return;
+  runLatest.current = run;
+  const remove = async (ids: string[] = photo ? [photo.id] : []) => {
+    if (!ids.length || busy || vault.busy) return;
     setBusy(true);
     setError('');
     try {
-      if (photo.batchId)
+      const removing = new Set(ids),
+        groups = new Map<string, Photo[]>();
+      for (const item of state.photos.filter((item) => removing.has(item.id))) {
+        if (item.batchId)
+          groups.set(item.batchId, [...(groups.get(item.batchId) || []), item]);
+      }
+      for (const [batchId, items] of groups)
         await sendPipeline('watermark', {
           sources: [],
-          batchId: photo.batchId,
-          batchTitle: photo.batchTitle,
-          settledIds: [photo.id],
+          batchId,
+          batchTitle: items[0].batchTitle,
+          settledIds: items.map((item) => item.id),
         });
       setState((current) => ({
         ...current,
-        photos: current.photos.filter((item) => item.id !== photo.id),
+        photos: current.photos.filter((item) => !removing.has(item.id)),
       }));
-      setSelected(0);
+      setSelected(
+        Math.max(0, Math.min(selected, state.photos.length - ids.length - 1)),
+      );
       await workspace.flush();
+      setProgress(`已从增强队列移除 ${ids.length} 张，可继续单张或批量处理。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '移除失败，请重试。');
     } finally {
@@ -407,6 +468,63 @@ export function ImageEnhancementPanel({
           {error || workspace.saveError}
         </p>
       )}
+      <SourceSelection
+        sources={state.photos}
+        disabled={busy || vault.busy}
+        openByDefault
+        onInspect={(id) =>
+          setSelected(state.photos.findIndex((item) => item.id === id))
+        }
+        onRemove={remove}
+        confirmMessage={(count) =>
+          '从画质增强队列删除选中的 ' +
+          count +
+          ' 张图片及其增强结果？设备原文件、已送入其他工坊的成品保留。'
+        }
+        actions={(ids) =>
+          ids.length > 0 && (
+            <div className="enhancement-selection-actions">
+              <Button
+                disabled={busy || vault.busy}
+                onClick={() => run(true, false, ids)}
+              >
+                增强选中（{ids.length}）
+              </Button>
+              <Button
+                variant="outline"
+                disabled={busy || vault.busy}
+                onClick={() =>
+                  void send(
+                    state.photos.filter((item) => ids.includes(item.id)),
+                    true,
+                  )
+                }
+              >
+                选中原图送水印
+              </Button>
+              <Button
+                variant="outline"
+                disabled={
+                  busy ||
+                  vault.busy ||
+                  !state.photos.some(
+                    (item) => ids.includes(item.id) && item.output,
+                  )
+                }
+                onClick={() =>
+                  void send(
+                    state.photos.filter(
+                      (item) => ids.includes(item.id) && item.output,
+                    ),
+                  )
+                }
+              >
+                选中结果送水印
+              </Button>
+            </div>
+          )
+        }
+      />
       <div className="enhancement-layout">
         <section className="enhancement-controls">
           <h2>增强方式</h2>
@@ -546,6 +664,12 @@ export function ImageEnhancementPanel({
           {photo ? (
             <>
               <div className="enhancement-photo-bar">
+                <IndexJump
+                  index={Math.min(selected, state.photos.length - 1)}
+                  count={state.photos.length}
+                  onChange={setSelected}
+                  label="跳转增强图片"
+                />
                 <select
                   aria-label="当前图片"
                   value={photo.id}

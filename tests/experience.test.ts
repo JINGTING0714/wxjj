@@ -432,3 +432,37 @@ void test('calculator handles all operations, decimals, repeat equals, sign, cle
   assert.equal(calculate(['8', '÷', '0', '=']).error, true);
   assert.equal(calculate(['8', '÷', '0', '=', '2']).display, '2');
 });
+import {cleanAiText,autoWritingTitle} from '../lib/ai-content';
+import {translateLocally} from '../lib/local-translation';
+import {snapPosterRect,savePosterLayout,applyPosterLayout,posterTracking} from '../lib/poster-editor';
+import {yanChat,yanGenerate,yanIdentity} from '../lib/yan';
+test('encoded images cannot enter prompt text or inflate editor work',()=>{
+ const media='data:image/png;base64,'+'A'.repeat(3359000);
+ assert.equal(cleanAiText('前文 ![image]('+media+') 后文'),'前文  后文');
+ assert.equal(cleanAiText('![image]\n('+media+')').replace(/!\[[^\]]*\]\s*\(\s*\)/g,'').trim(),'');
+ assert.throws(()=>cleanAiText('文'.repeat(40001)),/文字过长/);
+ assert.equal(autoWritingTitle('柔和侧光 --ar 9:16'),'柔和侧光');
+});
+test('six-language short translation runs locally, costs no API, and preserves private MJ flags',async()=>{
+ const original=globalThis.fetch;globalThis.fetch=async()=>{assert.fail('local phrase must never fetch');};
+ try {for(const language of ['en','fr','es','ja','ko'] as const){const value=await translateLocally('你好 --ar 9:16 --profile PRIVATE','zh',language,new AbortController().signal,()=>{},true);assert.ok(value.translation.endsWith('--ar 9:16 --profile PRIVATE'));assert.equal(value.backTranslation,'你好');}}
+ finally{globalThis.fetch=original;}
+});
+test('poster snapping aligns both canvas and neighboring image edges without changing dimensions',()=>{
+ const doc={width:1000,height:1600},file=new File(['x'],'x.png');const image=posterTemplate([{file}],doc,'grid')[0];
+ const canvas=snapPosterRect({x:5,y:5,width:100,height:200},doc,[],8);assert.equal(canvas.x,0);assert.equal(canvas.y,0);
+ const peer={...image,x:200,y:400,width:100,height:200};const result=snapPosterRect({x:307,y:403,width:100,height:200},doc,[peer],8);assert.equal(result.x,300);assert.equal(result.y,400);
+ const free=snapPosterRect({x:320,y:420,width:100,height:200},doc,[peer],8);assert.equal(free.x,320);assert.equal(free.y,420);
+});
+test('custom layouts scale frame placement while preserving identity, crop and original pixels',()=>{
+ const file=new File(['original pixels'],'one.png'),doc={width:1000,height:1600,background:'#fff',layers:[]};const images=posterTemplate([{file},{file}],doc,'duo');assert.ok(images.every(image=>image.fit==='contain'));
+ const changed={...images[0],fit:'cover' as const,zoom:2,offsetX:.25,rotation:12};const layout=savePosterLayout({...doc,layers:[changed,images[1]]},'我的版式');const result=applyPosterLayout([changed,images[1]],layout,{width:2000,height:3200});assert.equal(result[0].id,changed.id);assert.equal(result[0].file,file);assert.equal(result[0].zoom,2);assert.equal(result[0].offsetX,.25);assert.equal(result[0].width,changed.width*2);assert.equal(result[0].rotation,12);
+ const text={...posterTitle(doc),spacing:-10,strokeWidth:.06,style:'double-outline' as const};assert.ok(posterTracking(text)>0);assert.equal(posterTracking({...text,autoSpacing:false}),-10);
+});
+test('Yan keeps persona and history, sends images as structured input, and rejects unsupported vision',async()=>{
+ const original=globalThis.fetch,profile={id:'test',name:'test',url:'https://chosen.example/v1',key:'SYNTHETIC',model:'chat',vision:true},messages=[{id:'m1',role:'user' as const,text:'聊一聊灵感',createdAt:''}];let calls=0;
+ try{globalThis.fetch=async(_url,options)=>{calls++;const body=JSON.parse(String(options?.body));assert.equal(body.messages[0].content,yanIdentity);assert.equal(body.messages[1].content[1].type,'image_url');return Response.json({choices:[{message:{content:'柔和的侧光，明确的主体'}}]});};assert.equal(await yanChat(profile,messages,new AbortController().signal,'data:image/png;base64,AAAA'),'柔和的侧光，明确的主体');await assert.rejects(()=>yanChat({...profile,vision:false},messages,new AbortController().signal,'data:image/png;base64,AAAA'),/支持图像输入/);assert.equal(calls,1);
+ globalThis.fetch=async()=>Response.json({choices:[{message:{content:'![image](data:image/png;base64,AAAA)'}}]});await assert.rejects(()=>yanChat(profile,messages,new AbortController().signal),/可用文字/);
+ globalThis.fetch=async(url,options)=>{assert.match(String(url),/images\/generations$/);assert.ok(!String(options?.body).includes('response_format'));return Response.json({data:[{b64_json:'AAAA'}]});};const files=await yanGenerate(profile,'一个星星',new AbortController().signal,'1024x1024');assert.equal(files.length,1);assert.match(files[0].name,/年\d+月\d+日生图/);
+ }finally{globalThis.fetch=original;}
+});

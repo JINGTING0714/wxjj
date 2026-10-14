@@ -17,7 +17,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { SectionHead } from '@/components/prism/studio-shared';
 import { useVault } from '@/components/prism/vault-provider';
@@ -40,7 +40,7 @@ import type {
 } from '@/lib/prism-types';
 import { prismId } from '@/lib/prism-types';
 import { MobileWorkspaceSheet } from './mobile-workspace';
-import {IndexJump} from './index-jump';
+import { IndexJump } from './index-jump';
 
 const coreCollections: CollectionRecord[] = [{ id: 'daily', name: '每日刷图' }];
 
@@ -49,7 +49,18 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   const [collections, setCollections] =
     useState<CollectionRecord[]>(coreCollections);
   const [active, setActive] = useState('daily');
-  const [images, setImages] = useState<GalleryImage[]>([]);
+  const [page, setPage] = useState(0),
+    [loaded, setLoaded] = useState<GalleryImage[]>([]),
+    [loading, setLoading] = useState(false);
+  const previewUrl = useRef(''),
+    previewRequest = useRef(0);
+  useEffect(
+    () => () => {
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    },
+    [],
+  );
+  const [images, setImages] = useState<GalleryImageMeta[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [collectionDialog, setCollectionDialog] = useState<{
     id?: string;
@@ -73,6 +84,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     if (vault.status !== 'unlocked') {
       setCollections(coreCollections);
       setImages([]);
@@ -95,24 +107,23 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         const loaded = (
           await Promise.all(
             merged.map(async (collection) => {
-              const blobs = await vault.loadBlobs(`gallery:${collection.id}`);
-              return blobs.map((entry) => {
-                const meta = metaById.get(entry.id);
-                return {
-                  id: entry.id,
-                  name: meta?.name || entry.name,
-                  collection: collection.id,
-                  note: meta?.note || '',
-                  tags: meta?.tags || [],
-                  createdAt: meta?.createdAt || entry.updatedAt,
-                  updatedAt: meta?.updatedAt || entry.updatedAt,
-                  url: URL.createObjectURL(entry.blob),
-                  blob: entry.blob,
-                } satisfies GalleryImage;
-              });
+              const ids = await vault.listBlobIds('gallery:' + collection.id);
+              return ids.map(
+                (id, index) =>
+                  metaById.get(id) || {
+                    id,
+                    collection: collection.id,
+                    name: '图片 ' + (index + 1),
+                    note: '',
+                    tags: [],
+                    createdAt: '',
+                    updatedAt: '',
+                  },
+              );
             }),
           )
         ).flat();
+        if (cancelled) return;
         setCollections(merged);
         setImages(
           loaded.sort((a, b) =>
@@ -125,7 +136,131 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : '图库读取失败'),
       );
-  }, [refreshTick, vault.status]);
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshTick, vault.status, vault.session]);
+  const pages = Math.max(1, Math.ceil(visible.length / 36)),
+    currentPage = Math.min(page, pages - 1);
+  const pageImages = useMemo(
+    () => visible.slice(currentPage * 36, (currentPage + 1) * 36),
+    [visible, currentPage],
+  );
+  useEffect(() => {
+    setPage(0);
+    setSelected(new Set());
+  }, [active]);
+  useEffect(() => {
+    let cancelled = false;
+    const urls: string[] = [];
+    setLoaded([]);
+    if (vault.status !== 'unlocked') return;
+    setLoading(true);
+    void vault
+      .loadBlobs(
+        'gallery:' + active,
+        pageImages.map((item) => item.id),
+      )
+      .then(async (blobs) => {
+        const entries: GalleryImage[] = [];
+        for (const blob of blobs) {
+          if (cancelled) break;
+          const meta = pageImages.find((item) => item.id === blob.id)!;
+          let thumbnail: Blob = blob.blob;
+          try {
+            const bitmap = await createImageBitmap(blob.blob),
+              canvas = document.createElement('canvas'),
+              scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+            canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+            canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+            canvas
+              .getContext('2d')!
+              .drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            bitmap.close();
+            thumbnail = await new Promise<Blob>((resolve) =>
+              canvas.toBlob(
+                (value) => resolve(value || blob.blob),
+                'image/webp',
+                0.82,
+              ),
+            );
+            canvas.width = canvas.height = 0;
+          } catch {}
+          if (cancelled) break;
+          const url = URL.createObjectURL(thumbnail);
+          urls.push(url);
+          entries.push({
+            ...meta,
+            name: meta.createdAt ? meta.name : blob.name,
+            url,
+            blob: blob.blob,
+          });
+        }
+        if (!cancelled) setLoaded(entries);
+      })
+      .catch((error) => {
+        if (!cancelled) setError(String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [pageImages, active, vault.status, vault.session, refreshTick]);
+  const hydrate = async (items: GalleryImageMeta[]) => {
+    const result: GalleryImage[] = [];
+    for (const item of items) {
+      const cached = loaded.find((row) => row.id === item.id);
+      if (cached) {
+        result.push(cached);
+        continue;
+      }
+      const blob = (
+        await vault.loadBlobs('gallery:' + item.collection, [item.id])
+      )[0];
+      if (blob)
+        result.push({
+          ...item,
+          name: item.createdAt ? item.name : blob.name,
+          blob: blob.blob,
+          url: '',
+        });
+    }
+    return result;
+  };
+  const openPreview = async (item: GalleryImageMeta) => {
+    const token = ++previewRequest.current;
+    try {
+      const image = (await hydrate([item]))[0];
+      if (!image || token !== previewRequest.current) return;
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+      previewUrl.current = URL.createObjectURL(image.blob);
+      setPreview({ ...image, url: previewUrl.current });
+    } catch (error) {
+      setError(String(error));
+    }
+  };
+  const editImage = async (item: GalleryImageMeta) => {
+    await openPreview(item);
+    const image = (await hydrate([item]))[0];
+    if (image) setEditingImage({ ...image, url: previewUrl.current });
+  };
+  const downloadAll = async () => {
+    setBusy(true);
+    try {
+      const targets = await hydrate(visible);
+      await downloadZip(
+        targets.map((image) => ({ name: image.name, blob: image.blob })),
+        (currentCollection?.name || 'PRISM-图库') + '.zip',
+      );
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const upload = async (files: FileList | null) => {
     if (!files) return;
@@ -136,7 +271,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
     setBusy(true);
     setError('');
     try {
-      const next: GalleryImage[] = [];
+      const next: GalleryImageMeta[] = [];
       for (const file of Array.from(files)) {
         const id = prismId('gallery-image');
         const now = new Date().toISOString();
@@ -151,7 +286,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         };
         await vault.saveBlob(`gallery:${active}`, file, file.name, id);
         await vault.saveRecord('gallery-image-meta', meta);
-        next.push({ ...meta, url: URL.createObjectURL(file), blob: file });
+        next.push(meta);
       }
       setImages((current) => [...next, ...current]);
     } catch (reason) {
@@ -193,7 +328,9 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       return;
     const moving = images.filter((image) => image.collection === id);
     for (const image of moving) {
-      await vault.saveBlob('gallery:daily', image.blob, image.name, image.id);
+      const blob = (await vault.loadBlobs('gallery:' + id, [image.id]))[0];
+      if (!blob) throw new Error('图片读取失败，图库尚未删除。');
+      await vault.saveBlob('gallery:daily', blob.blob, image.name, image.id);
       await vault.saveRecord('gallery-image-meta', {
         ...image,
         url: undefined,
@@ -220,7 +357,7 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       return next;
     });
 
-  const deleteImages = async (targets: GalleryImage[]) => {
+  const deleteImages = async (targets: GalleryImageMeta[]) => {
     if (
       !targets.length ||
       !window.confirm(
@@ -234,12 +371,12 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
       setError(e instanceof Error ? e.message : '删除失败，图片已保留。');
     }
   };
-  const removeImages = async (targets: GalleryImage[]) => {
+  const removeImages = async (targets: GalleryImageMeta[]) => {
     await vault.writeBatch({
       deleteRecords: targets.map((i) => i.id),
       deleteBlobs: targets.map((i) => i.id),
     });
-    for (const image of targets) URL.revokeObjectURL(image.url);
+
     const ids = new Set(targets.map((item) => item.id));
     setImages((current) => current.filter((item) => !ids.has(item.id)));
     setSelected(
@@ -273,24 +410,36 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
     const { url: _url, blob: _blob, ...meta } = next;
     await vault.saveRecord('gallery-image-meta', meta);
     setImages((current) =>
-      current.map((image) => (image.id === next.id ? next : image)),
+      current.map((image) => (image.id === next.id ? meta : image)),
     );
-    setPreview(current=>current?.id===next.id?next:current);
+    setPreview((current) => (current?.id === next.id ? next : current));
     setEditingImage(null);
   };
 
-  const sendSelected = () => {
-    const targets = images.filter((image) => selected.has(image.id));
-    if (!targets.length) return;
-    window.dispatchEvent(
-      new CustomEvent('prism:send-to-collage', {
-        detail: targets.map(
-          (image) =>
-            new File([image.blob], image.name, { type: image.blob.type }),
-        ),
-      }),
-    );
-    onOpenCollage();
+  const sendSelected = async () => {
+    const chosen = images.filter((image) => selected.has(image.id));
+    if (chosen.length > 500) {
+      setError('单次最多送入 500 张，请减少选择。');
+      return;
+    }
+    setBusy(true);
+    try {
+      const targets = await hydrate(chosen);
+      if (!targets.length) return;
+      window.dispatchEvent(
+        new CustomEvent('prism:send-to-collage', {
+          detail: targets.map(
+            (image) =>
+              new File([image.blob], image.name, { type: image.blob.type }),
+          ),
+        }),
+      );
+      onOpenCollage();
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const currentCollection = collections.find(
@@ -435,15 +584,8 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
               <Badge variant="outline">{visible.length} IMAGES</Badge>
               {visible.length > 0 && (
                 <Button
-                  onClick={() =>
-                    downloadZip(
-                      visible.map((image) => ({
-                        name: image.name,
-                        blob: image.blob,
-                      })),
-                      `${currentCollection?.name || 'PRISM-图库'}.zip`,
-                    )
-                  }
+                  onClick={() => void downloadAll()}
+                  disabled={busy}
                   size="sm"
                   variant="outline"
                 >
@@ -453,8 +595,12 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
             </div>
           </div>
           {visible.length ? (
-            <DragSelection className="masonry-grid" disabled={busy} selection={{ selected, toggle: toggleSelected }}>
-              {visible.map((image, index) => (
+            <DragSelection
+              className="masonry-grid"
+              disabled={busy}
+              selection={{ selected, toggle: toggleSelected }}
+            >
+              {loaded.map((image, index) => (
                 <article
                   className={`gallery-image gallery-size-${(index % 3) + 1} ${selected.has(image.id) ? 'is-selected' : ''}`}
                   key={image.id}
@@ -470,20 +616,22 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
                   </button>
                   <button
                     className="gallery-preview-button"
-                    onClick={() => setPreview(image)}
+                    onClick={() => void openPreview(image)}
                     type="button"
                   >
-                    <img alt={image.name} src={image.url} />
+                    <img
+                      alt={image.name}
+                      src={image.url}
+                      loading="lazy"
+                      decoding="async"
+                    />
                     <span>
                       <Maximize2 />
                       {image.name}
                     </span>
                   </button>
                   <div className="gallery-card-actions">
-                    <button
-                      onClick={() => setEditingImage(image)}
-                      type="button"
-                    >
+                    <button onClick={() => void editImage(image)} type="button">
                       <Pencil /> 编辑
                     </button>
                     <button onClick={() => deleteImages([image])} type="button">
@@ -511,6 +659,32 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
                 type="file"
               />
             </label>
+          )}
+          {loading && <p role="status">正在准备本页图片…</p>}
+          {pages > 1 && (
+            <div className="gallery-pagination">
+              <Button
+                variant="outline"
+                disabled={currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                上一页
+              </Button>
+              <IndexJump
+                label="跳转图库页码"
+                index={currentPage}
+                count={pages}
+                onChange={setPage}
+              />
+              <Button
+                variant="outline"
+                disabled={currentPage + 1 === pages}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                下一页
+              </Button>
+              <small>每页 36 张 · 放大查看可跳转全部图片</small>
+            </div>
           )}
           <div className="gallery-footer">
             <p>
@@ -709,14 +883,48 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        onOpenChange={() => {}}
-        open={Boolean(preview)}
-      >
-        <DialogContent className="image-preview-dialog" showCloseButton={false} onKeyDown={event=>{if(event.target instanceof HTMLElement&&event.target.closest('input,textarea,select'))return;const delta=event.key==='ArrowLeft'?-1:event.key==='ArrowRight'?1:0;if(delta&&preview&&visible.length){const index=visible.findIndex(image=>image.id===preview.id);setPreview(visible[(index+delta+visible.length)%visible.length]);}}}>
+      <Dialog onOpenChange={() => {}} open={Boolean(preview)}>
+        <DialogContent
+          className="image-preview-dialog"
+          showCloseButton={false}
+          onKeyDown={(event) => {
+            if (
+              event.target instanceof HTMLElement &&
+              event.target.closest('input,textarea,select')
+            )
+              return;
+            const delta =
+              event.key === 'ArrowLeft'
+                ? -1
+                : event.key === 'ArrowRight'
+                  ? 1
+                  : 0;
+            if (delta && preview && visible.length) {
+              const index = visible.findIndex(
+                (image) => image.id === preview.id,
+              );
+              void openPreview(
+                visible[(index + delta + visible.length) % visible.length],
+              );
+            }
+          }}
+        >
           {preview && (
             <>
-              <button className="preview-close-icon" aria-label="关闭图片库查看" title="关闭" onClick={()=>setPreview(null)}><X/></button>
+              <button
+                className="preview-close-icon"
+                aria-label="关闭图片库查看"
+                title="关闭"
+                onClick={() => {
+                  previewRequest.current++;
+                  setPreview(null);
+                  if (previewUrl.current)
+                    URL.revokeObjectURL(previewUrl.current);
+                  previewUrl.current = '';
+                }}
+              >
+                <X />
+              </button>
               <DialogHeader>
                 <DialogTitle>{preview.name}</DialogTitle>
                 <DialogDescription>
@@ -724,9 +932,48 @@ export function GalleryPanel({ onOpenCollage }: { onOpenCollage: () => void }) {
                 </DialogDescription>
               </DialogHeader>
               <div className="example-lightbox-tools">
-                <Button variant="outline" aria-label="上一张图库图片" disabled={visible.length<2} onClick={()=>setPreview(visible[(visible.findIndex(image=>image.id===preview.id)-1+visible.length)%visible.length])}>上一张</Button>
-                <IndexJump label="跳转图库图片序号" index={Math.max(0,visible.findIndex(image=>image.id===preview.id))} count={visible.length} onChange={index=>setPreview(visible[index])}/>
-                <Button variant="outline" aria-label="下一张图库图片" disabled={visible.length<2} onClick={()=>setPreview(visible[(visible.findIndex(image=>image.id===preview.id)+1)%visible.length])}>下一张</Button>
+                <Button
+                  variant="outline"
+                  aria-label="上一张图库图片"
+                  disabled={visible.length < 2}
+                  onClick={() =>
+                    void openPreview(
+                      visible[
+                        (visible.findIndex((image) => image.id === preview.id) -
+                          1 +
+                          visible.length) %
+                          visible.length
+                      ],
+                    )
+                  }
+                >
+                  上一张
+                </Button>
+                <IndexJump
+                  label="跳转图库图片序号"
+                  index={Math.max(
+                    0,
+                    visible.findIndex((image) => image.id === preview.id),
+                  )}
+                  count={visible.length}
+                  onChange={(index) => void openPreview(visible[index])}
+                />
+                <Button
+                  variant="outline"
+                  aria-label="下一张图库图片"
+                  disabled={visible.length < 2}
+                  onClick={() =>
+                    void openPreview(
+                      visible[
+                        (visible.findIndex((image) => image.id === preview.id) +
+                          1) %
+                          visible.length
+                      ],
+                    )
+                  }
+                >
+                  下一张
+                </Button>
               </div>
               <img alt={preview.name} src={preview.url} />
               <DialogFooter>

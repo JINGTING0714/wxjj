@@ -102,6 +102,7 @@ export function useWorkspaceState<T>(id: string, initial: T) {
     (async () => {
       const records = await vault.loadRecords<{ id: string; data: unknown }>(
         'workspaces',
+        [`workspace:${id}`],
       );
       const record = records.find((r) => r.id === `workspace:${id}`);
       if (record) {

@@ -11,7 +11,11 @@ import {
   Type,
   Upload,
 } from 'lucide-react';
-import { posterArtPresets, posterFontOptions } from '@/lib/poster-typography';
+import {
+  posterArtPresets,
+  posterFontOptions,
+  type PosterArtPreset,
+} from '@/lib/poster-typography';
 import { PosterLettering } from './poster-lettering';
 import type { PosterText } from '@/lib/poster';
 export type PosterFontFile = { id: string; name: string; file: File };
@@ -56,13 +60,20 @@ export function PosterTypeControls({
   fonts,
   onImportFont,
   onRemoveFont,
+  savedStyles = [],
+  onSaveStyle,
+  onDeleteStyle,
 }: {
+  savedStyles?: PosterArtPreset[];
+  onSaveStyle?: (name: string) => void;
+  onDeleteStyle?: (id: string) => void;
   value: PosterText;
   onChange: (update: Partial<PosterText>) => void;
   fonts: PosterFontFile[];
   onImportFont: (file: File) => void;
   onRemoveFont: (id: string) => void;
 }) {
+  const [styleName, setStyleName] = useState('');
   return (
     <div className="poster-type-controls">
       <div className="poster-type-heading">
@@ -199,7 +210,7 @@ export function PosterTypeControls({
           <small>点选后仍可自由调色与修改</small>
         </div>
         <div className="poster-art-grid">
-          {posterArtPresets.map((preset) => {
+          {[...savedStyles, ...posterArtPresets].map((preset) => {
             const preview = { ...value, ...preset.values, size: 23 };
             return (
               <button
@@ -212,6 +223,7 @@ export function PosterTypeControls({
                     underline: false,
                     strike: false,
                     spacing: 0,
+                    autoSpacing: true,
                     lineHeight: 1.25,
                     strokeWidth: 0.035,
                     depth: 0.06,
@@ -242,6 +254,46 @@ export function PosterTypeControls({
           })}
         </div>
       </div>
+      <details className="poster-custom-presets">
+        <summary>我的艺术字 · {savedStyles.length}</summary>
+        <div className="poster-save-preset">
+          <input
+            aria-label="艺术字样式名称"
+            value={styleName}
+            onChange={(e) => setStyleName(e.target.value)}
+            placeholder="给当前艺术字命名"
+            maxLength={40}
+          />
+          <button
+            disabled={!styleName.trim()}
+            onClick={() => {
+              onSaveStyle?.(styleName.trim());
+              setStyleName('');
+            }}
+          >
+            保存样式
+          </button>
+        </div>
+        {savedStyles.map((item) => (
+          <div className="poster-saved-row" key={item.id}>
+            <button onClick={() => onChange(item.values)}>{item.name}</button>
+            <button
+              aria-label={'删除艺术字样式 ' + item.name}
+              onClick={() => onDeleteStyle?.(item.id)}
+            >
+              删除
+            </button>
+          </div>
+        ))}
+      </details>
+      <label className="poster-spacing-auto">
+        <input
+          type="checkbox"
+          checked={value.autoSpacing !== false}
+          onChange={(e) => onChange({ autoSpacing: e.target.checked })}
+        />
+        自动留出描边间距，避免文字粘连
+      </label>
       <details className="poster-type-details">
         <summary>自定义效果与颜色</summary>
         <label>

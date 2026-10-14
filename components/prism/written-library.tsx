@@ -256,7 +256,7 @@ export function WrittenLibrary({
       <SectionHead
         eyebrow="MY PROMPT LIBRARY"
         number="16"
-        title="自己的写词库"
+        title="自写词库"
         description="收纳中文原稿、各语言译文、例图与修改版本。分类、词条和旧版本都可以自由整理。"
         actions={
           <>
@@ -271,9 +271,9 @@ export function WrittenLibrary({
               }
             >
               <FolderPlus />
-              新建分类
+              新建库
             </Button>
-            <Button
+            <Button className="add-button"
               onClick={() =>
                 onEdit({
                   id: '',
@@ -292,7 +292,7 @@ export function WrittenLibrary({
               }
             >
               <Plus />
-              开始新写词
+              添加自写词
             </Button>
           </>
         }

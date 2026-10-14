@@ -86,13 +86,13 @@ type GuideEntry = {
 
 const primaryNav: NavEntry[] = [
   { id: 'overview' as const, label: '开始与总览', icon: Aperture },
-  {id:'writer',label:'写词练习',icon:Library},
-  {id:'written-prompts',label:'自己的写词库',icon:Library},
   { id: 'prompts' as const, label: '提示词库', icon: Library },
   { id: 'profiles' as const, label: 'Profile 库', icon: KeyRound },
   { id: 'moodboards' as const, label: 'Moodboard 库', icon: ImageIcon },
   { id: 'watermarks' as const, label: '水印库', icon: Droplets },
   { id: 'recipes' as const, label: '搭配配方', icon: Blocks },
+  {id:'writer',label:'写词',icon:Library},
+  {id:'written-prompts',label:'自写词库',icon:Library},
 ];
 
 const pipelineNav: NavEntry[] = [
@@ -173,6 +173,8 @@ const workflowSteps: Array<{
     title: '组合与创作',
     detail: '搭配 Profile / Moodboard，复制参数到 Midjourney 刷图。',
   },
+  {id:'writer',number:'03B',title:'写词与灵感',detail:'中文写词、晏对话、生图参考、本机翻译，保存版本到自写词库。'},
+  {id:'written-prompts',number:'03C',title:'收纳自写词',detail:'按分类收纳多语言、例图和版本，导出词包。'},
   {
     id: 'gallery',
     number: '04',
@@ -200,6 +202,7 @@ const workflowSteps: Array<{
     title: '按批拼图',
     detail: '设置单图比例和行列数，生成编号拼图并创建售图场次。',
   },
+  {id:'poster',number:'07B',title:'海报创作',detail:'自由图框、吸附对齐、裁剪、艺术字与装饰，保存自己的版式。'},
   {
     id: 'sales',
     number: '08',
@@ -215,8 +218,8 @@ const workflowSteps: Array<{
 ];
 
 const moduleGuide: GuideEntry[] = [
- {id:'writer',number:'15',label:'写词练习',icon:Library,responsibility:'参考图片、六种语言、AI 辅助与翻译、自己的常用词条。',firstAction:'导入参考图，写好描述和参数，核对翻译后保存新版本。',result:'写词、例图与版本收进自己的写词库。'},
- {id:'written-prompts',number:'16',label:'自己的写词库',icon:Library,responsibility:'分类收纳自创提示词、不同语言、例图与旧版本。',firstAction:'选择分类、查看版本，或导出带例图的词包 XLSX。',result:'标记词以紫色字体导出；例图可送水印、海报。'},
+ {id:'writer',number:'15',label:'写词',icon:Library,responsibility:'参考图写词、本机六语翻译、晏对话与生图、参考词库及常用词语录。',firstAction:'导入参考图，写好描述和参数，核对翻译后保存新版本。',result:'写词、例图与版本收进自写词库。'},
+ {id:'written-prompts',number:'16',label:'自写词库',icon:Library,responsibility:'分类收纳自创提示词、不同语言、例图与旧版本。',firstAction:'选择分类、查看版本，或导出带例图的词包 XLSX。',result:'标记词以紫色字体导出；例图可送水印、海报。'},
  {id:'poster',number:'17',label:'海报工坊',icon:Stamp,responsibility:'独立调整海报尺寸、各张图片尺寸，添加艺术字与符号。',firstAction:'从水印送入图片，选择布局，调整文字并输出海报。',result:'保存草稿、导出 PNG，或收纳到图片库。'},
   { id: 'enhancement', number: '14', label: '画质增强', icon: Aperture, responsibility: 'PNG 清洗后检测画质，在本机进行 2× / 4× 超分辨率与清晰度增强。', firstAction: '检查分流建议，选择倍数，放大对照人物、发丝与配饰。', result: '增强 PNG 汇入同一水印批次，继续打水印、拼图；支持单独下载。' },
   {
@@ -341,11 +344,14 @@ const orderedModuleGuide: GuideEntry[] = [
   'moodboards',
   'watermarks',
   'recipes',
+  'writer',
+  'written-prompts',
   'gallery',
   'png-cleaner',
   'enhancement',
   'watermark',
   'collage',
+  'poster',
   'sales',
   'accounting',
 ].map((id, index) => ({
@@ -604,7 +610,7 @@ export default function Home() {
                   <small>{vaultReady ? 'VAULT READY' : 'FIRST VISIT'}</small>
                 </div>
                 <h2 id="start-here-title">
-                  从资产整理到售图交付，
+                  从资产整理到自写词与交付，
                   <br />
                   每一步都有明确入口。
                 </h2>
@@ -653,7 +659,7 @@ export default function Home() {
                   <span>02</span>
                   <p>
                     <strong>KNOWLEDGE</strong>
-                    <small>四类资产库 · 自由配方</small>
+                    <small>购入资产 · 搭配配方 · 写词 · 自写词库</small>
                   </p>
                 </div>
                 <ArrowDown />
@@ -661,7 +667,7 @@ export default function Home() {
                   <span>03</span>
                   <p>
                     <strong>PRODUCTION</strong>
-                    <small>收纳 · 清洗 · 水印 · 拼图 · 核对 · 记账</small>
+                    <small>收纳 · 清洗 · 增强 · 水印 · 拼图 / 海报 · 核对 · 记账</small>
                   </p>
                 </div>
               </div>
@@ -670,7 +676,7 @@ export default function Home() {
             <section className="workflow-guide" id="workflow-guide">
               <div className="guide-heading">
                 <div>
-                  <p className="eyebrow">THE COMPLETE FLOW / 01—09</p>
+                  <p className="eyebrow">THE COMPLETE FLOW / CREATE & DELIVER</p>
                   <h2>从第一次打开，到交付一批成片</h2>
                 </div>
                 <p>
@@ -698,7 +704,7 @@ export default function Home() {
             <section className="module-guide" id="module-guide">
               <div className="guide-heading">
                 <div>
-                  <p className="eyebrow">MODULE DIRECTORY / 00—11</p>
+                  <p className="eyebrow">MODULE DIRECTORY / ALL WORKSPACES</p>
                   <h2>每一个板块负责什么</h2>
                 </div>
                 <p>

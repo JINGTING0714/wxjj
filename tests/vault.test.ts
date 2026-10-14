@@ -771,3 +771,8 @@ test('missing workspace files fail before replacing a destination even with vali
   ]);
   await unlockVault('destination-password');
 });
+import {listVaultBlobIds} from '../lib/local-vault';
+void test('gallery catalog enumerates IDs without decrypting payloads and stays scoped after restore',async()=>{
+ const key=await createVault('gallery-catalog-password');await writeVaultBatch(key,{blobs:[{id:'a',scope:'gallery:daily',name:'a.png',blob:new Blob(['a'])},{id:'b',scope:'gallery:other',name:'b.png',blob:new Blob(['b'])}]});
+ assert.deepEqual(await listVaultBlobIds('gallery:daily'),['a']);const backup=new File([await exportVaultFile(key)],'gallery.prism');await clear();await importVaultFile(backup,'gallery-catalog-password');assert.deepEqual(await listVaultBlobIds('gallery:daily'),['a']);assert.deepEqual(await listVaultBlobIds('gallery:other'),['b']);
+});

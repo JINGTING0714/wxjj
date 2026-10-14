@@ -1,4 +1,6 @@
 import { posterFontCss, posterTextStops } from './poster-typography';
+import { posterTracking } from './poster-editor';
+import { decoration } from './poster-decoration';
 export type PosterImage = {
   id: string;
   kind: 'image';
@@ -59,6 +61,7 @@ export type PosterText = {
   shadowY?: number;
   shadowBlur?: number;
   gradientAngle?: number;
+  autoSpacing?: boolean;
 };
 export type PosterShape = {
   id: string;
@@ -73,6 +76,8 @@ export type PosterShape = {
   locked: boolean;
   visible: boolean;
   color: string;
+  decoration?: string;
+  outline?: boolean;
 };
 export type PosterLayer = PosterImage | PosterText | PosterShape;
 export type PosterDocument = {
@@ -95,13 +100,29 @@ export type PosterLayout =
   | 'filmstrip'
   | 'overlap'
   | 'magazine'
-  | '2-3-2';
+  | '2-3-2'
+  | '4-4-4'
+  | '1-3-1'
+  | '3-2-3'
+  | '2-1-2'
+  | 'stripes'
+  | 'quad'
+  | 'hero-center'
+  | 'polaroid';
 export const posterLayoutOptions: {
   id: PosterLayout;
   name: string;
   note: string;
   count?: number;
 }[] = [
+  { id: '4-4-4', name: '十二图陈列', note: '4 / 4 / 4', count: 12 },
+  { id: '1-3-1', name: '双主图', note: '1 / 3 / 1', count: 5 },
+  { id: '3-2-3', name: '双人主推', note: '3 / 2 / 3', count: 8 },
+  { id: '2-1-2', name: '中心主视觉', note: '2 / 1 / 2', count: 5 },
+  { id: 'stripes', name: '横向长条', note: '横向并排' },
+  { id: 'quad', name: '四列展览', note: '四列自由拼排' },
+  { id: 'hero-center', name: '横贯主图', note: '中间主图 · 两端陈列' },
+  { id: 'polaroid', name: '拍立得留白', note: '留出备注与标题' },
   { id: '4-3-4', name: '主推词包', note: '4 / 3 / 4 · 中间更大', count: 11 },
   { id: 'mosaic', name: '错落九宫', note: '宽窄错落 · 9 张', count: 9 },
   { id: '2-3-2', name: '七图展览', note: '2 / 3 / 2 · 7 张', count: 7 },
@@ -150,6 +171,61 @@ export const posterSymbols = [
   '◆',
   '✺',
   '🪄',
+  '✶',
+  '✴',
+  '✵',
+  '✹',
+  '❋',
+  '❈',
+  '❊',
+  '✻',
+  '❁',
+  '❃',
+  '❅',
+  '❆',
+  '❄',
+  '☀',
+  '☼',
+  '☁',
+  '☽',
+  '☄',
+  '♢',
+  '◇',
+  '◈',
+  '◊',
+  '❖',
+  '♧',
+  '♤',
+  '♬',
+  '♪',
+  '♫',
+  '♩',
+  '↗',
+  '↘',
+  '⇢',
+  '➤',
+  '➵',
+  '➶',
+  '❥',
+  '❦',
+  '❧',
+  'ღ',
+  '∞',
+  '⌘',
+  '⚘',
+  '❣',
+  '☙',
+  '•',
+  '○',
+  '●',
+  '◎',
+  '◌',
+  '⟡',
+  '✢',
+  '✣',
+  '✥',
+  '✤',
+  '⋇',
 ];
 export function posterTemplate(
   files: { id?: string; file: File }[],
@@ -174,7 +250,34 @@ export function posterTemplate(
       x += width;
     }
   };
-  if (template === '4-3-4' && files.length === 11) {
+  const bands: Record<string, number[]> = {
+    '4-4-4': [4, 4, 4],
+    '1-3-1': [1, 3, 1],
+    '3-2-3': [3, 2, 3],
+    '2-1-2': [2, 1, 2],
+  };
+  if (bands[template]?.reduce((a, b) => a + b, 0) === files.length) {
+    const counts = bands[template],
+      heights = template === '4-4-4' ? [0.3, 0.4, 0.3] : [0.27, 0.46, 0.27];
+    let y = 0;
+    counts.forEach((count, i) => {
+      row(count, y, heights[i]);
+      y += heights[i];
+    });
+  } else if (template === 'stripes') {
+    row(files.length, 0, 1);
+  } else if (template === 'hero-center' && files.length > 1) {
+    boxes.push({
+      x: 0,
+      y: doc.height * 0.25,
+      width: doc.width,
+      height: doc.height * 0.5,
+    });
+    const top = Math.ceil((files.length - 1) / 2),
+      bottom = files.length - 1 - top;
+    row(top, 0, 0.25);
+    if (bottom) row(bottom, 0.75, 0.25);
+  } else if (template === '4-3-4' && files.length === 11) {
     row(4, 0, 0.3);
     row(3, 0.3, 0.4);
     row(4, 0.7, 0.3);
@@ -260,11 +363,13 @@ export function posterTemplate(
       });
   } else {
     const columns =
-        template === 'duo'
-          ? 2
-          : template === 'triptych'
-            ? 3
-            : Math.ceil(Math.sqrt((files.length * doc.width) / doc.height)),
+        template === 'quad'
+          ? 4
+          : template === 'duo'
+            ? 2
+            : template === 'triptych'
+              ? 3
+              : Math.ceil(Math.sqrt((files.length * doc.width) / doc.height)),
       rows = Math.ceil(files.length / Math.max(1, columns));
     for (let i = 0; i < files.length; i++)
       boxes.push({
@@ -275,12 +380,12 @@ export function posterTemplate(
         width: doc.width / Math.max(1, columns) - gap,
         height: doc.height / rows - gap,
       });
-    if (template === 'gallery')
+    if (template === 'gallery' || template === 'polaroid')
       for (const box of boxes) {
         box.x = doc.width * 0.07 + box.x * 0.86;
         box.y = doc.height * 0.08 + box.y * 0.77;
         box.width *= 0.86;
-        box.height *= 0.77;
+        box.height *= template === 'polaroid' ? 0.65 : 0.77;
       }
   }
   for (const box of boxes) {
@@ -310,7 +415,7 @@ export function posterTemplate(
     opacity: 1,
     locked: false,
     visible: true,
-    fit: 'cover',
+    fit: 'contain',
     zoom: 1,
     offsetX: 0,
     offsetY: 0,
@@ -441,6 +546,23 @@ export async function renderPoster(
         } finally {
           image.close();
         }
+      } else if (layer.kind === 'shape' && layer.decoration) {
+        const item = decoration(layer.decoration);
+        context.scale(layer.width / 100, layer.height / 100);
+        context.fillStyle = layer.color;
+        context.strokeStyle = layer.color;
+        context.lineWidth = layer.outline ? 2 : 1.5;
+        context.lineCap = 'round';
+        context.lineJoin = 'round';
+        for (const path of item?.paths || []) {
+          const shape = new Path2D(path);
+          if (
+            !layer.outline &&
+            !['arrow', 'wave', 'bracket', 'orbit'].includes(layer.decoration)
+          )
+            context.fill(shape);
+          context.stroke(shape);
+        }
       } else if (layer.kind === 'shape') {
         context.fillStyle = layer.color;
         context.textAlign = 'center';
@@ -455,7 +577,7 @@ export async function renderPoster(
         context.font = posterFontCss(layer);
         context.textAlign = layer.align;
         context.textBaseline = 'top';
-        const spacing = layer.spacing || 0,
+        const spacing = posterTracking(layer),
           rows = lines(layer.text, context, layer.width, spacing),
           x =
             layer.align === 'center'

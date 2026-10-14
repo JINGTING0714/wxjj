@@ -34,6 +34,16 @@ import { PosterLettering } from './poster-lettering';
 import { PosterLayoutPicker } from './poster-layout-picker';
 import type { PosterLayout } from '@/lib/poster';
 import { useEditorGestures } from './use-editor-gestures';
+import {
+  savePosterLayout,
+  applyPosterLayout,
+  snapPosterRect,
+  posterStyleValues,
+  type PosterSavedLayout,
+} from '@/lib/poster-editor';
+import type { PosterArtPreset } from '@/lib/poster-typography';
+import { posterDecorations } from '@/lib/poster-decoration';
+import { PosterDecoration } from './poster-decoration';
 import { SortableList, SortHandle, moveListItem } from './sortable-list';
 type Project = PosterDocument & { id: string; title: string; batchId?: string };
 const fresh = (title = '新海报'): Project => ({
@@ -86,6 +96,9 @@ export function PosterPanel() {
   const vault = useVault(),
     workspace = useWorkspaceState('poster-studio', {
       fonts: [] as PosterFontFile[],
+      layouts: [] as PosterSavedLayout[],
+      styles: [] as PosterArtPreset[],
+      snap: true,
       projects: [] as Project[],
       active: '',
     }),
@@ -94,12 +107,14 @@ export function PosterPanel() {
       state.projects.find((item) => item.id === state.active) ||
       state.projects[0],
     [selectedId, setSelectedId] = useState(''),
-    [panel, setPanel] = useState<string | null>('images'),
+    [panel, setPanel] = useState<string | null>(null),
     [template, setTemplate] = useState<PosterLayout>('4-3-4'),
     [gap, setGap] = useState(0),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false),
     [navigation, setNavigation] = useState(false),
+    [editMode, setEditMode] = useState<'move' | 'resize' | 'crop'>('move'),
+    [layoutName, setLayoutName] = useState(''),
     [full, setFull] = useState(false),
     [output, setOutput] = useState<File | null>(null),
     [scaleContents, setScaleContents] = useState(false);
@@ -135,9 +150,14 @@ export function PosterPanel() {
       px: number;
       py: number;
       node: HTMLElement;
-      next: { x: number; y: number };
+      layer: PosterLayer;
+      mode: string;
+      corner: string;
+      next: Partial<PosterLayer>;
     } | null>(null),
-    frame = useRef(0);
+    frame = useRef(0),
+    guideX = useRef<HTMLDivElement>(null),
+    guideY = useRef<HTMLDivElement>(null);
   const change = (fn: (current: Project) => Project, record = true) => {
     if (!project) return;
     if (record) {
@@ -259,10 +279,9 @@ export function PosterPanel() {
     const node = stage.current;
     if (!node) return;
     const observer = new ResizeObserver(() => {
-      const rect = node.getBoundingClientRect();
       setBounds({
-        width: Math.max(0, rect.width - 24),
-        height: Math.max(0, rect.height - 24),
+        width: Math.max(0, node.clientWidth - 24),
+        height: Math.max(0, node.clientHeight - 24),
       });
     });
     observer.observe(node);
@@ -277,13 +296,35 @@ export function PosterPanel() {
       cancelAnimationFrame(frame.current);
     };
   }, []);
+  const paintDrag = (
+    current: NonNullable<typeof drag.current>,
+    value: Partial<PosterLayer>,
+  ) => {
+    if (!project) return;
+    const next = { ...current.layer, ...value };
+    Object.assign(current.node.style, {
+      left: (next.x / project.width) * 100 + '%',
+      top: (next.y / project.height) * 100 + '%',
+      width: (next.width / project.width) * 100 + '%',
+      height: (next.height / project.height) * 100 + '%',
+    });
+    if (next.kind === 'image') {
+      const image = current.node.querySelector('img');
+      if (image)
+        image.style.transform = `translate(${(next.offsetX || 0) * 100}%,${(next.offsetY || 0) * 100}%) scale(${next.zoom})`;
+    }
+  };
+  const clearGuides = () => {
+    for (const node of [guideX.current, guideY.current])
+      if (node) node.hidden = true;
+  };
   const cancelDrag = () => {
-    const current = drag.current;
-    if (!current) return;
-    cancelAnimationFrame(frame.current);
-    current.node.style.left = `${(current.x / (project?.width || 1)) * 100}%`;
-    current.node.style.top = `${(current.y / (project?.height || 1)) * 100}%`;
-    drag.current = null;
+    if (drag.current) {
+      cancelAnimationFrame(frame.current);
+      paintDrag(drag.current, {});
+      drag.current = null;
+    }
+    clearGuides();
   };
   const gestures = useEditorGestures({
     surface,
@@ -298,12 +339,18 @@ export function PosterPanel() {
   const startMove = (
     event: PointerEvent<HTMLDivElement>,
     layer: PosterLayer,
+    corner = '',
   ) => {
     if (layer.locked || busy || navigation || !surface.current) return;
+    if (editMode === 'resize' && !corner) {
+      setSelectedId(layer.id);
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     setSelectedId(layer.id);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const node = event.currentTarget.closest<HTMLElement>('.poster-layer')!;
+    node.setPointerCapture(event.pointerId);
     drag.current = {
       pointer: event.pointerId,
       id: layer.id,
@@ -311,8 +358,11 @@ export function PosterPanel() {
       y: layer.y,
       px: event.clientX,
       py: event.clientY,
-      node: event.currentTarget,
-      next: { x: layer.x, y: layer.y },
+      node,
+      layer,
+      mode: corner ? 'resize' : editMode,
+      corner,
+      next: {},
     };
   };
   const move = (event: PointerEvent<HTMLDivElement>) => {
@@ -320,18 +370,66 @@ export function PosterPanel() {
       rect = surface.current?.getBoundingClientRect();
     if (!current || current.pointer !== event.pointerId || !rect || !project)
       return;
-    current.next = {
-      x:
-        current.x + ((event.clientX - current.px) * project.width) / rect.width,
-      y:
-        current.y +
-        ((event.clientY - current.py) * project.height) / rect.height,
-    };
+    const dx = ((event.clientX - current.px) * project.width) / rect.width,
+      dy = ((event.clientY - current.py) * project.height) / rect.height,
+      layer = current.layer;
+    if (current.mode === 'crop' && layer.kind === 'image') {
+      const angle = (-layer.rotation * Math.PI) / 180;
+      current.next = {
+        offsetX: Math.max(
+          -2,
+          Math.min(
+            2,
+            layer.offsetX +
+              (dx * Math.cos(angle) - dy * Math.sin(angle)) / layer.width,
+          ),
+        ),
+        offsetY: Math.max(
+          -2,
+          Math.min(
+            2,
+            layer.offsetY +
+              (dx * Math.sin(angle) + dy * Math.cos(angle)) / layer.height,
+          ),
+        ),
+      };
+    } else if (current.mode === 'resize') {
+      const left = current.corner.includes('w'),
+        top = current.corner.includes('n'),
+        width = Math.max(8, layer.width + (left ? -dx : dx)),
+        height = Math.max(8, layer.height + (top ? -dy : dy));
+      current.next = {
+        width,
+        height,
+        x: left ? layer.x + layer.width - width : layer.x,
+        y: top ? layer.y + layer.height - height : layer.y,
+      };
+    } else {
+      const next = { ...layer, x: layer.x + dx, y: layer.y + dy };
+      if (state.snap !== false) {
+        const snapped = snapPosterRect(
+          next,
+          project,
+          project.layers.filter((item) => item.id !== layer.id),
+          (8 * project.width) / rect.width,
+        );
+        current.next = { x: snapped.x, y: snapped.y };
+        if (guideX.current) {
+          guideX.current.hidden = snapped.guideX === undefined;
+          guideX.current.style.left =
+            ((snapped.guideX || 0) / project.width) * 100 + '%';
+        }
+        if (guideY.current) {
+          guideY.current.hidden = snapped.guideY === undefined;
+          guideY.current.style.top =
+            ((snapped.guideY || 0) / project.height) * 100 + '%';
+        }
+      } else current.next = { x: next.x, y: next.y };
+    }
     cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => {
-      current.node.style.left = `${(current.next.x / project.width) * 100}%`;
-      current.node.style.top = `${(current.next.y / project.height) * 100}%`;
-    });
+    frame.current = requestAnimationFrame(() =>
+      paintDrag(current, current.next),
+    );
   };
   const end = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
@@ -342,7 +440,8 @@ export function PosterPanel() {
       return;
     }
     drag.current = null;
-    patch(current.id, current.next);
+    clearGuides();
+    if (Object.keys(current.next).length) patch(current.id, current.next);
   };
   const addImages = (files: File[]) => {
     if (!files.length || !workspace.ready) return;
@@ -460,7 +559,70 @@ export function PosterPanel() {
         <Button variant="outline" onClick={() => setFull((value) => !value)}>
           {full ? '退出全屏' : '全屏预览'}
         </Button>
-        <small>双指缩放预览 · 拖动图层调整位置</small>
+        <div
+          className="poster-edit-modes"
+          role="group"
+          aria-label="海报编辑模式"
+        >
+          {(['move', 'resize', 'crop'] as const).map((mode, i) => (
+            <button
+              key={mode}
+              disabled={mode === 'crop' && selected?.kind !== 'image'}
+              aria-pressed={!navigation && editMode === mode}
+              onClick={() => {
+                setNavigation(false);
+                setEditMode(mode);
+                if (mode === 'crop' && selected?.kind === 'image')
+                  patch(selected.id, { fit: 'cover' });
+              }}
+            >
+              {['移动', '尺寸', '裁剪'][i]}
+            </button>
+          ))}
+        </div>
+        <label className="poster-snap">
+          <input
+            type="checkbox"
+            checked={state.snap !== false}
+            onChange={(e) =>
+              setState((current) => ({ ...current, snap: e.target.checked }))
+            }
+          />
+          吸附
+        </label>
+        {editMode === 'crop' && selected?.kind === 'image' && (
+          <label className="poster-crop-zoom">
+            取景
+            <input
+              aria-label="预览图片缩放"
+              type="range"
+              min={0.25}
+              max={6}
+              step={0.01}
+              value={selected.zoom}
+              onChange={(e) =>
+                patch(selected.id, { zoom: Number(e.target.value) })
+              }
+            />
+            <button
+              onClick={() =>
+                patch(selected.id, {
+                  fit: 'contain',
+                  zoom: 1,
+                  offsetX: 0,
+                  offsetY: 0,
+                })
+              }
+            >
+              完整图
+            </button>
+          </label>
+        )}
+        <small>
+          {editMode === 'crop'
+            ? '拖动图片取景 · 滑杆缩放图片'
+            : '单指移动图层 · 双指缩放画布'}
+        </small>
       </div>
       <div
         ref={stage}
@@ -494,6 +656,7 @@ export function PosterPanel() {
               .map((layer) => (
                 <div
                   key={layer.id}
+                  data-layer-id={layer.id}
                   className={`poster-layer ${layer.id === selectedId ? 'selected' : ''}`}
                   role="button"
                   aria-label={`选择海报图层 ${layer.kind === 'image' ? layer.name : layer.kind === 'text' ? layer.text : layer.symbol}`}
@@ -534,6 +697,12 @@ export function PosterPanel() {
                         transform: `translate(${layer.offsetX * 100}%,${layer.offsetY * 100}%) scale(${layer.zoom})`,
                       }}
                     />
+                  ) : layer.kind === 'shape' && layer.decoration ? (
+                    <PosterDecoration
+                      id={layer.decoration}
+                      color={layer.color}
+                      outline={layer.outline}
+                    />
                   ) : layer.kind === 'shape' ? (
                     <span
                       style={{
@@ -546,8 +715,24 @@ export function PosterPanel() {
                   ) : (
                     <PosterLettering text={layer} ratio={ratio} />
                   )}
+                  {editMode === 'resize' &&
+                    layer.id === selectedId &&
+                    !layer.locked &&
+                    ['nw', 'ne', 'sw', 'se'].map((corner) => (
+                      <div
+                        key={corner}
+                        role="button"
+                        aria-label={'调整图层尺寸 ' + corner}
+                        className={'poster-resize-handle ' + corner}
+                        onPointerDown={(event) =>
+                          startMove(event, layer, corner)
+                        }
+                      />
+                    ))}
                 </div>
               ))}
+            <div ref={guideX} hidden className="poster-snap-guide vertical" />
+            <div ref={guideY} hidden className="poster-snap-guide horizontal" />
           </div>
         ) : (
           <p className="empty-state">
@@ -556,6 +741,779 @@ export function PosterPanel() {
         )}
       </div>
     </section>
+  );
+  const controls = (
+    <>
+      <section className="poster-controls" data-mobile-active={panel !== null}>
+        <div className="poster-controls-heading">
+          <strong>
+            {panel === 'images'
+              ? '图片与图层'
+              : panel === 'text'
+                ? '文字与符号'
+                : panel === 'output'
+                  ? '输出'
+                  : '画布、布局与调整'}
+          </strong>
+          <Button variant="ghost" onClick={() => setPanel(null)}>
+            收起操作区
+          </Button>
+        </div>
+        <div className="poster-control-group" hidden={panel !== 'images'}>
+          <label className="poster-file-control">
+            导入海报图片
+            <input
+              id="poster-images"
+              type="file"
+              accept="image/*"
+              multiple
+              disabled={!workspace.ready || busy}
+              onChange={(event) => {
+                addImages(Array.from(event.target.files || []));
+                event.target.value = '';
+              }}
+            />
+          </label>
+          {project && (
+            <SortableList
+              className="poster-layer-list"
+              disabled={busy}
+              onMove={(from, to) =>
+                change((current) => ({
+                  ...current,
+                  layers: moveListItem(current.layers, from, to),
+                }))
+              }
+            >
+              {project.layers.map((layer) => (
+                <div key={layer.id}>
+                  <SortHandle disabled={busy} />
+                  <button
+                    type="button"
+                    key={layer.id}
+                    className={layer.id === selectedId ? 'selected' : ''}
+                    onClick={() => {
+                      setSelectedId(layer.id);
+                      setPanel('adjust');
+                    }}
+                  >
+                    {layer.locked ? '🔒 ' : ''}
+                    {layer.kind === 'image'
+                      ? layer.name
+                      : layer.kind === 'text'
+                        ? layer.text
+                        : layer.symbol}
+                  </button>
+                </div>
+              ))}
+            </SortableList>
+          )}
+        </div>
+        {project && (
+          <>
+            <div className="poster-control-group" hidden={panel !== 'layout'}>
+              <label>
+                海报名称
+                <input
+                  value={project.title}
+                  onChange={(event) =>
+                    change(
+                      (current) => ({
+                        ...current,
+                        title: event.target.value,
+                      }),
+                      false,
+                    )
+                  }
+                />
+              </label>
+              <label>
+                画布预设
+                <select
+                  aria-label="海报画布预设"
+                  onChange={(event) => {
+                    const preset = posterPresets[Number(event.target.value)];
+                    if (preset) resize(preset.width, preset.height);
+                  }}
+                  defaultValue=""
+                >
+                  <option value="">选择尺寸</option>
+                  {posterPresets.map((preset, i) => (
+                    <option value={i} key={preset.name}>
+                      {preset.name} · {preset.width}×{preset.height}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="poster-fields">
+                <NumberField
+                  label="海报宽 px"
+                  value={project.width}
+                  min={64}
+                  max={8000}
+                  onChange={(value) => resize(value, project.height)}
+                />
+                <NumberField
+                  label="海报高 px"
+                  value={project.height}
+                  min={64}
+                  max={8000}
+                  onChange={(value) => resize(project.width, value)}
+                />
+              </div>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={scaleContents}
+                  onChange={(event) => setScaleContents(event.target.checked)}
+                />
+                改变画布时同比例调整内容
+              </label>
+              <label>
+                底色
+                <input
+                  aria-label="海报底色"
+                  type="color"
+                  value={project.background}
+                  onChange={(event) =>
+                    change((current) => ({
+                      ...current,
+                      background: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <PosterLayoutPicker
+                value={template}
+                count={images.length}
+                onSelect={(layout) => {
+                  setTemplate(layout);
+                  if (!images.length) return;
+                  const layers = posterTemplate(
+                    images.map((image) => ({
+                      file: image.file,
+                      id: image.sourceId,
+                    })),
+                    project,
+                    layout,
+                    gap,
+                  );
+                  change((current) => ({
+                    ...current,
+                    layers: [
+                      ...layers.map((frame, index) => ({
+                        ...images[index],
+                        x: frame.x,
+                        y: frame.y,
+                        width: frame.width,
+                        height: frame.height,
+                      })),
+                      ...current.layers.filter(
+                        (layer) => layer.kind !== 'image',
+                      ),
+                    ],
+                  }));
+                  setSelectedId(images[0]?.id || '');
+                }}
+              />
+              <NumberField
+                label="海报图片间距 px"
+                value={gap}
+                min={0}
+                max={100}
+                onChange={setGap}
+              />
+              <Button
+                disabled={!images.length}
+                onClick={() => {
+                  const layers = posterTemplate(
+                    images.map((image) => ({
+                      file: image.file,
+                      id: image.sourceId,
+                    })),
+                    project,
+                    template,
+                    gap,
+                  );
+                  change((current) => ({
+                    ...current,
+                    layers: [
+                      ...layers,
+                      ...current.layers.filter(
+                        (layer) => layer.kind !== 'image',
+                      ),
+                    ],
+                  }));
+                  setSelectedId(layers[0]?.id || '');
+                }}
+              >
+                应用图片布局
+              </Button>
+              <p>
+                版式只调整图框位置和尺寸。完整图片默认保留；点“裁剪”后自行决定取景。
+              </p>
+              <details className="poster-custom-presets">
+                <summary>我的版式 · {(state.layouts || []).length}</summary>
+                <div className="poster-save-preset">
+                  <input
+                    aria-label="版式名称"
+                    value={layoutName}
+                    maxLength={40}
+                    placeholder="保存当前图片排版"
+                    onChange={(e) => setLayoutName(e.target.value)}
+                  />
+                  <button
+                    disabled={!images.length || !layoutName.trim()}
+                    onClick={() => {
+                      const layout = savePosterLayout(
+                        project,
+                        layoutName.trim(),
+                      );
+                      setState((current) => ({
+                        ...current,
+                        layouts: [...(current.layouts || []), layout],
+                      }));
+                      setLayoutName('');
+                    }}
+                  >
+                    保存版式
+                  </button>
+                </div>
+                {(state.layouts || []).map((layout) => (
+                  <div className="poster-saved-row" key={layout.id}>
+                    <button
+                      onClick={() =>
+                        change((current) => ({
+                          ...current,
+                          layers: [
+                            ...applyPosterLayout(images, layout, current),
+                            ...current.layers.filter(
+                              (layer) => layer.kind !== 'image',
+                            ),
+                          ],
+                        }))
+                      }
+                    >
+                      {layout.name} · {layout.frames.length} 图
+                    </button>
+                    <button
+                      aria-label={'删除版式 ' + layout.name}
+                      onClick={() =>
+                        setState((current) => ({
+                          ...current,
+                          layouts: current.layouts.filter(
+                            (item) => item.id !== layout.id,
+                          ),
+                        }))
+                      }
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </details>
+            </div>
+            <div className="poster-control-group" hidden={panel !== 'text'}>
+              <Button
+                onClick={() => {
+                  const layer = posterTitle(project);
+                  change((current) => ({
+                    ...current,
+                    layers: [...current.layers, layer],
+                  }));
+                  setSelectedId(layer.id);
+                  setPanel('text');
+                }}
+              >
+                添加标题 / 艺术字
+              </Button>
+              <label className="poster-file-control">
+                导入 TXT 文本
+                <input
+                  type="file"
+                  accept="text/plain,.txt"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      const value = await file.text();
+                      if (value.length > 8000) {
+                        setMessage(
+                          '文字较长，请拆成多个文字图层（每层最多 8000 字）。',
+                        );
+                        return;
+                      }
+                      const layer = posterTitle(project, value, 'plain');
+                      change((current) => ({
+                        ...current,
+                        layers: [...current.layers, layer],
+                      }));
+                      setSelectedId(layer.id);
+                      setPanel('adjust');
+                    }
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+              <details className="poster-symbol-library">
+                <summary>符号与装饰</summary>
+                <div className="poster-decoration-grid">
+                  {posterDecorations.map((item) => (
+                    <button
+                      key={item.id}
+                      aria-label={'添加装饰 ' + item.name}
+                      onClick={() => {
+                        const layer: PosterLayer = {
+                          id: crypto.randomUUID(),
+                          kind: 'shape',
+                          symbol: item.name,
+                          decoration: item.id,
+                          color: '#ffb9df',
+                          x: project.width * 0.3,
+                          y: project.height * 0.3,
+                          width: project.width * 0.28,
+                          height: project.width * 0.28,
+                          rotation: 0,
+                          opacity: 1,
+                          locked: false,
+                          visible: true,
+                        };
+                        change((current) => ({
+                          ...current,
+                          layers: [...current.layers, layer],
+                        }));
+                        setSelectedId(layer.id);
+                      }}
+                    >
+                      <PosterDecoration id={item.id} color="#c34d96" />
+                      <small>{item.name}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="poster-symbols">
+                  {posterSymbols.map((symbol) => (
+                    <Button
+                      variant="outline"
+                      key={symbol}
+                      onClick={() => {
+                        const layer: PosterLayer = {
+                          id: crypto.randomUUID(),
+                          kind: 'shape',
+                          symbol,
+                          x: project.width * 0.4,
+                          y: project.height * 0.4,
+                          width: project.width * 0.2,
+                          height: project.width * 0.2,
+                          rotation: 0,
+                          opacity: 1,
+                          locked: false,
+                          visible: true,
+                          color: '#ff66b6',
+                        };
+                        change((current) => ({
+                          ...current,
+                          layers: [...current.layers, layer],
+                        }));
+                        setSelectedId(layer.id);
+                      }}
+                    >
+                      {symbol}
+                    </Button>
+                  ))}
+                </div>
+              </details>
+
+              {selected?.kind === 'text' && (
+                <PosterTypeControls
+                  value={selected}
+                  onChange={(update) => patch(selected.id, update)}
+                  fonts={state.fonts || []}
+                  savedStyles={state.styles || []}
+                  onSaveStyle={(name) =>
+                    setState((current) => ({
+                      ...current,
+                      styles: [
+                        ...(current.styles || []),
+                        {
+                          id: crypto.randomUUID(),
+                          name,
+                          sample: selected.text.slice(0, 18),
+                          values: posterStyleValues(selected),
+                        },
+                      ],
+                    }))
+                  }
+                  onDeleteStyle={(id) =>
+                    setState((current) => ({
+                      ...current,
+                      styles: current.styles.filter((item) => item.id !== id),
+                    }))
+                  }
+                  onImportFont={(file) => {
+                    if (file.size > 30_000_000) {
+                      setMessage('字体文件最大 30 MB，请选择较小的字体。');
+                      return;
+                    }
+                    const next = {
+                      id:
+                        'PrismFont_' + crypto.randomUUID().replaceAll('-', ''),
+                      name: file.name.replace(/\.[^.]+$/, ''),
+                      file,
+                    };
+                    setState((current) => ({
+                      ...current,
+                      fonts: [...(current.fonts || []), next],
+                    }));
+                    patch(selected.id, { font: next.id });
+                  }}
+                  onRemoveFont={(id) => {
+                    setState((current) => ({
+                      ...current,
+                      fonts: (current.fonts || []).filter(
+                        (font) => font.id !== id,
+                      ),
+                      projects: current.projects.map((item) => ({
+                        ...item,
+                        layers: item.layers.map((layer) =>
+                          layer.kind === 'text' && layer.font === id
+                            ? { ...layer, font: 'Noto Sans SC' }
+                            : layer,
+                        ),
+                      })),
+                    }));
+                  }}
+                />
+              )}
+            </div>
+            <div className="poster-control-group" hidden={panel !== 'adjust'}>
+              <div className="poster-history">
+                <Button
+                  variant="outline"
+                  disabled={!history.current.undo.length}
+                  onClick={() => undo()}
+                >
+                  撤销
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!history.current.redo.length}
+                  onClick={() => undo(true)}
+                >
+                  重做
+                </Button>
+              </div>
+              {selected ? (
+                <>
+                  <div className="poster-fields">
+                    <NumberField
+                      label="图层 X px"
+                      value={selected.x}
+                      onChange={(value) => patch(selected.id, { x: value })}
+                    />
+                    <NumberField
+                      label="图层 Y px"
+                      value={selected.y}
+                      onChange={(value) => patch(selected.id, { y: value })}
+                    />
+                    <NumberField
+                      label="单张 / 图层宽 px"
+                      value={selected.width}
+                      min={8}
+                      max={16000}
+                      onChange={(value) => patch(selected.id, { width: value })}
+                    />
+                    <NumberField
+                      label="单张 / 图层高 px"
+                      value={selected.height}
+                      min={8}
+                      max={16000}
+                      onChange={(value) =>
+                        patch(selected.id, { height: value })
+                      }
+                    />
+                    <NumberField
+                      label="旋转角度"
+                      value={selected.rotation}
+                      onChange={(value) =>
+                        patch(selected.id, { rotation: value })
+                      }
+                    />
+                  </div>
+                  <label>
+                    透明度
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={selected.opacity}
+                      onChange={(event) =>
+                        patch(selected.id, {
+                          opacity: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <div className="poster-layer-actions">
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        patch(selected.id, { locked: !selected.locked })
+                      }
+                    >
+                      {selected.locked ? '解锁图层' : '锁定图层'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        patch(selected.id, { visible: !selected.visible })
+                      }
+                    >
+                      {selected.visible ? '隐藏图层' : '显示图层'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const copy = {
+                          ...selected,
+                          id: crypto.randomUUID(),
+                          x: selected.x + 30,
+                          y: selected.y + 30,
+                        };
+                        change((current) => ({
+                          ...current,
+                          layers: [...current.layers, copy],
+                        }));
+                        setSelectedId(copy.id);
+                      }}
+                    >
+                      复制图层
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        patch(selected.id, {
+                          x: (project.width - selected.width) / 2,
+                          y: (project.height - selected.height) / 2,
+                        })
+                      }
+                    >
+                      居中
+                    </Button>
+                    {[-1, 1].map((direction) => (
+                      <Button
+                        key={direction}
+                        variant="outline"
+                        onClick={() =>
+                          change((current) => {
+                            const layers = [...current.layers],
+                              i = layers.findIndex(
+                                (layer) => layer.id === selected.id,
+                              ),
+                              next = i + direction;
+                            if (next < 0 || next >= layers.length)
+                              return current;
+                            [layers[i], layers[next]] = [
+                              layers[next],
+                              layers[i],
+                            ];
+                            return { ...current, layers };
+                          })
+                        }
+                      >
+                        {direction < 0 ? '下移一层' : '上移一层'}
+                      </Button>
+                    ))}
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        change((current) => ({
+                          ...current,
+                          layers: current.layers.filter(
+                            (layer) => layer.id !== selected.id,
+                          ),
+                        }));
+                        setSelectedId('');
+                      }}
+                    >
+                      删除图层
+                    </Button>
+                  </div>
+                  {selected.kind === 'image' && (
+                    <>
+                      <label>
+                        图片填充
+                        <select
+                          value={selected.fit}
+                          onChange={(event) =>
+                            patch(selected.id, {
+                              fit: event.target.value as 'cover' | 'contain',
+                            })
+                          }
+                        >
+                          <option value="cover">铺满图框 · 可调整取景</option>
+                          <option value="contain">完整显示图片</option>
+                        </select>
+                      </label>
+                      <label>
+                        图片取景缩放
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={4}
+                          step={0.01}
+                          value={selected.zoom}
+                          onChange={(event) =>
+                            patch(selected.id, {
+                              zoom: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        取景左右
+                        <input
+                          type="range"
+                          min={-1}
+                          max={1}
+                          step={0.01}
+                          value={selected.offsetX}
+                          onChange={(event) =>
+                            patch(selected.id, {
+                              offsetX: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        取景上下
+                        <input
+                          type="range"
+                          min={-1}
+                          max={1}
+                          step={0.01}
+                          value={selected.offsetY}
+                          onChange={(event) =>
+                            patch(selected.id, {
+                              offsetY: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  )}
+                  {selected.kind === 'shape' && (
+                    <label>
+                      符号颜色
+                      <input
+                        type="color"
+                        value={selected.color}
+                        onChange={(event) =>
+                          patch(selected.id, { color: event.target.value })
+                        }
+                      />
+                    </label>
+                  )}
+                </>
+              ) : (
+                <p>
+                  在预览里点选图层，或从图片列表选择。单指移动图层，双指缩放预览。
+                </p>
+              )}
+            </div>
+            <div className="poster-control-group" hidden={panel !== 'output'}>
+              <p>
+                输出尺寸：{project.width} × {project.height}{' '}
+                px。图片图框、艺术字与符号按当前位置导出。
+              </p>
+              <Button
+                disabled={busy || !project.layers.length}
+                onClick={() => void exportPoster()}
+              >
+                {busy ? '输出中…' : '导出海报 PNG'}
+              </Button>
+              {busy && (
+                <Button
+                  variant="outline"
+                  onClick={() => controller.current?.abort()}
+                >
+                  取消输出
+                </Button>
+              )}
+              {output && (
+                <>
+                  <ExampleImage src={outputUrl} alt="海报输出结果" />
+                  <Button
+                    variant="outline"
+                    onClick={() => void downloadBlob(output, output.name)}
+                  >
+                    再次下载
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      const id = crypto.randomUUID(),
+                        now = new Date().toISOString();
+                      await vault.writeBatch({
+                        records: [
+                          {
+                            scope: 'gallery-image-meta',
+                            value: {
+                              id,
+                              name: output.name,
+                              collection: 'posters',
+                              note: project.title,
+                              tags: ['海报'],
+                              createdAt: now,
+                              updatedAt: now,
+                            },
+                          },
+                          {
+                            scope: 'gallery-collections',
+                            value: { id: 'posters', name: '海报成品' },
+                          },
+                        ],
+                        blobs: [
+                          {
+                            id,
+                            scope: 'gallery:posters',
+                            blob: output,
+                            name: output.name,
+                          },
+                        ],
+                      });
+                      setMessage('海报已收纳到图片库。');
+                      window.dispatchEvent(
+                        new CustomEvent('prism:gallery-refresh'),
+                      );
+                    }}
+                  >
+                    收纳到图片库
+                  </Button>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+      <nav className="poster-mobile-tabs" aria-label="海报功能">
+        {[
+          ['images', '图片'],
+          ['layout', '布局'],
+          ['text', '文字'],
+          ['adjust', '调整'],
+          ['output', '输出'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={panel === key}
+            onClick={() => setPanel((value) => (value === key ? null : key))}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+    </>
   );
   return (
     <div className="studio-page poster-page">
@@ -623,660 +1581,13 @@ export function PosterPanel() {
           </Button>
         )}
       </div>
-      <div className="poster-workspace" data-controls-open={panel !== null}>
+      <div
+        className="poster-workspace"
+        data-controls-open={panel !== null}
+        hidden={full}
+      >
         <div className="poster-preview-host">{!full && preview}</div>
-        <section
-          className="poster-controls"
-          data-mobile-active={panel !== null}
-        >
-          <div className="poster-controls-heading">
-            <strong>
-              {panel === 'images'
-                ? '图片与图层'
-                : panel === 'text'
-                  ? '文字与符号'
-                  : panel === 'output'
-                    ? '输出'
-                    : '画布、布局与调整'}
-            </strong>
-            <Button variant="ghost" onClick={() => setPanel(null)}>
-              收起操作区
-            </Button>
-          </div>
-          <div className="poster-control-group" hidden={panel !== 'images'}>
-            <label className="poster-file-control">
-              导入海报图片
-              <input
-                id="poster-images"
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={!workspace.ready || busy}
-                onChange={(event) => {
-                  addImages(Array.from(event.target.files || []));
-                  event.target.value = '';
-                }}
-              />
-            </label>
-            {project && (
-              <SortableList
-                className="poster-layer-list"
-                disabled={busy}
-                onMove={(from, to) =>
-                  change((current) => ({
-                    ...current,
-                    layers: moveListItem(current.layers, from, to),
-                  }))
-                }
-              >
-                {project.layers.map((layer) => (
-                  <div key={layer.id}>
-                    <SortHandle disabled={busy} />
-                    <button
-                      type="button"
-                      key={layer.id}
-                      className={layer.id === selectedId ? 'selected' : ''}
-                      onClick={() => {
-                        setSelectedId(layer.id);
-                        setPanel('adjust');
-                      }}
-                    >
-                      {layer.locked ? '🔒 ' : ''}
-                      {layer.kind === 'image'
-                        ? layer.name
-                        : layer.kind === 'text'
-                          ? layer.text
-                          : layer.symbol}
-                    </button>
-                  </div>
-                ))}
-              </SortableList>
-            )}
-          </div>
-          {project && (
-            <>
-              <div className="poster-control-group" hidden={panel !== 'layout'}>
-                <label>
-                  海报名称
-                  <input
-                    value={project.title}
-                    onChange={(event) =>
-                      change(
-                        (current) => ({
-                          ...current,
-                          title: event.target.value,
-                        }),
-                        false,
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  画布预设
-                  <select
-                    aria-label="海报画布预设"
-                    onChange={(event) => {
-                      const preset = posterPresets[Number(event.target.value)];
-                      if (preset) resize(preset.width, preset.height);
-                    }}
-                    defaultValue=""
-                  >
-                    <option value="">选择尺寸</option>
-                    {posterPresets.map((preset, i) => (
-                      <option value={i} key={preset.name}>
-                        {preset.name} · {preset.width}×{preset.height}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="poster-fields">
-                  <NumberField
-                    label="海报宽 px"
-                    value={project.width}
-                    min={64}
-                    max={8000}
-                    onChange={(value) => resize(value, project.height)}
-                  />
-                  <NumberField
-                    label="海报高 px"
-                    value={project.height}
-                    min={64}
-                    max={8000}
-                    onChange={(value) => resize(project.width, value)}
-                  />
-                </div>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={scaleContents}
-                    onChange={(event) => setScaleContents(event.target.checked)}
-                  />
-                  改变画布时同比例调整内容
-                </label>
-                <label>
-                  底色
-                  <input
-                    aria-label="海报底色"
-                    type="color"
-                    value={project.background}
-                    onChange={(event) =>
-                      change((current) => ({
-                        ...current,
-                        background: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <PosterLayoutPicker
-                  value={template}
-                  count={images.length}
-                  onSelect={(layout) => {
-                    setTemplate(layout);
-                    if (!images.length) return;
-                    const layers = posterTemplate(
-                      images.map((image) => ({
-                        file: image.file,
-                        id: image.sourceId,
-                      })),
-                      project,
-                      layout,
-                      gap,
-                    );
-                    change((current) => ({
-                      ...current,
-                      layers: [
-                        ...layers,
-                        ...current.layers.filter(
-                          (layer) => layer.kind !== 'image',
-                        ),
-                      ],
-                    }));
-                    setSelectedId(layers[0]?.id || '');
-                  }}
-                />
-                <NumberField
-                  label="海报图片间距 px"
-                  value={gap}
-                  min={0}
-                  max={100}
-                  onChange={setGap}
-                />
-                <Button
-                  disabled={!images.length}
-                  onClick={() => {
-                    const layers = posterTemplate(
-                      images.map((image) => ({
-                        file: image.file,
-                        id: image.sourceId,
-                      })),
-                      project,
-                      template,
-                      gap,
-                    );
-                    change((current) => ({
-                      ...current,
-                      layers: [
-                        ...layers,
-                        ...current.layers.filter(
-                          (layer) => layer.kind !== 'image',
-                        ),
-                      ],
-                    }));
-                    setSelectedId(layers[0]?.id || '');
-                  }}
-                >
-                  应用图片布局
-                </Button>
-              </div>
-              <div className="poster-control-group" hidden={panel !== 'text'}>
-                <Button
-                  onClick={() => {
-                    const layer = posterTitle(project);
-                    change((current) => ({
-                      ...current,
-                      layers: [...current.layers, layer],
-                    }));
-                    setSelectedId(layer.id);
-                    setPanel('text');
-                  }}
-                >
-                  添加标题 / 艺术字
-                </Button>
-                <label className="poster-file-control">
-                  导入 TXT 文本
-                  <input
-                    type="file"
-                    accept="text/plain,.txt"
-                    onChange={async (event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        const value = await file.text();
-                        if (value.length > 8000) {
-                          setMessage(
-                            '文字较长，请拆成多个文字图层（每层最多 8000 字）。',
-                          );
-                          return;
-                        }
-                        const layer = posterTitle(project, value, 'plain');
-                        change((current) => ({
-                          ...current,
-                          layers: [...current.layers, layer],
-                        }));
-                        setSelectedId(layer.id);
-                        setPanel('adjust');
-                      }
-                      event.target.value = '';
-                    }}
-                  />
-                </label>
-                <details className="poster-symbol-library">
-                  <summary>符号与装饰</summary>
-                  <div className="poster-symbols">
-                    {posterSymbols.map((symbol) => (
-                      <Button
-                        variant="outline"
-                        key={symbol}
-                        onClick={() => {
-                          const layer: PosterLayer = {
-                            id: crypto.randomUUID(),
-                            kind: 'shape',
-                            symbol,
-                            x: project.width * 0.4,
-                            y: project.height * 0.4,
-                            width: project.width * 0.2,
-                            height: project.width * 0.2,
-                            rotation: 0,
-                            opacity: 1,
-                            locked: false,
-                            visible: true,
-                            color: '#ff66b6',
-                          };
-                          change((current) => ({
-                            ...current,
-                            layers: [...current.layers, layer],
-                          }));
-                          setSelectedId(layer.id);
-                        }}
-                      >
-                        {symbol}
-                      </Button>
-                    ))}
-                  </div>
-                </details>
-
-                {selected?.kind === 'text' && (
-                  <PosterTypeControls
-                    value={selected}
-                    onChange={(update) => patch(selected.id, update)}
-                    fonts={state.fonts || []}
-                    onImportFont={(file) => {
-                      if (file.size > 30_000_000) {
-                        setMessage('字体文件最大 30 MB，请选择较小的字体。');
-                        return;
-                      }
-                      const next = {
-                        id:
-                          'PrismFont_' +
-                          crypto.randomUUID().replaceAll('-', ''),
-                        name: file.name.replace(/\.[^.]+$/, ''),
-                        file,
-                      };
-                      setState((current) => ({
-                        ...current,
-                        fonts: [...(current.fonts || []), next],
-                      }));
-                      patch(selected.id, { font: next.id });
-                    }}
-                    onRemoveFont={(id) => {
-                      setState((current) => ({
-                        ...current,
-                        fonts: (current.fonts || []).filter(
-                          (font) => font.id !== id,
-                        ),
-                        projects: current.projects.map((item) => ({
-                          ...item,
-                          layers: item.layers.map((layer) =>
-                            layer.kind === 'text' && layer.font === id
-                              ? { ...layer, font: 'Noto Sans SC' }
-                              : layer,
-                          ),
-                        })),
-                      }));
-                    }}
-                  />
-                )}
-              </div>
-              <div className="poster-control-group" hidden={panel !== 'adjust'}>
-                <div className="poster-history">
-                  <Button
-                    variant="outline"
-                    disabled={!history.current.undo.length}
-                    onClick={() => undo()}
-                  >
-                    撤销
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={!history.current.redo.length}
-                    onClick={() => undo(true)}
-                  >
-                    重做
-                  </Button>
-                </div>
-                {selected ? (
-                  <>
-                    <div className="poster-fields">
-                      <NumberField
-                        label="图层 X px"
-                        value={selected.x}
-                        onChange={(value) => patch(selected.id, { x: value })}
-                      />
-                      <NumberField
-                        label="图层 Y px"
-                        value={selected.y}
-                        onChange={(value) => patch(selected.id, { y: value })}
-                      />
-                      <NumberField
-                        label="单张 / 图层宽 px"
-                        value={selected.width}
-                        min={8}
-                        max={16000}
-                        onChange={(value) =>
-                          patch(selected.id, { width: value })
-                        }
-                      />
-                      <NumberField
-                        label="单张 / 图层高 px"
-                        value={selected.height}
-                        min={8}
-                        max={16000}
-                        onChange={(value) =>
-                          patch(selected.id, { height: value })
-                        }
-                      />
-                      <NumberField
-                        label="旋转角度"
-                        value={selected.rotation}
-                        onChange={(value) =>
-                          patch(selected.id, { rotation: value })
-                        }
-                      />
-                    </div>
-                    <label>
-                      透明度
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={selected.opacity}
-                        onChange={(event) =>
-                          patch(selected.id, {
-                            opacity: Number(event.target.value),
-                          })
-                        }
-                      />
-                    </label>
-                    <div className="poster-layer-actions">
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          patch(selected.id, { locked: !selected.locked })
-                        }
-                      >
-                        {selected.locked ? '解锁图层' : '锁定图层'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          patch(selected.id, { visible: !selected.visible })
-                        }
-                      >
-                        {selected.visible ? '隐藏图层' : '显示图层'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          const copy = {
-                            ...selected,
-                            id: crypto.randomUUID(),
-                            x: selected.x + 30,
-                            y: selected.y + 30,
-                          };
-                          change((current) => ({
-                            ...current,
-                            layers: [...current.layers, copy],
-                          }));
-                          setSelectedId(copy.id);
-                        }}
-                      >
-                        复制图层
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          patch(selected.id, {
-                            x: (project.width - selected.width) / 2,
-                            y: (project.height - selected.height) / 2,
-                          })
-                        }
-                      >
-                        居中
-                      </Button>
-                      {[-1, 1].map((direction) => (
-                        <Button
-                          key={direction}
-                          variant="outline"
-                          onClick={() =>
-                            change((current) => {
-                              const layers = [...current.layers],
-                                i = layers.findIndex(
-                                  (layer) => layer.id === selected.id,
-                                ),
-                                next = i + direction;
-                              if (next < 0 || next >= layers.length)
-                                return current;
-                              [layers[i], layers[next]] = [
-                                layers[next],
-                                layers[i],
-                              ];
-                              return { ...current, layers };
-                            })
-                          }
-                        >
-                          {direction < 0 ? '下移一层' : '上移一层'}
-                        </Button>
-                      ))}
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          change((current) => ({
-                            ...current,
-                            layers: current.layers.filter(
-                              (layer) => layer.id !== selected.id,
-                            ),
-                          }));
-                          setSelectedId('');
-                        }}
-                      >
-                        删除图层
-                      </Button>
-                    </div>
-                    {selected.kind === 'image' && (
-                      <>
-                        <label>
-                          图片填充
-                          <select
-                            value={selected.fit}
-                            onChange={(event) =>
-                              patch(selected.id, {
-                                fit: event.target.value as 'cover' | 'contain',
-                              })
-                            }
-                          >
-                            <option value="cover">铺满图框 · 可调整取景</option>
-                            <option value="contain">完整显示图片</option>
-                          </select>
-                        </label>
-                        <label>
-                          图片取景缩放
-                          <input
-                            type="range"
-                            min={0.5}
-                            max={4}
-                            step={0.01}
-                            value={selected.zoom}
-                            onChange={(event) =>
-                              patch(selected.id, {
-                                zoom: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          取景左右
-                          <input
-                            type="range"
-                            min={-1}
-                            max={1}
-                            step={0.01}
-                            value={selected.offsetX}
-                            onChange={(event) =>
-                              patch(selected.id, {
-                                offsetX: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          取景上下
-                          <input
-                            type="range"
-                            min={-1}
-                            max={1}
-                            step={0.01}
-                            value={selected.offsetY}
-                            onChange={(event) =>
-                              patch(selected.id, {
-                                offsetY: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      </>
-                    )}
-                    {selected.kind === 'shape' && (
-                      <label>
-                        符号颜色
-                        <input
-                          type="color"
-                          value={selected.color}
-                          onChange={(event) =>
-                            patch(selected.id, { color: event.target.value })
-                          }
-                        />
-                      </label>
-                    )}
-                  </>
-                ) : (
-                  <p>
-                    在预览里点选图层，或从图片列表选择。单指移动图层，双指缩放预览。
-                  </p>
-                )}
-              </div>
-              <div className="poster-control-group" hidden={panel !== 'output'}>
-                <p>
-                  输出尺寸：{project.width} × {project.height}{' '}
-                  px。图片图框、艺术字与符号按当前位置导出。
-                </p>
-                <Button
-                  disabled={busy || !project.layers.length}
-                  onClick={() => void exportPoster()}
-                >
-                  {busy ? '输出中…' : '导出海报 PNG'}
-                </Button>
-                {busy && (
-                  <Button
-                    variant="outline"
-                    onClick={() => controller.current?.abort()}
-                  >
-                    取消输出
-                  </Button>
-                )}
-                {output && (
-                  <>
-                    <ExampleImage src={outputUrl} alt="海报输出结果" />
-                    <Button
-                      variant="outline"
-                      onClick={() => void downloadBlob(output, output.name)}
-                    >
-                      再次下载
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={async () => {
-                        const id = crypto.randomUUID(),
-                          now = new Date().toISOString();
-                        await vault.writeBatch({
-                          records: [
-                            {
-                              scope: 'gallery-image-meta',
-                              value: {
-                                id,
-                                name: output.name,
-                                collection: 'posters',
-                                note: project.title,
-                                tags: ['海报'],
-                                createdAt: now,
-                                updatedAt: now,
-                              },
-                            },
-                            {
-                              scope: 'gallery-collections',
-                              value: { id: 'posters', name: '海报成品' },
-                            },
-                          ],
-                          blobs: [
-                            {
-                              id,
-                              scope: 'gallery:posters',
-                              blob: output,
-                              name: output.name,
-                            },
-                          ],
-                        });
-                        setMessage('海报已收纳到图片库。');
-                        window.dispatchEvent(
-                          new CustomEvent('prism:gallery-refresh'),
-                        );
-                      }}
-                    >
-                      收纳到图片库
-                    </Button>
-                  </>
-                )}
-              </div>
-            </>
-          )}
-        </section>
-        <nav className="poster-mobile-tabs" aria-label="海报功能">
-          {[
-            ['images', '图片'],
-            ['layout', '布局'],
-            ['text', '文字'],
-            ['adjust', '调整'],
-            ['output', '输出'],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={panel === key}
-              onClick={() => setPanel((value) => (value === key ? null : key))}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+        {!full && controls}
       </div>
       <Dialog open={full} onOpenChange={setFull}>
         <DialogContent
@@ -1285,9 +1596,17 @@ export function PosterPanel() {
         >
           <DialogTitle className="sr-only">海报全屏预览</DialogTitle>
           <DialogDescription className="sr-only">
-            双指缩放、平移预览，单指移动图层；点击退出全屏返回。
+            双指缩放画布，单指移动图层。使用尺寸、裁剪及底部工具进行编辑。
           </DialogDescription>
-          {full && preview}
+          {full && (
+            <div
+              className="poster-workspace poster-full-workspace"
+              data-controls-open={panel !== null}
+            >
+              <div className="poster-preview-host">{preview}</div>
+              {controls}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

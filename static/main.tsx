@@ -1,3 +1,9 @@
+import '@fontsource/anton/400.css';
+import '@fontsource/orbitron/400.css';
+import '@fontsource/russo-one/400.css';
+import '@fontsource/lobster/400.css';
+import '@fontsource/bungee/400.css';
+import '@fontsource/cinzel/400.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/geist';

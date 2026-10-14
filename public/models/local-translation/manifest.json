@@ -1,0 +1,64 @@
+{
+  "source": "Xenova/m2m100_418M",
+  "revision": "9c374f0b7aca709787cea97b047bfbbd1559d177",
+  "license": "MIT",
+  "files": {
+    "encoder_model_quantized.onnx": {
+      "size": 287856370,
+      "sha256": "13a94e354a9140764eb81102d77d3ec6952d796e6f113c651eeb3c3443da0386",
+      "parts": [
+        {
+          "name": "encoder_model_quantized.onnx.part0",
+          "size": 80000000,
+          "sha256": "c28255ea5e6a56b52d7e29c338a404ed7c28892f0b7a42054210e26f0dfe7687"
+        },
+        {
+          "name": "encoder_model_quantized.onnx.part1",
+          "size": 80000000,
+          "sha256": "8500e38ea35b9fc62b9fb123ab8f8ab20eea140a798ae6d50bd56e1b860f611c"
+        },
+        {
+          "name": "encoder_model_quantized.onnx.part2",
+          "size": 80000000,
+          "sha256": "dec534df6f90f56ef2837f12099ed64907cb8767522a18987c426c16b4d09c1c"
+        },
+        {
+          "name": "encoder_model_quantized.onnx.part3",
+          "size": 47856370,
+          "sha256": "6117a410085706187ae55ca8ea5f38e14b2823dfede795d993cb3e755a343a15"
+        }
+      ]
+    },
+    "decoder_model_merged_quantized.onnx": {
+      "size": 344128178,
+      "sha256": "007654bcabb6cea6fd3bde34ce933137b431330b3755781145d7b6906270b45a",
+      "parts": [
+        {
+          "name": "decoder_model_merged_quantized.onnx.part0",
+          "size": 80000000,
+          "sha256": "1d0fa1f444be38fb167eaf972b422c80138d50e30b681cd5e3d6fde50c263c26"
+        },
+        {
+          "name": "decoder_model_merged_quantized.onnx.part1",
+          "size": 80000000,
+          "sha256": "b75a2806b4be3c89b15cd6825ec4e9d7421a59137dfaf81ef33bcbc01d73ff7d"
+        },
+        {
+          "name": "decoder_model_merged_quantized.onnx.part2",
+          "size": 80000000,
+          "sha256": "d4ce7846607d31ace1b80606cc033d2c97adcca4058af630c8feaeea73f0a5e9"
+        },
+        {
+          "name": "decoder_model_merged_quantized.onnx.part3",
+          "size": 80000000,
+          "sha256": "a6aacd5f1bfe100c628e66daf8cacecf8a88c61085543db270534c617aa5573c"
+        },
+        {
+          "name": "decoder_model_merged_quantized.onnx.part4",
+          "size": 24128178,
+          "sha256": "113b2fe871422d71fff3807574cb76f3171a09f05162cdb1bd1fde98a560faaf"
+        }
+      ]
+    }
+  }
+}

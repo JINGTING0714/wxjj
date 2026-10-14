@@ -4,6 +4,9 @@ import type { PosterImage } from '@/lib/poster';
 export function usePosterPreviews(images: PosterImage[]) {
   const cache = useRef(new Map<File, string>()),
     [, refresh] = useState(0);
+  const stable = useRef(images);
+  if (images.length !== stable.current.length || images.some((item,index)=>item.file!==stable.current[index]?.file)) stable.current=images;
+  const files=stable.current;
   useEffect(() => {
     let cancelled = false;
     const keep = new Set(images.map((image) => image.file));
@@ -55,7 +58,7 @@ export function usePosterPreviews(images: PosterImage[]) {
     return () => {
       cancelled = true;
     };
-  }, [images]);
+  }, [files]);
   useEffect(
     () => () => {
       for (const url of cache.current.values()) URL.revokeObjectURL(url);

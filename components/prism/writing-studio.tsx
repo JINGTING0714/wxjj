@@ -15,6 +15,16 @@ import {
   X,
   Settings2,
 } from 'lucide-react';
+import { YanWindow } from './yan-window';
+import {
+  translateLocally,
+  clearLocalTranslation,
+  prepareLocalTranslation,
+} from '@/lib/local-translation';
+import { autoWritingTitle, cleanAiText, imageDataFile } from '@/lib/ai-content';
+import { protectedParameters, applyTranslation, type ApiSettings } from '@/lib/writing-model';
+import { translateWriting } from '@/lib/writing-api';
+import type { YanProfile } from '@/lib/yan';
 import { WritingWordLibrary } from './writing-word-library';
 import { copyText } from '@/lib/clipboard';
 import { Button } from '@/components/ui/button';
@@ -34,12 +44,6 @@ import { SectionHead } from './studio-shared';
 import { startTask } from '@/lib/task-center';
 import { splitWritingVariants as splitPromptVariants } from '@/lib/writing-model';
 import {
-  apiBase,
-  writingApiModels,
-  assistWriting,
-  translateWriting,
-} from '@/lib/writing-api';
-import {
   emptyWritingText,
   emptySensitive,
   writingLanguages,
@@ -48,7 +52,6 @@ import {
   writingVersion,
   type WritingLanguage,
   type WrittenPrompt,
-  type ApiSettings,
 } from '@/lib/writing-model';
 const languageName = (id: WritingLanguage) =>
   ({ zh: '中文', en: '英语', fr: '法语', es: '西语', ja: '日语', ko: '韩语' })[
@@ -102,21 +105,11 @@ export function WritingStudio({
     [message, setMessage] = useState(''),
     [saving, setSaving] = useState(false),
     [loadingSeed, setLoadingSeed] = useState(false);
-  const [api, setApi] = useState<ApiSettings>({
-      id: 'writing-api',
-      url: '',
-      key: '',
-      model: '',
-    }),
-    [apiOpen, setApiOpen] = useState(false),
-    [models, setModels] = useState<string[]>([]),
-    [aiBusy, setAiBusy] = useState(false),
-    [instruction, setInstruction] = useState(
-      '帮助我检查提示词的主体、动作、配饰、光影和材质是否明确，给出不改变原意的改进版本。',
-    ),
-    [sendImage, setSendImage] = useState(false),
+  const [apiOpen, setApiOpen] = useState(false),
+    [aiBusy,setAiBusy]=useState(false),
+    [translationMode, setTranslationMode] = useState<'local' | 'ai'>('local'),
     [targetLang, setTargetLang] = useState<WritingLanguage>('en'),
-    [verify, setVerify] = useState(true),
+    [verify, setVerify] = useState(false),
     [glossary, setGlossary] = useState(''),
     [result, setResult] = useState<{
       text: string;
@@ -136,7 +129,6 @@ export function WritingStudio({
     );
   const translatedText = useRef<HTMLTextAreaElement>(null);
   const text = useRef<HTMLTextAreaElement>(null),
-    apiEdited = useRef(false),
     controller = useRef<AbortController | null>(null),
     loaded = useRef(''),
     urls = useFileUrls(state.references.map((item) => item.file));
@@ -146,16 +138,6 @@ export function WritingStudio({
       .then(setCollections);
   useEffect(() => {
     void refresh().catch((error) => setMessage(String(error)));
-    void vault
-      .loadRecords<ApiSettings>('writing-api-settings')
-      .then((items) => {
-        if (items[0] && !apiEdited.current) setApi(items[0]);
-      })
-      .catch((error) =>
-        setMessage(
-          error instanceof Error ? error.message : '接口设置读取失败，请重试。',
-        ),
-      );
     const stop = () => controller.current?.abort();
     const changed = () =>
       void refresh().catch((error) => setMessage(String(error)));
@@ -289,10 +271,9 @@ export function WritingStudio({
     }));
   };
   const save = async () => {
-    if (saving || !state.title.trim()) {
-      setMessage('请填写写词名称。');
-      return;
-    }
+    if (saving) return;
+    const title = state.title.trim() || autoWritingTitle(state.languages.zh);
+    setState((current) => ({ ...current, title }));
     const parts = Object.fromEntries(
       writingLanguages.map((lang) => [
         lang.id,
@@ -359,7 +340,7 @@ export function WritingStudio({
           };
         return {
           id,
-          title: state.title.trim() + (count > 1 ? ` · 版本 ${i + 1}` : ''),
+          title: title + (count > 1 ? ` · 版本 ${i + 1}` : ''),
           category: state.category,
           author: state.author.trim() || '自创',
           origin: state.origin,
@@ -405,9 +386,13 @@ export function WritingStudio({
         versionNote:
           current.versionNote === state.versionNote ? '' : current.versionNote,
       }));
-      await workspace.flush();
-      setMessage(`已保存 ${count} 个独立写词版本到自己的写词库；旧版本保留。`);
       window.dispatchEvent(new CustomEvent('prism:writing-changed'));
+      setMessage(`已保存到自写词库：${title}；同一条写词的旧版本保留。`);
+      try {
+        await workspace.flush();
+      } catch {
+        setMessage('写词已入库；草稿同步未完成，稍后会重试。');
+      }
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : '保存失败，草稿保留。',
@@ -416,126 +401,173 @@ export function WritingStudio({
       setSaving(false);
     }
   };
-  const request = async (
-    action: 'models' | 'translate' | 'translate-all' | 'assist',
-  ) => {
+  const request = async (action: 'translate' | 'translate-all') => {
     if (aiBusy) return;
     const control = new AbortController();
     controller.current = control;
     setAiBusy(true);
     const tracked = startTask(
-      'writing-ai',
-      action === 'translate'
-        ? '写词翻译与核对'
-        : action === 'models'
-          ? '读取模型列表'
-          : 'AI 写词辅助',
+      'writing-translation',
+      translationMode === 'local' ? '本机翻译' : 'AI 翻译',
       'writer',
       { stop: () => control.abort() },
     );
+    const translated: WritingResult[] = [];
+    setPendingTranslations([]);
     try {
-      tracked.indeterminate('正在请求你配置的服务…');
-      if (action === 'models') {
-        const list = await writingApiModels(api, control.signal);
-        setModels(list);
-        if (!api.model) setApi((current) => ({ ...current, model: list[0] }));
-        setMessage(`已读取 ${list.length} 个模型。`);
-      } else if (action === 'translate' || action === 'translate-all') {
-        const targets =
-          action === 'translate-all'
-            ? writingLanguages
-                .filter((lang) => lang.id !== 'zh')
-                .map((lang) => lang.id)
-            : [targetLang];
-        const translated: WritingResult[] = [];
-        setPendingTranslations([]);
-        for (const language of targets) {
-          tracked.indeterminate('正在翻译' + languageName(language) + '…');
-          try {
-            const output = await translateWriting(
-              api,
-              state.languages.zh,
-              'zh',
-              language,
-              control.signal,
-              verify,
-              glossary,
-            );
-            translated.push({
-              text: output.translation,
-              target: language,
-              source: state.languages.zh,
-              back: output.backTranslation,
-              warnings: output.warnings,
-            });
-          } catch (error) {
-            if (translated.length) {
-              setPendingTranslations(translated);
-              setResult(translated[0]);
-              setResultOpen(true);
-            }
-            throw error;
-          }
+      const targets =
+        action === 'translate-all'
+          ? writingLanguages
+              .filter((lang) => lang.id !== 'zh')
+              .map((lang) => lang.id)
+          : [targetLang];
+      let aiSettings: ApiSettings | undefined;
+      if (translationMode === 'ai') {
+        const [profiles, bindings, legacy] = await Promise.all([
+          vault.loadRecords<YanProfile>('yan-api-profiles'),
+          vault.loadRecords<{ write?: string }>('yan-api-bindings'),
+          vault.loadRecords<ApiSettings>('writing-api-settings'),
+        ]);
+        let available = profiles;
+        let writeBinding = bindings[0]?.write || '';
+        if (!available.length && legacy[0]) {
+          const migrated: YanProfile = {
+            ...legacy[0],
+            id: 'yan-migrated-main',
+            name: '主 API',
+          };
+          available = [migrated];
+          writeBinding = migrated.id;
+          await vault.writeBatch({
+            records: [
+              { scope: 'yan-api-profiles', value: migrated },
+              {
+                scope: 'yan-api-bindings',
+                value: {
+                  id: 'yan-bindings',
+                  write: migrated.id,
+                  image: '',
+                  vision: '',
+                },
+              },
+            ],
+          });
         }
+        const profile = available.find((item) => item.id === writeBinding);
+        if (!profile?.key.trim() || !profile.model.trim()) {
+          setApiOpen(true);
+          setMessage(
+            '请先在晏的 API 设置中配置并绑定“写词晏”主接口，再试 AI 翻译。',
+          );
+          tracked.fail(new Error('尚未配置写词晏主 API。'));
+          return;
+        }
+        aiSettings = { ...profile, id: 'writing-api' };
+      }
+      for (const language of targets) {
+        const output =
+          translationMode === 'local'
+            ? await translateLocally(
+                state.languages.zh,
+                'zh',
+                language,
+                control.signal,
+                (message) => {
+                  tracked.indeterminate(message);
+                  setMessage(message);
+                },
+                verify,
+              )
+            : await translateWriting(
+                aiSettings!,
+                state.languages.zh,
+                'zh',
+                language,
+                control.signal,
+                verify,
+                glossary,
+              );
+        translated.push({
+          text: output.translation,
+          target: language,
+          source: state.languages.zh,
+          back: output.backTranslation,
+          warnings: [
+            ...output.warnings,
+            ...(translationMode === 'local' && glossary.trim()
+              ? ['术语备忘（请对照译文核对）：' + glossary]
+              : []),
+          ],
+        });
+      }
+      setPendingTranslations(translated);
+      setResult(translated[0]);
+      setResultOpen(true);
+      setMessage(
+        translationMode === 'local'
+          ? '本机翻译完成，未调用 API。'
+          : 'AI 翻译完成，请逐项核对语义和细节。',
+      );
+      tracked.done();
+    } catch (error) {
+      if (translated.length) {
         setPendingTranslations(translated);
         setResult(translated[0]);
         setResultOpen(true);
-      } else {
-        setPendingTranslations([]);
-        let image: string | undefined;
-        if (sendImage && state.references[activeImage]) {
-          const bitmap = await createImageBitmap(
-              state.references[activeImage].file,
-            ),
-            canvas = document.createElement('canvas');
-          const scale = Math.min(
-            1,
-            1536 / Math.max(bitmap.width, bitmap.height),
-          );
-          canvas.width = Math.round(bitmap.width * scale);
-          canvas.height = Math.round(bitmap.height * scale);
-          canvas
-            .getContext('2d')!
-            .drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-          image = canvas.toDataURL('image/jpeg', 0.9);
-          bitmap.close();
-          canvas.width = canvas.height = 0;
-        }
-        const output = await assistWriting(
-          api,
-          state.languages.zh,
-          'zh',
-          instruction,
-          control.signal,
-          image
-            ? { data: image, variant: state.references[activeImage]?.variant }
-            : undefined,
-        );
-        setResult({
-          text: output,
-          target: 'zh',
-          source: state.languages.zh,
-          back: '',
-          warnings: ['AI 建议是草稿，请核对原意和 MJ 参数后采用。'],
-        });
-        setResultOpen(true);
       }
-      tracked.done();
-    } catch (error) {
       if (control.signal.aborted) tracked.pause();
       else tracked.fail(error);
       setMessage(
-        control.signal.aborted
-          ? '请求已取消，原草稿保留。'
-          : error instanceof Error
-            ? error.message
-            : '请求失败。',
+        error instanceof Error
+          ? error.message
+          : translationMode === 'local'
+            ? '本机翻译失败。'
+            : 'AI 翻译失败。',
       );
     } finally {
       controller.current = null;
       setAiBusy(false);
     }
   };
+  useEffect(() => {
+    if (!workspace.ready) return;
+    const encoded = Object.values(state.languages).find((value) =>
+      value.includes('data:image/'),
+    );
+    if (!encoded) return;
+    const uri = encoded.match(
+      /data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=\s]+/i,
+    )?.[0];
+    let file: File | undefined;
+    try {
+      if (uri) file = imageDataFile(uri, 'AI返回参考图.png');
+    } catch {}
+    setState((current) => ({
+      ...current,
+      languages: Object.fromEntries(
+        Object.entries(current.languages).map(([id, value]) => [
+          id,
+          value.includes('data:image/')
+            ? cleanAiText(value)
+                .replace(/!\[[^\]]*\]\s*\(\s*\)/g, '')
+                .trim()
+            : value,
+        ]),
+      ) as typeof current.languages,
+      references: file
+        ? [
+            ...current.references,
+            { id: crypto.randomUUID(), file, role: 'reference' },
+          ]
+        : current.references,
+    }));
+    setMessage('AI 返回的图片编码已从正文分离，恢复为参考图。');
+  }, [workspace.ready]);
+  useEffect(() => {
+    const stop = () => clearLocalTranslation();
+    window.addEventListener('prism:stop-processing', stop);
+    return () => window.removeEventListener('prism:stop-processing', stop);
+  }, []);
   const variants = Math.max(
     1,
     ...writingLanguages.map(
@@ -543,16 +575,19 @@ export function WritingStudio({
     ),
   );
   return (
-    <div className="studio-page writing-page writing-redesign">
+    <div
+      className="studio-page writing-page writing-redesign"
+      data-assistant-open={assistOpen || apiOpen}
+    >
       <SectionHead
         eyebrow="WRITING STUDIO"
         number="15"
-        title="写词练习"
+        title="写词"
         description="从中文原稿开始，边看参考图边写，再翻译、核对和保存自己的版本。"
         actions={
           <>
             <Button variant="outline" onClick={onOpenLibrary}>
-              自己的写词库
+              自写词库
             </Button>
             <Button variant="outline" onClick={() => setApiOpen(true)}>
               API 设置
@@ -796,7 +831,7 @@ export function WritingStudio({
               onClick={() => setAssistOpen(true)}
             >
               <Sparkles />
-              AI 辅助
+              晏 · AI 助手
             </button>
           </div>
           <textarea
@@ -874,36 +909,90 @@ export function WritingStudio({
                 <small>TRANSLATION</small>
                 <h2>中文翻译</h2>
               </div>
-              <select
-                aria-label="翻译目标语言"
-                value={targetLang}
-                onChange={(event) =>
-                  setTargetLang(event.target.value as WritingLanguage)
-                }
-              >
-                {writingLanguages
-                  .filter((lang) => lang.id !== 'zh')
-                  .map((lang) => (
-                    <option key={lang.id} value={lang.id}>
-                      {languageName(lang.id)}
-                    </option>
-                  ))}
-              </select>
+              <div className="writing-translation-selects">
+                <label>
+                  翻译方式
+                  <select
+                    aria-label="翻译方式"
+                    value={translationMode}
+                    onChange={(event) =>
+                      setTranslationMode(event.target.value as 'local' | 'ai')
+                    }
+                  >
+                    <option value="local">本机（默认）</option>
+                    <option value="ai">AI（主 API）</option>
+                  </select>
+                </label>
+                <label>
+                  目标语言
+                  <select
+                    aria-label="翻译目标语言"
+                    value={targetLang}
+                    onChange={(event) =>
+                      setTargetLang(event.target.value as WritingLanguage)
+                    }
+                  >
+                    {writingLanguages
+                      .filter((lang) => lang.id !== 'zh')
+                      .map((lang) => (
+                        <option key={lang.id} value={lang.id}>
+                          {languageName(lang.id)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
             </div>
-            <p>将中文原稿翻译为所选语言，核对后采用。MJ 参数在本机保留。</p>
+            <p>
+              {translationMode === 'local'
+                ? '本机翻译不调用 API。首次准备约 670 MB 语言包，之后可离线使用；翻译结果请核对后采用。'
+                : 'AI 翻译调用晏绑定的“写词晏”主 API，只发送中文原稿和术语备忘，可能产生服务费用；请核对后采用。'}
+            </p>
+            {translationMode === 'local' ? (
+              <Button
+                variant="outline"
+                disabled={aiBusy}
+                onClick={async () => {
+                  const control = new AbortController();
+                  controller.current = control;
+                  setAiBusy(true);
+                  try {
+                    await prepareLocalTranslation(control.signal, setMessage);
+                    setMessage('本地语言包已就绪。');
+                  } catch (error) {
+                    setMessage(String(error));
+                  } finally {
+                    setAiBusy(false);
+                    controller.current = null;
+                  }
+                }}
+              >
+                准备本地语言包（约 670 MB）
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                disabled={aiBusy}
+                onClick={() => setApiOpen(true)}
+              >
+                管理晏的 API 设置
+              </Button>
+            )}
             <div className="writing-translation-actions">
               <Button
                 disabled={aiBusy || !state.languages.zh.trim()}
                 onClick={() => void request('translate')}
               >
-                {aiBusy ? '处理中…' : `翻译为${languageName(targetLang)}`}
+                {aiBusy
+                  ? '处理中…'
+                  : `${translationMode === 'local' ? '本机' : 'AI'} 翻译为${languageName(targetLang)}`}
               </Button>
               <Button
                 variant="outline"
                 disabled={aiBusy || !state.languages.zh.trim()}
                 onClick={() => void request('translate-all')}
               >
-                翻译全部五种语言
+                {translationMode === 'local' ? '本机' : 'AI'} 翻译全部五种语言
               </Button>
               <button
                 className="writing-quiet-action"
@@ -921,10 +1010,12 @@ export function WritingStudio({
                     checked={verify}
                     onChange={(event) => setVerify(event.target.checked)}
                   />
-                  附带中文反译（每个版本增加一次请求）
+                  {translationMode === 'local'
+                    ? '本机反译核对（增加本机计算量）'
+                    : 'AI 反译核对（会额外调用一次 API）'}
                 </label>
                 <label>
-                  术语译法偏好
+                  术语复核备忘
                   <textarea
                     value={glossary}
                     onChange={(event) => setGlossary(event.target.value)}
@@ -1138,234 +1229,29 @@ export function WritingStudio({
         }}
         onInsert={insert}
       />
-      <Dialog open={assistOpen} onOpenChange={setAssistOpen}>
-        <DialogContent className="writing-assist-dialog">
-          <DialogTitle>AI 写词辅助</DialogTitle>
-          <DialogDescription>
-            围绕你的中文原稿补充或检查描述，先对照建议，再决定采用。MJ
-            参数留在本机。
-          </DialogDescription>
-          <label>
-            这次希望 AI 帮你做什么
-            <textarea
-              aria-label="AI 辅助要求"
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-            />
-          </label>
-          <div className="writing-assist-presets">
-            {[
-              '检查人物动作与配饰，消除歧义',
-              '完善光影、材质与构图，保留原意',
-              '精简重复描述，保留关键细节',
-            ].map((value) => (
-              <button key={value} onClick={() => setInstruction(value)}>
-                {value}
-              </button>
-            ))}
-          </div>
-          <label className="check-line">
-            <input
-              type="checkbox"
-              checked={sendImage}
-              onChange={(event) => setSendImage(event.target.checked)}
-            />
-            把当前参考图发送给所选服务辅助
-          </label>
-          <p className="muted-note">
-            仅在点击请求后发送当前描述；参考图需要勾选才会发送。
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAssistOpen(false)}>
-              返回写词
-            </Button>
-            <Button
-              disabled={aiBusy || !state.languages.zh.trim()}
-              onClick={() => {
-                setAssistOpen(false);
-                void request('assist');
-              }}
-            >
-              请求 AI 建议
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={apiOpen} onOpenChange={setApiOpen}>
-        <DialogContent className="writing-api-dialog">
-          <DialogTitle>连接 AI 接口</DialogTitle>
-          <DialogDescription>
-            填写与 AIRP 相同的接口地址和密钥。设置在本机保险库中加密保存。
-          </DialogDescription>
-          <label>
-            接口地址
-            <input
-              aria-label="写词 API 地址"
-              value={api.url}
-              onChange={(event) => {
-                apiEdited.current = true;
-                setApi((current) => ({ ...current, url: event.target.value }));
-              }}
-              placeholder="https://你的中转站/v1"
-            />
-          </label>
-          <label>
-            API Key
-            <input
-              aria-label="写词 API 密钥"
-              type="password"
-              autoComplete="new-password"
-              value={api.key}
-              onChange={(event) => {
-                apiEdited.current = true;
-                setApi((current) => ({ ...current, key: event.target.value }));
-              }}
-            />
-          </label>
-          <div className="writing-api-connect">
-            <Button
-              variant="outline"
-              disabled={aiBusy}
-              onClick={() => void request('models')}
-            >
-              {aiBusy ? '连接中…' : '连接并读取模型'}
-            </Button>
-            <span>
-              {models.length
-                ? `${models.length} 个模型可用`
-                : '支持手动填写模型'}
-            </span>
-          </div>
-          {models.length > 0 && (
-            <label>
-              选择模型
-              <select
-                aria-label="写词服务模型列表"
-                value={api.model}
-                onChange={(event) =>
-                  setApi((current) => ({
-                    ...current,
-                    model: event.target.value,
-                  }))
-                }
-              >
-                {models.map((model) => (
-                  <option key={model}>{model}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label>
-            模型名称
-            <input
-              aria-label="写词 API 模型"
-              list="writing-model-list"
-              value={api.model}
-              onChange={(event) => {
-                apiEdited.current = true;
-                setApi((current) => ({
-                  ...current,
-                  model: event.target.value,
-                }));
-              }}
-            />
-            <datalist id="writing-model-list">
-              {models.map((model) => (
-                <option key={model}>{model}</option>
-              ))}
-            </datalist>
-          </label>
-          <details className="writing-api-advanced">
-            <summary>高级连接设置</summary>
-            <label>
-              密钥发送方式
-              <select
-                aria-label="写词密钥发送方式"
-                value={api.authHeader || 'auto'}
-                onChange={(event) =>
-                  setApi((current) => ({
-                    ...current,
-                    authHeader: event.target.value as ApiSettings['authHeader'],
-                  }))
-                }
-              >
-                <option value="auto">自动兼容</option>
-                <option value="bearer">Authorization Bearer</option>
-                <option value="x-api-key">X-Api-Key</option>
-              </select>
-            </label>
-            <label>
-              连接方式
-              <select
-                aria-label="写词连接方式"
-                value={api.transport || 'direct'}
-                onChange={(event) =>
-                  setApi((current) => ({
-                    ...current,
-                    transport: event.target.value as ApiSettings['transport'],
-                  }))
-                }
-              >
-                <option value="direct">直接连接所选接口</option>
-                <option value="auto">直连优先，失败时使用指定中继</option>
-                <option value="relay">使用指定中继</option>
-              </select>
-            </label>
-            {api.transport && api.transport !== 'direct' && (
-              <label>
-                中继地址
-                <input
-                  aria-label="写词中继地址"
-                  value={api.relayUrl || ''}
-                  placeholder="https://你的中继/api/relay"
-                  onChange={(event) =>
-                    setApi((current) => ({
-                      ...current,
-                      relayUrl: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            )}
-            <p>
-              网站的本机功能不依赖中继。请使用你能直接访问的接口或中继地址。
-            </p>
-          </details>
-          {message && (
-            <p className="writing-api-status" role="status">
-              {message}
-            </p>
-          )}
-          <DialogFooter>
-            <button
-              className="writing-quiet-action"
-              onClick={async () => {
-                await vault.deleteRecord('writing-api');
-                setApi({ id: 'writing-api', url: '', key: '', model: '' });
-                setModels([]);
-                setMessage('本机 API 设置已删除。');
-              }}
-            >
-              删除设置
-            </button>
-            <Button
-              onClick={async () => {
-                try {
-                  const saved = { ...api, url: apiBase(api.url) };
-                  await vault.saveRecord('writing-api-settings', saved);
-                  setApi(saved);
-                  setApiOpen(false);
-                  setMessage('API 设置已加密保存。');
-                } catch (error) {
-                  setMessage(String(error));
-                }
-              }}
-            >
-              加密保存设置
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <YanWindow
+        open={assistOpen || apiOpen}
+        openSettings={apiOpen}
+        onClose={() => {
+          setAssistOpen(false);
+          setApiOpen(false);
+        }}
+        draft={state.languages.zh}
+        currentImage={state.references[activeImage]?.file}
+        onUseText={(value) => {
+          const source = state.languages.zh;
+          setState((current) => ({
+            ...current,
+            languages: {
+              ...current.languages,
+              zh: protectedParameters(source).parameters
+                ? applyTranslation(source, protectedParameters(value).body)
+                : cleanAiText(value),
+            },
+          }));
+        }}
+        onUseImage={(file) => addImages([file], 'reference')}
+      />
       <Dialog open={resultOpen} onOpenChange={setResultOpen}>
         <DialogContent className="writing-result-dialog">
           <DialogTitle>

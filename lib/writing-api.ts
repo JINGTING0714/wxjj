@@ -6,6 +6,7 @@ import {
   type WritingLanguage,
   splitWritingVariants,
 } from './writing-model';
+import {cleanAiText} from './ai-content';
 export function apiBase(value: string) {
   let url: URL;
   try {
@@ -28,7 +29,7 @@ export function apiBase(value: string) {
     .replace(/\/$/, '')
     .replace(/\/(?:chat\/completions|models)$/, '');
 }
-async function apiRequest(
+export async function apiRequest(
   settings: ApiSettings,
   path: string,
   body: unknown,
@@ -224,7 +225,9 @@ export async function writingCompletion(
         : '';
   if (!value.trim())
     throw new Error('模型没有返回文字，请检查模型是否支持此接口。');
-  return value.trim();
+  const cleaned=cleanAiText(value);
+  if(!cleaned)throw new Error('模型返回了图片编码，没有返回可用文字。请在晏的识图窗口选择支持图像输入的模型；原稿保留。');
+  return cleaned;
 }
 export async function translateWriting(
   settings: ApiSettings,

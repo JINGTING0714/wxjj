@@ -15,6 +15,7 @@ import {
   importVaultFile,
   inspectVaultFile,
   loadEncryptedBlobs,
+  listVaultBlobIds,
   loadEncryptedRecords,
   resetVaultPassword,
   unlockVault,
@@ -49,6 +50,7 @@ type VaultContextValue = {
   ) => Promise<string>;
   deleteBlob: (id: string) => Promise<void>;
   loadBlobs: (scope: string,ids?:readonly string[]) => ReturnType<typeof loadEncryptedBlobs>;
+  listBlobIds: (scope: string) => Promise<string[]>;
   writeBatch: (batch: VaultWrite) => Promise<void>;
   exportBackup: (options?: VaultExportOptions) => Promise<Blob | undefined>;
   inspectBackup: (file: File) => Promise<BackupInfo>;
@@ -168,6 +170,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         return id;
       },
       deleteBlob: async (id) => write({ deleteBlobs: [id] }),
+      listBlobIds: async scope => { const {check} = access(); const ids = await listVaultBlobIds(scope); check(); return ids; },
       loadBlobs: async (scope,ids) => {
         const { key, check } = access();
         const result = await loadEncryptedBlobs(key, scope,ids);

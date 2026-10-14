@@ -474,6 +474,15 @@ export async function loadEncryptedRecords<T>(
     ),
   );
 }
+/** Enumerate references without reading or decrypting image payloads. */
+export async function listVaultBlobIds(scope: string): Promise<string[]> {
+  const meta = await getMeta(), database = await db();
+  try {
+    const keys = await request(database.transaction('blobs').objectStore('blobs').index('scope').getAllKeys(storageKey(scope, meta?.generation)));
+    const prefix = generationPrefix(meta?.generation);
+    return keys.map(id => String(id).slice(prefix.length));
+  } finally { database.close(); }
+}
 export async function loadEncryptedBlobs(
   key: CryptoKey,
   scope: string,

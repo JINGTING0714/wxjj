@@ -1,0 +1,3 @@
+M2M100 418M translation model. Source: https://huggingface.co/facebook/m2m100_418M
+ONNX conversion: https://huggingface.co/Xenova/m2m100_418M
+License: MIT. Model inference runs on this device; user text is never sent with model downloads.
